@@ -1063,7 +1063,7 @@
     <div class="auth-error" id="auth-error">Usuario o contraseña incorrectos.</div>
     <div class="auth-field">
       <label>Usuario</label>
-      <input type="text" id="login-user" placeholder="nombre de usuario" autocomplete="username"
+      <input type="text" id="login-user" placeholder="correo o usuario" autocomplete="username"
         onkeydown="if(event.key==='Enter')document.getElementById('login-pwd').focus()">
     </div>
     <div class="auth-field">
@@ -1120,8 +1120,8 @@
           <input type="text" id="nu-nombre" placeholder="Dra. López">
         </div>
         <div class="form-group">
-          <label>Usuario</label>
-          <input type="text" id="nu-user" placeholder="dlopez">
+          <label>Correo electrónico (usuario)</label>
+          <input type="text" id="nu-user" placeholder="dlopez@rcm.upr.edu" autocomplete="email">
         </div>
         <div class="form-group">
           <label>Rol</label>
@@ -6262,7 +6262,7 @@ async function crearUsuario() {
   if (!nombre || !user || !pwd) return show('Completa todos los campos.');
   if (pwd.length < 8) return show('Mínimo 8 caracteres.');
   if (pwd !== pwd2) return show('Las contraseñas no coinciden.');
-  if (!/^[a-z0-9_]+$/.test(user)) return show('Usuario: solo letras, números y _');
+  if (!/^[a-z0-9_.@+\-]+$/.test(user)) return show('Ingresa un correo válido o usuario sin espacios.');
 
   const users = await loadUsers() || [];
   if (users.find(u => u.username === user)) return show('Ese usuario ya existe.');
