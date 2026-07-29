@@ -5943,11 +5943,25 @@ function updateConnectionIndicator(status) {
   if (window._fb) await window._fb.ready;
 
   // Indicador de conexión: escucha el path especial .info/connected de
-  // Firebase, que refleja el estado real de la conexión con el servidor
-  // (no solo si el sign-in funcionó).
+  // Firebase. Ese valor puede parpadear brevemente a "desconectado" durante
+  // la negociación inicial o una reconexión momentánea (más notorio en redes
+  // lentas/institucionales) — por eso se espera unos segundos antes de
+  // mostrar "Sin conexión", para no alarmar por un parpadeo que se resuelve solo.
   if (window._fb) {
+    let _connOfflineTimer = null;
     window._fb.onValue(window._fb.ref(window._fb.database, '.info/connected'), (snap) => {
-      updateConnectionIndicator(snap.val() === true ? 'online' : 'offline');
+      const isOnline = snap.val() === true;
+      if (isOnline) {
+        if (_connOfflineTimer) { clearTimeout(_connOfflineTimer); _connOfflineTimer = null; }
+        updateConnectionIndicator('online');
+      } else {
+        if (!_connOfflineTimer) {
+          _connOfflineTimer = setTimeout(() => {
+            _connOfflineTimer = null;
+            updateConnectionIndicator('offline');
+          }, 4000);
+        }
+      }
     });
   } else {
     updateConnectionIndicator('offline');
