@@ -6037,13 +6037,20 @@ async function sha256(str) {
 }
 
 // ── Load / save user accounts (Firebase 'usuarios' node; POC) ──
+// loadUsers() devuelve:
+//   - un array (posiblemente vacío) si la lectura fue exitosa
+//   - null si NO se pudo confirmar el estado real (error de red/Firebase) —
+//     null es distinto de "lista vacía" para que ensureDefaultAdmin() nunca
+//     confunda un fallo transitorio con "no hay usuarios" y sobrescriba a todos.
 async function loadUsers() {
   if (window._fb) {
     try {
       const snap = await window._fb.get(window._fb.ref(window._fb.database, 'usuarios'));
-      const val = snap.val();
-      if (val) return val;
-    } catch(e) { console.error('Firebase loadUsers error:', e); }
+      return snap.val() || [];
+    } catch(e) {
+      console.error('Firebase loadUsers error:', e);
+      return null;
+    }
   }
   // Fallback: window.storage (entorno de artifacts de Claude.ai) o localStorage
   try {
@@ -6071,7 +6078,13 @@ async function saveUsers(users) {
 // ── Seed default admin on first run ───────────────────────
 async function ensureDefaultAdmin() {
   const users = await loadUsers();
-  if (users && users.length > 0) return;
+  if (users === null) {
+    // No se pudo confirmar el estado real (lectura falló) — NO sembrar admin,
+    // para evitar sobrescribir cuentas existentes con un solo registro nuevo.
+    console.warn('ensureDefaultAdmin: no se pudo leer la lista de usuarios; se omite el seed por seguridad.');
+    return;
+  }
+  if (users.length > 0) return;
   const hash = await sha256('Admin1234!');
   await saveUsers([{
     username: 'admin',
