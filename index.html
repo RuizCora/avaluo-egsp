@@ -1202,6 +1202,9 @@
     <div class="header-actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="exportarJSON()">⬇ JSON</button>
       <button class="btn btn-success btn-sm" onclick="exportarCSV()">📊 CSV</button>
+      <span id="fb-connection-indicator" title="Conectando..." style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;font-size:0.78rem;padding:4px 10px;border-radius:6px">
+        <span id="fb-connection-dot" style="font-size:0.7rem">⚪</span><span id="fb-connection-text">Conectando…</span>
+      </span>
       <div id="user-badge-wrap" style="display:none">
         <div class="user-badge">
           <span id="hdr-user-name">—</span>
@@ -5912,10 +5915,44 @@ if (localStorage.getItem('avaluo_db_version') !== DB_VERSION) {
   localStorage.removeItem('avaluo_db');
   localStorage.setItem('avaluo_db_version', DB_VERSION);
 }
+// ======================== INDICADOR DE CONEXIÓN ========================
+function updateConnectionIndicator(status) {
+  // status: 'online' | 'offline' | 'connecting'
+  const dot = document.getElementById('fb-connection-dot');
+  const text = document.getElementById('fb-connection-text');
+  const wrap = document.getElementById('fb-connection-indicator');
+  if (!dot || !text || !wrap) return;
+  if (status === 'online') {
+    dot.textContent = '🟢';
+    text.textContent = 'En línea';
+    wrap.title = 'Conectado a Firebase — los cambios se sincronizan en tiempo real';
+  } else if (status === 'offline') {
+    dot.textContent = '🔴';
+    text.textContent = 'Sin conexión';
+    wrap.title = 'Sin conexión a Firebase — los cambios no se están sincronizando';
+  } else {
+    dot.textContent = '⚪';
+    text.textContent = 'Conectando…';
+    wrap.title = 'Conectando a Firebase...';
+  }
+}
+
 // El arranque ahora es asíncrono: espera el sign-in anónimo de Firebase y la
 // primera carga de cada colección antes de precargar datos y pintar el dashboard.
 (async function initApp() {
   if (window._fb) await window._fb.ready;
+
+  // Indicador de conexión: escucha el path especial .info/connected de
+  // Firebase, que refleja el estado real de la conexión con el servidor
+  // (no solo si el sign-in funcionó).
+  if (window._fb) {
+    window._fb.onValue(window._fb.ref(window._fb.database, '.info/connected'), (snap) => {
+      updateConnectionIndicator(snap.val() === true ? 'online' : 'offline');
+    });
+  } else {
+    updateConnectionIndicator('offline');
+  }
+
   await loadDB();
   preloadExcelData();
   db.cursos = db.cursos.filter(c => !['c1','c2','c3','c4','c5'].includes(c.id));
@@ -7504,8 +7541,25 @@ let _adiesQuizEditorBlockId = null;
 let _adiesTempQuestions = [];
 let _adiesBlockType = 'video';
 
+// Los nombres de usuario pueden contener '.' (ej. "prof.dummy", o un correo),
+// que no es válido como clave de Firebase RTDB. Se sanea solo para el path,
+// el username real (con puntos) se sigue usando como llave dentro del objeto
+// en memoria, igual que antes.
+function fbKeyEncode(s) { return String(s).replace(/\./g, ','); }
+function fbKeyDecode(s) { return String(s).replace(/,/g, '.'); }
+
+// Contenido de Adiestramientos (secciones/bloques/quizzes): lo edita solo el
+// admin, así que un reemplazo completo del nodo al guardar es seguro (igual
+// que 'usuarios').
 async function adiesLoadData() {
   if (_adiesData) return _adiesData;
+  if (window._fb) {
+    try {
+      const snap = await window._fb.get(window._fb.ref(window._fb.database, 'adiestramientos'));
+      _adiesData = snap.val() || { sections: [] };
+      return _adiesData;
+    } catch(e) { console.error('Firebase adiesLoadData error:', e); }
+  }
   try {
     const r = window.storage ? await window.storage.get(ADIES_KEY) : null;
     const raw = r?.value || localStorage.getItem(ADIES_KEY);
@@ -7515,11 +7569,32 @@ async function adiesLoadData() {
 }
 async function adiesSaveData() {
   const json = JSON.stringify(_adiesData);
+  if (window._fb) {
+    try {
+      await window._fb.set(window._fb.ref(window._fb.database, 'adiestramientos'), _adiesData);
+    } catch(e) { console.error('Firebase adiesSaveData error:', e); }
+  }
   if (window.storage) await window.storage.set(ADIES_KEY, json);
   try { localStorage.setItem(ADIES_KEY, json); } catch(e) {}
 }
+
+// Progreso de quizzes: MUCHAS personas pueden escribir el suyo casi al mismo
+// tiempo, así que aquí sí aplica el mismo cuidado que con db/{coleccion}.
+// La lectura trae el progreso de todos (necesario para el Reporte de admin),
+// pero cada persona ESCRIBE únicamente su propia rama
+// (adiestramientos_progreso/{su-usuario}), nunca el objeto completo.
 async function adiesLoadProgress() {
   if (_adiesProgress) return _adiesProgress;
+  if (window._fb) {
+    try {
+      const snap = await window._fb.get(window._fb.ref(window._fb.database, 'adiestramientos_progreso'));
+      const val = snap.val() || {};
+      const decoded = {};
+      Object.keys(val).forEach(k => { decoded[fbKeyDecode(k)] = val[k]; });
+      _adiesProgress = decoded;
+      return _adiesProgress;
+    } catch(e) { console.error('Firebase adiesLoadProgress error:', e); }
+  }
   try {
     const r = window.storage ? await window.storage.get(ADIES_PROGRESS_KEY, true) : null;
     const raw = r?.value || localStorage.getItem(ADIES_PROGRESS_KEY);
@@ -7529,9 +7604,17 @@ async function adiesLoadProgress() {
 }
 async function adiesSaveProgress() {
   const json = JSON.stringify(_adiesProgress);
+  if (window._fb && currentUser) {
+    try {
+      const key = fbKeyEncode(currentUser.username);
+      await window._fb.set(window._fb.ref(window._fb.database, 'adiestramientos_progreso/' + key),
+        _adiesProgress[currentUser.username] || {});
+    } catch(e) { console.error('Firebase adiesSaveProgress error:', e); }
+  }
   if (window.storage) await window.storage.set(ADIES_PROGRESS_KEY, json, true);
   try { localStorage.setItem(ADIES_PROGRESS_KEY, json); } catch(e) {}
 }
+
 
 function adiesId() { return 'a' + Math.random().toString(36).slice(2,9); }
 
