@@ -6,6 +6,41 @@
 <title>Sistema de Avalúo de Competencias</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- ======================== FIREBASE (POC) ======================== -->
+<!-- Cargado como módulo separado, sin tocar el script principal (que sigue -->
+<!-- siendo clásico/global, con onclick="..." etc.). Expone lo necesario en -->
+<!-- window._fb para que el resto de la app (script clásico más abajo) lo use. -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+  import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB0PplwkAp3-CEsFicIt70dNOPI9szIfQI",
+    authDomain: "egsp-avaluo-poc.firebaseapp.com",
+    databaseURL: "https://egsp-avaluo-poc-default-rtdb.firebaseio.com",
+    projectId: "egsp-avaluo-poc",
+    storageBucket: "egsp-avaluo-poc.firebasestorage.app",
+    messagingSenderId: "865275810900",
+    appId: "1:865275810900:web:860843e7816a1d986f49c1"
+  };
+
+  const fbApp = initializeApp(firebaseConfig);
+  const fbDatabase = getDatabase(fbApp);
+  const fbAuth = getAuth(fbApp);
+
+  // POC: autenticación anónima solo para satisfacer las reglas "auth != null".
+  // Esto NO reemplaza tu sistema de roles (SHA-256 + ROLE_ACCESS) — ese sigue
+  // controlando la UI igual que antes. Es una capa mínima para bloquear
+  // accesos crudos sin pasar por la app. Ver nota de seguridad en el chat.
+  const ready = signInAnonymously(fbAuth).then(() => true).catch(err => {
+    console.error('Firebase anon sign-in falló:', err);
+    return false;
+  });
+
+  window._fb = { database: fbDatabase, ref, set, get, onValue, ready };
+</script>
 <style>
   :root {
     --ink: #1a1a1a;
@@ -2346,20 +2381,83 @@ const NIVELES = {
   N: { label: 'No Logrado', color: 'N', desc: 'No cumple con la competencia' }
 };
 
-// ======================== STORAGE ========================
+// ======================== STORAGE (Firebase Realtime Database, POC) ========================
+// Guardado granular por colección: en vez de escribir el objeto `db` completo
+// cada vez (lo que sobrescribiría el trabajo de otros usuarios concurrentes),
+// saveDB() compara cada colección contra el último estado sincronizado y solo
+// empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
+// ~50 sitios donde se llama saveDB() en el resto del archivo.
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias'];
+let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
+
 function saveDB() {
+  if (window._fb) {
+    FB_COLLECTIONS.forEach(key => {
+      const currentJSON = JSON.stringify(db[key] ?? []);
+      const lastJSON     = JSON.stringify(_lastSyncedDB[key] ?? []);
+      if (currentJSON !== lastJSON) {
+        _lastSyncedDB[key] = JSON.parse(currentJSON);
+        window._fb.set(window._fb.ref(window._fb.database, 'db/' + key), db[key] ?? [])
+          .catch(e => console.error('Firebase saveDB error (' + key + '):', e));
+      }
+    });
+  }
+  // Respaldo local (ya no es la fuente de verdad, pero sirve si Firebase falla)
   try { localStorage.setItem('avaluo_db', JSON.stringify(db)); } catch(e) {}
 }
+
+// loadDB() ahora es asíncrona: resuelve cuando cada colección recibió su
+// primer valor de Firebase, y deja instalados los listeners en tiempo real
+// para que cambios de otros usuarios se reflejen sin recargar la página.
 function loadDB() {
-  try {
-    const d = localStorage.getItem('avaluo_db');
-    if (d) db = JSON.parse(d);
-    if (!db.secciones)   db.secciones = [];
-    if (!db.programas)   db.programas = [];
-    if (!db.facultad)    db.facultad = [];
-    if (!db.codigosProg) db.codigosProg = [];
-    if (!db.asesorias)   db.asesorias = [];
-  } catch(e) {}
+  if (!db.secciones)    db.secciones = [];
+  if (!db.programas)    db.programas = [];
+  if (!db.facultad)     db.facultad = [];
+  if (!db.codigosProg)  db.codigosProg = [];
+  if (!db.asesorias)    db.asesorias = [];
+  if (!db.cursos)       db.cursos = [];
+  if (!db.competencias) db.competencias = [];
+  if (!db.avaluos)      db.avaluos = [];
+
+  if (!window._fb) {
+    // Sin Firebase disponible (ej. red caída): usa localStorage como fallback
+    try {
+      const d = localStorage.getItem('avaluo_db');
+      if (d) db = Object.assign(db, JSON.parse(d));
+    } catch(e) {}
+    return Promise.resolve();
+  }
+
+  const { database, ref, onValue } = window._fb;
+  const firstLoads = FB_COLLECTIONS.map(key => new Promise(resolve => {
+    let isFirst = true;
+    onValue(ref(database, 'db/' + key), (snapshot) => {
+      const val = snapshot.val() || [];
+      db[key] = val;
+      _lastSyncedDB[key] = JSON.parse(JSON.stringify(val));
+      if (isFirst) { isFirst = false; resolve(); }
+      else { refreshVisiblePanelFor(key); } // cambio remoto llegó después de la carga inicial
+    }, (err) => { console.error('Firebase onValue error (' + key + '):', err); resolve(); });
+  }));
+  return Promise.all(firstLoads);
+}
+
+// Re-renderiza el panel visible si su colección cambió por otro usuario.
+// POC: cubre los tabs más usados; se puede extender según haga falta.
+function refreshVisiblePanelFor(collectionKey) {
+  const activePanel = document.querySelector('.panel.active');
+  if (!activePanel) return;
+  const tabId = activePanel.id.replace('panel-', '');
+  if (tabId === 'dashboard')     renderDashboard();
+  if (tabId === 'dashboard2')    renderDashboard2();
+  if (tabId === 'cursos')        renderCursos();
+  if (tabId === 'secciones')     renderSecciones();
+  if (tabId === 'competencias')  renderCompetencias();
+  if (tabId === 'base-datos')    renderBaseDatos();
+  if (tabId === 'reportes')      renderReportes();
+  if (tabId === 'matriz')        renderMatriz();
+  if (tabId === 'alineacion')    renderAlineacion();
+  if (tabId === 'facultad')      renderFacultadList();
 }
 
 // ======================== TABS ========================
@@ -5814,7 +5912,18 @@ if (localStorage.getItem('avaluo_db_version') !== DB_VERSION) {
   localStorage.removeItem('avaluo_db');
   localStorage.setItem('avaluo_db_version', DB_VERSION);
 }
-loadDB();
+// El arranque ahora es asíncrono: espera el sign-in anónimo de Firebase y la
+// primera carga de cada colección antes de precargar datos y pintar el dashboard.
+(async function initApp() {
+  if (window._fb) await window._fb.ready;
+  await loadDB();
+  preloadExcelData();
+  db.cursos = db.cursos.filter(c => !['c1','c2','c3','c4','c5'].includes(c.id));
+  db.competencias = db.competencias.filter(c => !c.id.startsWith('comp'));
+  preloadExcelData();
+  renderDashboard();
+  setDefaultDate();
+})();
 
 function preloadExcelData() {
   // Add cursos
@@ -5847,14 +5956,6 @@ function preloadExcelData() {
   });
   saveDB();
 }
-
-preloadExcelData();
-// Force refresh of preloaded cursos/competencias in case of stale data
-db.cursos = db.cursos.filter(c => !['c1','c2','c3','c4','c5'].includes(c.id));
-db.competencias = db.competencias.filter(c => !c.id.startsWith('comp'));
-preloadExcelData();
-renderDashboard();
-setDefaultDate();
 
 // Close modals on overlay click
 document.querySelectorAll('.modal-overlay').forEach(m => {
@@ -5935,9 +6036,16 @@ async function sha256(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── Load / save user accounts via window.storage ──────────
+// ── Load / save user accounts (Firebase 'usuarios' node; POC) ──
 async function loadUsers() {
-  // Try window.storage (claude.ai artifact env) first, fall back to localStorage
+  if (window._fb) {
+    try {
+      const snap = await window._fb.get(window._fb.ref(window._fb.database, 'usuarios'));
+      const val = snap.val();
+      if (val) return val;
+    } catch(e) { console.error('Firebase loadUsers error:', e); }
+  }
+  // Fallback: window.storage (entorno de artifacts de Claude.ai) o localStorage
   try {
     if (window.storage) {
       const res = await window.storage.get(USERS_KEY);
@@ -5951,9 +6059,12 @@ async function loadUsers() {
 }
 async function saveUsers(users) {
   const json = JSON.stringify(users);
-  try {
-    if (window.storage) await window.storage.set(USERS_KEY, json);
-  } catch(e) {}
+  if (window._fb) {
+    try {
+      await window._fb.set(window._fb.ref(window._fb.database, 'usuarios'), users);
+    } catch(e) { console.error('Firebase saveUsers error:', e); }
+  }
+  try { if (window.storage) await window.storage.set(USERS_KEY, json); } catch(e) {}
   try { localStorage.setItem(USERS_KEY, json); } catch(e) {}
 }
 
@@ -6300,6 +6411,7 @@ async function resetUserPwd(username) {
 
 // ── Boot: seed admin then show login ──────────────────────
 (async () => {
+  if (window._fb) await window._fb.ready;
   await ensureDefaultAdmin();
   // Login overlay is already shown by default (display:flex in HTML)
   // Wire Enter key for login form
