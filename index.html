@@ -1713,12 +1713,21 @@
   <!-- R6 — At-Risk Students -->
   <div id="rpt-r6" class="rpt-pane" style="display:none">
     <div class="rpt-filter-bar">
+      <div class="dash-filter-group"><label class="dash-filter-label">Criterio de riesgo</label>
+        <select id="r6-criterio" class="dash-select" onchange="renderR6()">
+          <option value="comp">Puntaje de competencias</option>
+          <option value="nota">Nota del curso</option>
+          <option value="cualquiera">Cualquiera de los dos</option>
+        </select></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Umbral global (0–3)</label>
         <input id="r6-threshold-global" type="number" min="0" max="3" step="0.1"
           class="dash-select" style="width:80px" value="1.5" onchange="saveR6Threshold()"></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Override esta corrida</label>
         <input id="r6-threshold" type="number" min="0" max="3" step="0.1"
           class="dash-select" style="width:80px" placeholder="—" oninput="renderR6()"></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Nota de curso &lt;</label>
+        <input id="r6-nota-threshold" type="number" min="0" max="100" step="1"
+          class="dash-select" style="width:80px" value="70" onchange="saveR6Threshold()" oninput="renderR6()"></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
         <select id="r6-prog" class="dash-select" onchange="renderR6()"><option value="">Todos</option></select></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Trimestre</label>
@@ -3988,6 +3997,8 @@ function renderReportes() {
   // R6 threshold global default
   const saved = localStorage.getItem('r6_threshold_global');
   if (saved) { const el=document.getElementById('r6-threshold-global'); if(el) el.value=saved; }
+  const savedNota = localStorage.getItem('r6_nota_threshold');
+  if (savedNota) { const el=document.getElementById('r6-nota-threshold'); if(el) el.value=savedNota; }
   // R7 visibility
   const effRole = getEffectiveRole();
   const e = currentUser?.efectivo;
@@ -4388,6 +4399,8 @@ function renderR5() {
 function saveR6Threshold() {
   const v = document.getElementById('r6-threshold-global')?.value;
   if (v) localStorage.setItem('r6_threshold_global', v);
+  const vn = document.getElementById('r6-nota-threshold')?.value;
+  if (vn) localStorage.setItem('r6_nota_threshold', vn);
   renderR6();
 }
 
@@ -4396,9 +4409,12 @@ function renderR6() {
   const overrideT = document.getElementById('r6-threshold')?.value;
   const threshold = overrideT!==''&&overrideT!==undefined&&!isNaN(parseFloat(overrideT))
     ? parseFloat(overrideT) : globalT;
+  const notaThreshold = parseFloat(document.getElementById('r6-nota-threshold')?.value);
+  const criterio = document.getElementById('r6-criterio')?.value || 'comp';
   const filterProg = document.getElementById('r6-prog')?.value||'';
   const filterTerm = document.getElementById('r6-term')?.value||'';
-  document.getElementById('rpt-export-title').textContent = `R6 · Estudiantes en Riesgo (umbral < ${threshold.toFixed(1)})`;
+  const criterioLabel = criterio==='comp' ? 'puntaje de competencias' : criterio==='nota' ? 'nota del curso' : 'competencias o nota del curso';
+  document.getElementById('rpt-export-title').textContent = `R6 · Estudiantes en Riesgo (por ${criterioLabel})`;
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[]);
   if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
@@ -4413,48 +4429,70 @@ function renderR6() {
   const byEst = {};
   avaluos.forEach(av => {
     const estId = av.estudianteId||av.estudiante;
-    if (!byEst[estId]) byEst[estId]={nombre:av.estudiante||estId,id:estId,vals:[],compsRiesgo:[],notaFinal:av.notaFinal,avaluos:[]};
+    if (!byEst[estId]) byEst[estId]={nombre:av.estudiante||estId,id:estId,vals:[],compsRiesgo:[],notas:[],avaluos:[]};
     byEst[estId].avaluos.push(av);
     const evals = _allEvals([av]);
     evals.forEach(ev=>{
       byEst[estId].vals.push(ev.val);
       if (ev.val < threshold) byEst[estId].compsRiesgo.push({code:ev.compCode,desc:ev.compDesc,val:ev.val});
     });
+    if (av.notaFinal !== '' && av.notaFinal !== undefined && av.notaFinal !== null && !isNaN(parseFloat(av.notaFinal))) {
+      byEst[estId].notas.push(parseFloat(av.notaFinal));
+    }
   });
 
-  const atRisk = Object.values(byEst)
-    .map(e=>({...e,avg:_avgNivel(e.vals)}))
-    .filter(e=>e.avg!==null && e.avg<threshold)
-    .sort((a,b)=>a.avg-b.avg);
+  const hasNotaFilter = !isNaN(notaThreshold);
+
+  const all = Object.values(byEst).map(e => {
+    const avg = _avgNivel(e.vals);
+    // Nota más baja del estudiante entre los cursos filtrados — la lectura más
+    // conservadora para "en riesgo" (si algún curso tiene nota baja, se marca).
+    const notaMin = e.notas.length ? Math.min(...e.notas) : null;
+    const riskComp = avg !== null && avg < threshold;
+    const riskNota = hasNotaFilter && notaMin !== null && notaMin < notaThreshold;
+    return { ...e, avg, notaMin, riskComp, riskNota };
+  });
+
+  const atRisk = all
+    .filter(e => {
+      if (criterio === 'comp') return e.riskComp;
+      if (criterio === 'nota') return e.riskNota;
+      return e.riskComp || e.riskNota; // 'cualquiera'
+    })
+    .sort((a,b) => (a.avg??99) - (b.avg??99));
 
   if (!atRisk.length) {
-    el.innerHTML=`<div class="dash-empty"><div class="dash-empty-icon">✅</div><p>No hay estudiantes por debajo del umbral ${threshold.toFixed(1)} con los filtros actuales</p></div>`;
+    el.innerHTML=`<div class="dash-empty"><div class="dash-empty-icon">✅</div><p>No hay estudiantes en riesgo por ${criterioLabel} con los filtros actuales</p></div>`;
     _reportCSVData=[]; return;
   }
 
   const myAdvisees = new Set(currentUser?.efectivo?.advisees||[]);
-  const csvRows=[['Estudiante','ID','¿Asesoría?','Avg Logro','Competencias en Riesgo','Nota Final']];
+  const csvRows=[['Estudiante','ID','¿Asesoría?','Avg Logro','Nota más baja','Motivo','Competencias en Riesgo']];
 
   let html=`<div style="margin-bottom:12px;padding:10px 14px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;font-size:0.82rem">
-    ⚠️ <strong>${atRisk.length} estudiante(s)</strong> con logro promedio por debajo de <strong>${threshold.toFixed(1)}</strong>
+    ⚠️ <strong>${atRisk.length} estudiante(s)</strong> en riesgo por <strong>${criterioLabel}</strong>
+    ${criterio!=='nota' ? ` (competencias &lt; <strong>${threshold.toFixed(1)}</strong>)` : ''}
+    ${criterio!=='comp' && hasNotaFilter ? ` (nota &lt; <strong>${notaThreshold}</strong>)` : ''}
   </div>`;
   html+=`<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-    <th>Estudiante</th><th>ID</th><th>Avg Logro</th><th>Competencias en Riesgo</th><th>Nota Final</th><th>Asesoría</th>
+    <th>Estudiante</th><th>ID</th><th>Avg Logro</th><th>Nota más baja</th><th>Motivo</th><th>Competencias en Riesgo</th><th>Asesoría</th>
   </tr></thead><tbody>`;
 
   atRisk.forEach(e=>{
-    const riskCls = e.avg<1?'risk-high':e.avg<threshold?'risk-med':'risk-ok';
+    const riskCls = e.avg!==null && e.avg<1?'risk-high':(e.avg!==null && e.avg<threshold)?'risk-med':'risk-ok';
     const isAdvisee = myAdvisees.has(e.id);
     const uniqueRisk = [...new Map(e.compsRiesgo.map(c=>[c.code,c])).values()].slice(0,5);
+    const motivo = e.riskComp && e.riskNota ? 'Ambos' : e.riskComp ? 'Competencias' : 'Nota del curso';
     html+=`<tr>
       <td><strong>${e.nombre}</strong></td>
       <td style="font-size:0.75rem;color:var(--muted)">${e.id}</td>
-      <td><span class="${riskCls}">${e.avg?.toFixed(2)||'—'}</span></td>
+      <td>${e.avg!==null?`<span class="${riskCls}">${e.avg.toFixed(2)}</span>`:'—'}</td>
+      <td>${e.notaMin!==null?e.notaMin:'—'}</td>
+      <td><span class="badge ${motivo==='Ambos'?'badge-rust':motivo==='Competencias'?'badge-blue':'badge-green'}">${motivo}</span></td>
       <td style="font-size:0.75rem">${uniqueRisk.map(c=>`<span class="nivel-pill nivel-N" style="margin:1px">${c.code}</span>`).join(' ')}${e.compsRiesgo.length>5?` +${e.compsRiesgo.length-5} más`:''}</td>
-      <td>${e.notaFinal||'—'}</td>
       <td>${isAdvisee?'<span class="badge badge-green">Asesor/a</span>':'—'}</td>
     </tr>`;
-    csvRows.push([e.nombre,e.id,isAdvisee?'Sí':'No',e.avg?.toFixed(2),uniqueRisk.map(c=>c.code).join('; '),e.notaFinal||'']);
+    csvRows.push([e.nombre,e.id,isAdvisee?'Sí':'No',e.avg!==null?e.avg.toFixed(2):'',e.notaMin!==null?e.notaMin:'',motivo,uniqueRisk.map(c=>c.code).join('; ')]);
   });
   html+='</tbody></table></div>';
   el.innerHTML=html;
