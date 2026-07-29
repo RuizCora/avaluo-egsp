@@ -5939,7 +5939,30 @@ function updateConnectionIndicator(status) {
 
 // El arranque ahora es asíncrono: espera el sign-in anónimo de Firebase y la
 // primera carga de cada colección antes de precargar datos y pintar el dashboard.
+
+// El bloque <script type="module"> que inicializa Firebase se ejecuta DIFERIDO
+// (el navegador espera a que termine de parsear todo el HTML), mientras que
+// este script clásico corre de inmediato — es decir, ANTES de que window._fb
+// necesariamente exista. Antes este código solo preguntaba "¿existe
+// window._fb?" una vez, y si en ese instante todavía no existía, se quedaba
+// pensando para siempre que no hay Firebase (aunque medio segundo después sí
+// esté listo). Esta función espera activamente (hasta 8 segundos) a que
+// aparezca, en vez de preguntarlo una sola vez.
+function waitForFb(timeoutMs = 8000) {
+  return new Promise(resolve => {
+    if (window._fb) { resolve(window._fb); return; }
+    const start = Date.now();
+    const iv = setInterval(() => {
+      if (window._fb || Date.now() - start > timeoutMs) {
+        clearInterval(iv);
+        resolve(window._fb || null);
+      }
+    }, 50);
+  });
+}
+
 (async function initApp() {
+  await waitForFb();
   if (window._fb) await window._fb.ready;
 
   // Indicador de conexión: escucha el path especial .info/connected de
@@ -6475,6 +6498,7 @@ async function resetUserPwd(username) {
 
 // ── Boot: seed admin then show login ──────────────────────
 (async () => {
+  await waitForFb();
   if (window._fb) await window._fb.ready;
   await ensureDefaultAdmin();
   // Login overlay is already shown by default (display:flex in HTML)
