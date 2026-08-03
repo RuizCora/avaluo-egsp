@@ -2940,8 +2940,11 @@ function processRosterFile(file) {
       document.getElementById('roster-seccion-num').value = meta.seccion;
       document.getElementById('roster-semestre').value    = meta.periodoLabel;
 
-      // Auto-fill professor from course
-      if (matchCurso?.profesor) document.getElementById('roster-profesor').value = matchCurso.profesor;
+      // Auto-fill professor from course — pero nunca sobrescribas el campo si
+      // ya está bloqueado con el nombre del profesor que está creando la
+      // sección (ver openModal()), o esa sección dejaría de reconocerse como suya.
+      const profField = document.getElementById('roster-profesor');
+      if (matchCurso?.profesor && !profField.readOnly) profField.value = matchCurso.profesor;
     } else {
       detEl.style.display = 'none';
     }
