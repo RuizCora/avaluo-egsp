@@ -1248,6 +1248,7 @@
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Administración</div>
   <button class="tab-btn" data-tab="facultad" onclick="showTab('facultad', this)" style="display:none">Facultad</button>
+  <button class="tab-btn" data-tab="solicitudes" onclick="showTab('solicitudes', this)">📋 Solicitudes<span id="sol-pending-badge" class="badge badge-rust" style="display:none;margin-left:6px"></span></button>
   <button class="tab-btn" data-tab="adiestramientos" onclick="showTab('adiestramientos', this)">Adiestramientos</button>
 </aside>
 
@@ -1409,7 +1410,7 @@
 
 <!-- ==================== CURSOS ==================== -->
 <div id="panel-cursos" class="panel">
-  <div id="readonly-notice-cursos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar cursos.</div>
+  <div id="readonly-notice-cursos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar cursos. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('cursos')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div class="section-title">Gestión de Cursos</div>
     <span id="btn-nuevo-curso"><button class="btn btn-primary" onclick="openModal('modal-curso')">+ Nuevo Curso</button></span>
@@ -1461,7 +1462,7 @@
 
 <!-- ==================== COMPETENCIAS ==================== -->
 <div id="panel-competencias" class="panel">
-  <div id="readonly-notice-competencias" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar competencias.</div>
+  <div id="readonly-notice-competencias" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar competencias. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('competencias')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div class="section-title">Competencias por Curso</div>
     <button class="btn btn-primary" onclick="openModal('modal-competencia')">+ Nueva Competencia</button>
@@ -1569,7 +1570,7 @@
 
 <!-- ==================== BASE DE DATOS ==================== -->
 <div id="panel-base-datos" class="panel">
-  <div id="readonly-notice-base-datos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no puede eliminar registros.</div>
+  <div id="readonly-notice-base-datos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no puede eliminar registros. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('base-datos')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div>
       <div class="section-title">Base de Datos de Avalúos</div>
@@ -1864,6 +1865,17 @@
     </div>
     <div id="asesorias-list"></div>
   </div>
+</div>
+
+<!-- ==================== SOLICITUDES DE EDICIÓN ==================== -->
+<div id="panel-solicitudes" class="panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+    <div>
+      <div class="section-title">📋 Solicitudes de Edición</div>
+      <div class="section-sub" id="sol-section-sub">Solicitudes de cambios a registros de solo lectura</div>
+    </div>
+  </div>
+  <div id="solicitudes-list"></div>
 </div>
 
 <!-- ==================== ADIESTRAMIENTOS Y TUTORIALES ==================== -->
@@ -2368,6 +2380,35 @@
   </div>
 </div>
 
+<!-- Modal Solicitud de Edición -->
+<div id="modal-solicitud-edicion" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">📝 Solicitar Edición</div>
+      <button class="modal-close" onclick="closeModal('modal-solicitud-edicion')">✕</button>
+    </div>
+    <p style="font-size:0.85rem;color:var(--muted);margin-bottom:14px">
+      Tu rol tiene acceso de solo lectura aquí. Describe el cambio que necesitas y un administrador
+      lo revisará. Puedes ver el estado de tus solicitudes en la pestaña "📋 Solicitudes".
+    </p>
+    <input type="hidden" id="sol-tipo">
+    <div class="form-group" id="sol-registro-wrap">
+      <label>Registro específico (opcional)</label>
+      <select id="sol-registro">
+        <option value="">— General / no aplica a un registro específico —</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Describe el cambio que necesitas *</label>
+      <textarea id="sol-descripcion" placeholder="Ej: El nombre del curso debe decir 'Epidemiología II' en vez de 'Epidemiología 2'..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-solicitud-edicion')">Cancelar</button>
+      <button class="btn btn-primary" onclick="enviarSolicitudEdicion()">📨 Enviar Solicitud</button>
+    </div>
+  </div>
+</div>
+
 <!-- Notificación -->
 <div id="notif" class="notif"></div>
 
@@ -2381,7 +2422,8 @@ let db = {
   programas: [],       // custom programs added via wizard
   facultad: [],        // faculty master list
   codigosProg: [],     // student program code -> program name map
-  asesorias: []        // student_id -> profesor_email advising assignments
+  asesorias: [],       // student_id -> profesor_email advising assignments
+  solicitudes: []       // edit requests for locked/readonly records, admin-reviewed
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2399,7 +2441,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2427,6 +2469,7 @@ function loadDB() {
   if (!db.facultad)     db.facultad = [];
   if (!db.codigosProg)  db.codigosProg = [];
   if (!db.asesorias)    db.asesorias = [];
+  if (!db.solicitudes)  db.solicitudes = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -2470,6 +2513,7 @@ function refreshVisiblePanelFor(collectionKey) {
   if (tabId === 'matriz')        renderMatriz();
   if (tabId === 'alineacion')    renderAlineacion();
   if (tabId === 'facultad')      renderFacultadList();
+  if (tabId === 'solicitudes')   renderSolicitudes();
 }
 
 // ======================== TABS ========================
@@ -2511,6 +2555,7 @@ function showTab(tabId, btn) {
   if (tabId === 'facultad') renderFacultadTab();
   if (tabId === 'adiestramientos') renderAdiestramientos();
   if (tabId === 'sincronizar') renderSincronizar();
+  if (tabId === 'solicitudes') renderSolicitudes();
 }
 
 function openModal(id) {
@@ -6086,11 +6131,11 @@ const USERS_KEY = 'avaluo_users_v1';
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, sincronizar:true },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:true },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':true,        reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, sincronizar:true, solicitudes:true },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:true, solicitudes:true },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true, solicitudes:true },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':true,        reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true, solicitudes:true },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:false, solicitudes:false },
 };
 
 function setViewAs(role) {
@@ -6423,6 +6468,14 @@ function applyRoleUI() {
   if (btnNC) btnNC.style.display = authIsReadonly('cursos') ? 'none' : '';
   const btnNS = document.getElementById('btn-nueva-seccion');
   if (btnNS) btnNS.style.display = !authCan('secciones') ? 'none' : '';
+
+  // Badge de solicitudes pendientes (solo cuenta para admin, que es quien aprueba/rechaza)
+  const solBadge = document.getElementById('sol-pending-badge');
+  if (solBadge) {
+    const pendientes = rol === 'admin' ? (db.solicitudes||[]).filter(s => s.estado === 'pendiente').length : 0;
+    if (pendientes > 0) { solBadge.textContent = pendientes; solBadge.style.display = 'inline-block'; }
+    else { solBadge.style.display = 'none'; }
+  }
   _updateSidebarSections();
 }
 
@@ -7599,6 +7652,151 @@ function openPerfil() {
   document.getElementById('perfil-viewas-section').style.display = currentUser.rol==='admin' ? '' : 'none';
   openModal('modal-perfil');
 }
+
+// ======================== SOLICITUDES DE EDICIÓN ========================
+// Usuarios con acceso de solo lectura (director/coordinator/profesor en
+// cursos, competencias, base-datos) pueden solicitar un cambio en vez de
+// editar directamente. Un admin revisa y aprueba/rechaza — la aplicación del
+// cambio en sí la hace el admin manualmente con su propio acceso de edición;
+// esto queda como historial de auditoría (quién pidió qué, cuándo, y qué
+// decidió el admin), sin necesidad de aplicar diffs automáticos a 8
+// colecciones con formas distintas.
+
+function abrirSolicitudEdicion(tipo) {
+  document.getElementById('sol-tipo').value = tipo;
+  document.getElementById('sol-descripcion').value = '';
+  const sel = document.getElementById('sol-registro');
+  const wrap = document.getElementById('sol-registro-wrap');
+  sel.innerHTML = '<option value="">— General / no aplica a un registro específico —</option>';
+  let registros = [];
+  if (tipo === 'cursos') registros = db.cursos.map(c => ({ id: c.id, label: `${c.codigo} — ${c.nombre}` }));
+  if (tipo === 'competencias') registros = db.competencias.map(c => {
+    const curso = db.cursos.find(x => x.id === c.cursoId);
+    return { id: c.id, label: `${c.codigo} (${curso?.codigo||'—'}) — ${c.descripcion?.slice(0,50)||''}` };
+  });
+  if (tipo === 'base-datos') {
+    wrap.style.display = 'none'; // el módulo de Base de Datos es tabular, no hay un "registro" único que seleccionar aquí
+  } else {
+    wrap.style.display = '';
+  }
+  registros.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.id; opt.textContent = r.label;
+    sel.appendChild(opt);
+  });
+  openModal('modal-solicitud-edicion');
+}
+
+async function enviarSolicitudEdicion() {
+  const tipo = document.getElementById('sol-tipo').value;
+  const registroId = document.getElementById('sol-registro')?.value || '';
+  const registroLabel = registroId ? document.getElementById('sol-registro').selectedOptions[0]?.textContent || '' : '';
+  const descripcion = document.getElementById('sol-descripcion').value.trim();
+  if (!descripcion) { notify('Describe el cambio que necesitas', '⚠️'); return; }
+
+  const solicitud = {
+    id: 'sol_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+    coleccion: tipo,
+    registroId,
+    registroLabel,
+    descripcion,
+    solicitante: currentUser.username,
+    solicitanteNombre: currentUser.nombre,
+    fecha: new Date().toISOString(),
+    estado: 'pendiente',
+    revisadoPor: null,
+    fechaRevision: null,
+    comentarioAdmin: null,
+  };
+  db.solicitudes.push(solicitud);
+  saveDB();
+  closeModal('modal-solicitud-edicion');
+  notify('Solicitud enviada — un administrador la revisará', '📨');
+}
+
+function _solTipoLabel(tipo) {
+  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos' }[tipo] || tipo;
+}
+function _solEstadoBadge(estado) {
+  if (estado === 'aprobada')  return '<span class="badge badge-green">✓ Aprobada</span>';
+  if (estado === 'rechazada') return '<span class="badge badge-red">✕ Rechazada</span>';
+  return '<span class="badge badge-rust">⏳ Pendiente</span>';
+}
+
+function renderSolicitudes() {
+  const rol = getEffectiveRole();
+  const isAdmin = rol === 'admin';
+  const el = document.getElementById('solicitudes-list');
+  const sub = document.getElementById('sol-section-sub');
+  if (sub) sub.textContent = isAdmin
+    ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba o rechaza cada una'
+    : 'Historial de tus solicitudes de edición y su estado';
+
+  let solicitudes = [...(db.solicitudes||[])];
+  if (!isAdmin) solicitudes = solicitudes.filter(s => s.solicitante === currentUser.username);
+
+  if (!solicitudes.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No hay solicitudes de edición todavía</p></div>';
+    return;
+  }
+
+  // Pendientes primero, luego por fecha descendente
+  solicitudes.sort((a,b) => {
+    if (a.estado === 'pendiente' && b.estado !== 'pendiente') return -1;
+    if (a.estado !== 'pendiente' && b.estado === 'pendiente') return 1;
+    return new Date(b.fecha) - new Date(a.fecha);
+  });
+
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>Fecha</th><th>Tipo</th><th>Registro</th><th>Descripción</th>
+      ${isAdmin ? '<th>Solicitante</th>' : ''}
+      <th>Estado</th><th>Revisado por</th><th>Acciones</th>
+    </tr></thead>
+    <tbody>${solicitudes.map(s => `
+      <tr>
+        <td style="font-size:0.78rem;white-space:nowrap">${new Date(s.fecha).toLocaleString('es-PR',{dateStyle:'short',timeStyle:'short'})}</td>
+        <td><span class="badge badge-blue">${_solTipoLabel(s.coleccion)}</span></td>
+        <td style="font-size:0.8rem">${s.registroLabel || '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="font-size:0.82rem;max-width:280px">${s.descripcion}</td>
+        ${isAdmin ? `<td style="font-size:0.78rem">${s.solicitanteNombre||s.solicitante}</td>` : ''}
+        <td>${_solEstadoBadge(s.estado)}</td>
+        <td style="font-size:0.78rem">${s.revisadoPor ? `${s.revisadoPor}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${s.comentarioAdmin}"</span>` : ''}` : '—'}</td>
+        <td class="actions-cell">
+          ${isAdmin && s.estado === 'pendiente' ? `
+            <button class="btn btn-primary btn-sm" onclick="aprobarSolicitud('${s.id}')">✓ Aprobar</button>
+            <button class="btn btn-danger btn-sm" onclick="rechazarSolicitud('${s.id}')">✕ Rechazar</button>
+          ` : '—'}
+        </td>
+      </tr>
+    `).join('')}</tbody>
+  </table></div>`;
+}
+
+function aprobarSolicitud(id) {
+  const s = db.solicitudes.find(x => x.id === id);
+  if (!s) return;
+  const comentario = prompt('Comentario opcional para el solicitante (ej. "Corregido, gracias"):', '') || '';
+  s.estado = 'aprobada';
+  s.revisadoPor = currentUser.nombre;
+  s.fechaRevision = new Date().toISOString();
+  s.comentarioAdmin = comentario;
+  saveDB(); renderSolicitudes(); applyRoleUI();
+  notify('Solicitud aprobada — recuerda hacer el cambio correspondiente', '✓');
+}
+
+function rechazarSolicitud(id) {
+  const s = db.solicitudes.find(x => x.id === id);
+  if (!s) return;
+  const comentario = prompt('Explica por qué se rechaza (se le mostrará al solicitante):', '') || '';
+  s.estado = 'rechazada';
+  s.revisadoPor = currentUser.nombre;
+  s.fechaRevision = new Date().toISOString();
+  s.comentarioAdmin = comentario;
+  saveDB(); renderSolicitudes(); applyRoleUI();
+  notify('Solicitud rechazada', '✕');
+}
+
 
 </script>
 
