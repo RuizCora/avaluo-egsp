@@ -6,6 +6,7 @@
 <title>Sistema de Avalúo de Competencias</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 
 <!-- ======================== FIREBASE (POC) ======================== -->
 <!-- Cargado como módulo separado, sin tocar el script principal (que sigue -->
@@ -1875,6 +1876,31 @@
       <div class="section-sub" id="sol-section-sub">Solicitudes de cambios a registros de solo lectura</div>
     </div>
   </div>
+
+  <!-- Configuración temporal de notificaciones (EmailJS) — solo admin.
+       Esto se moverá al panel de Configuración general cuando exista (Fase 3). -->
+  <div id="cfg-emailjs-wrap" style="display:none;background:var(--cream);border-radius:12px;padding:16px 18px;margin-bottom:20px">
+    <strong style="font-size:0.9rem">✉️ Notificaciones por Email (EmailJS) <span style="font-weight:400;color:var(--muted);font-size:0.78rem">— temporal, se moverá a Configuración</span></strong>
+    <div id="cfg-emailjs-body" style="margin-top:12px">
+      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">
+        Cuando alguien envía una solicitud de edición, se le notificará por correo a la dirección configurada aquí.
+        Necesitas una cuenta gratuita en <a href="https://www.emailjs.com" target="_blank" rel="noopener">emailjs.com</a> con un servicio y una plantilla ya creados.
+      </p>
+      <div class="form-row">
+        <div class="form-group"><label>Service ID</label><input type="text" id="cfg-emailjs-service" placeholder="ej. service_abc123"></div>
+        <div class="form-group"><label>Template ID</label><input type="text" id="cfg-emailjs-template" placeholder="ej. template_xyz789"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Public Key</label><input type="text" id="cfg-emailjs-publickey" placeholder="ej. AbCdEfGhIjKlMnOp"></div>
+        <div class="form-group"><label>Correo del Admin</label><input type="email" id="cfg-admin-email" placeholder="admin@ejemplo.com"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="btn btn-primary btn-sm" onclick="guardarConfigEmailJS()">💾 Guardar</button>
+        <button class="btn btn-outline btn-sm" onclick="enviarEmailPrueba()">📨 Enviar correo de prueba</button>
+      </div>
+    </div>
+  </div>
+
   <div id="solicitudes-list"></div>
 </div>
 
@@ -7739,6 +7765,7 @@ async function enviarSolicitudEdicion() {
   saveDB();
   closeModal('modal-solicitud-edicion');
   notify('Solicitud enviada — un administrador la revisará', '📨');
+  notificarAdminPorEmail(solicitud);
 }
 
 function _solTipoLabel(tipo) {
@@ -7750,7 +7777,7 @@ function _solEstadoBadge(estado) {
   return '<span class="badge badge-rust">⏳ Pendiente</span>';
 }
 
-function renderSolicitudes() {
+async function renderSolicitudes() {
   const rol = getEffectiveRole();
   const isAdmin = rol === 'admin';
   const el = document.getElementById('solicitudes-list');
@@ -7758,6 +7785,22 @@ function renderSolicitudes() {
   if (sub) sub.textContent = isAdmin
     ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba o rechaza cada una'
     : 'Historial de tus solicitudes de edición y su estado';
+
+  const cfgWrap = document.getElementById('cfg-emailjs-wrap');
+  if (cfgWrap) {
+    cfgWrap.style.display = isAdmin ? '' : 'none';
+    if (isAdmin) {
+      const cfg = await loadConfiguracion();
+      const svcEl = document.getElementById('cfg-emailjs-service');
+      if (svcEl && !svcEl.dataset.loaded) {
+        document.getElementById('cfg-emailjs-service').value   = cfg.emailjsServiceId  || '';
+        document.getElementById('cfg-emailjs-template').value  = cfg.emailjsTemplateId || '';
+        document.getElementById('cfg-emailjs-publickey').value = cfg.emailjsPublicKey  || '';
+        document.getElementById('cfg-admin-email').value       = cfg.adminEmail        || '';
+        svcEl.dataset.loaded = '1';
+      }
+    }
+  }
 
   let solicitudes = [...(db.solicitudes||[])];
   if (!isAdmin) solicitudes = solicitudes.filter(s => s.solicitante === currentUser.username);
@@ -7822,6 +7865,96 @@ function rechazarSolicitud(id) {
   s.comentarioAdmin = comentario;
   saveDB(); renderSolicitudes(); applyRoleUI();
   notify('Solicitud rechazada', '✕');
+}
+
+// ======================== CONFIGURACIÓN (EmailJS, etc.) ========================
+// Objeto único (no colección) guardado en Firebase bajo 'configuracion'.
+// Por ahora solo trae los campos de EmailJS necesarios para notificar al admin
+// cuando llega una solicitud de edición. El panel completo de Configuración
+// (Fase 3: nombre de institución, logo, correo admin general) reutilizará
+// este mismo nodo y estas mismas funciones.
+let _configuracion = null;
+
+async function loadConfiguracion() {
+  if (_configuracion) return _configuracion;
+  if (window._fb) {
+    try {
+      const snap = await window._fb.get(window._fb.ref(window._fb.database, 'configuracion'));
+      _configuracion = snap.val() || {};
+      return _configuracion;
+    } catch(e) { console.error('Firebase loadConfiguracion error:', e); }
+  }
+  try {
+    const raw = localStorage.getItem('avaluo_configuracion');
+    _configuracion = raw ? JSON.parse(raw) : {};
+  } catch(e) { _configuracion = {}; }
+  return _configuracion;
+}
+
+async function saveConfiguracion() {
+  const json = JSON.stringify(_configuracion);
+  if (window._fb) {
+    try {
+      await window._fb.set(window._fb.ref(window._fb.database, 'configuracion'), _configuracion);
+    } catch(e) { console.error('Firebase saveConfiguracion error:', e); }
+  }
+  try { localStorage.setItem('avaluo_configuracion', json); } catch(e) {}
+}
+
+async function guardarConfigEmailJS() {
+  const cfg = await loadConfiguracion();
+  cfg.emailjsServiceId  = document.getElementById('cfg-emailjs-service')?.value.trim() || '';
+  cfg.emailjsTemplateId = document.getElementById('cfg-emailjs-template')?.value.trim() || '';
+  cfg.emailjsPublicKey  = document.getElementById('cfg-emailjs-publickey')?.value.trim() || '';
+  cfg.adminEmail        = document.getElementById('cfg-admin-email')?.value.trim() || '';
+  await saveConfiguracion();
+  notify('Configuración de notificaciones guardada', '💾');
+}
+
+async function enviarEmailPrueba() {
+  const cfg = await loadConfiguracion();
+  if (!cfg.emailjsServiceId || !cfg.emailjsTemplateId || !cfg.emailjsPublicKey || !cfg.adminEmail) {
+    notify('Completa los 4 campos antes de enviar una prueba', '⚠️'); return;
+  }
+  try {
+    await emailjs.send(cfg.emailjsServiceId, cfg.emailjsTemplateId, {
+      to_email: cfg.adminEmail,
+      subject: '🧪 Prueba de notificaciones — Sistema de Avalúo EGSP',
+      tipo: 'Prueba',
+      registro: '—',
+      solicitante: currentUser?.nombre || 'Admin',
+      descripcion: 'Este es un correo de prueba enviado desde el panel de configuración. Si lo recibiste, EmailJS está bien configurado.',
+      fecha: new Date().toLocaleString('es-PR'),
+    }, { publicKey: cfg.emailjsPublicKey });
+    notify('Correo de prueba enviado — revisa la bandeja de ' + cfg.adminEmail, '📨');
+  } catch (e) {
+    console.error('EmailJS error:', e);
+    notify('No se pudo enviar el correo de prueba — revisa la consola (F12) para el error exacto', '⚠️');
+  }
+}
+
+// Notifica al admin cuando llega una nueva solicitud de edición. No bloquea
+// ni revierte el envío de la solicitud si el correo falla — el registro en
+// Firebase (y por tanto el historial de auditoría) ya quedó guardado de todas
+// formas; el correo es solo un aviso adicional.
+async function notificarAdminPorEmail(solicitud) {
+  try {
+    const cfg = await loadConfiguracion();
+    if (!cfg.emailjsServiceId || !cfg.emailjsTemplateId || !cfg.emailjsPublicKey || !cfg.adminEmail) {
+      return; // EmailJS no configurado todavía — no es un error, solo no hay a quién avisarle
+    }
+    await emailjs.send(cfg.emailjsServiceId, cfg.emailjsTemplateId, {
+      to_email: cfg.adminEmail,
+      subject: `📝 Nueva solicitud de edición — ${_solTipoLabel(solicitud.coleccion)}`,
+      tipo: _solTipoLabel(solicitud.coleccion),
+      registro: solicitud.registroLabel || '(general)',
+      solicitante: solicitud.solicitanteNombre || solicitud.solicitante,
+      descripcion: solicitud.descripcion,
+      fecha: new Date(solicitud.fecha).toLocaleString('es-PR'),
+    }, { publicKey: cfg.emailjsPublicKey });
+  } catch (e) {
+    console.error('No se pudo notificar por email (la solicitud sí se guardó):', e);
+  }
 }
 
 
