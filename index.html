@@ -1450,6 +1450,22 @@
     <input type="file" id="roster-file-quick" accept=".csv" style="display:none" onchange="handleRosterFileQuick(this)">
   </div>
 
+  <!-- Registrador multi-course session file drop zone (admin only) -->
+  <div id="sesion-dropzone-wrap" style="display:none">
+    <div id="sesion-dropzone"
+      style="border:2.5px dashed #6b7280;border-radius:14px;background:#f3f4f6;padding:28px 24px;text-align:center;margin-bottom:24px;cursor:pointer;transition:all 0.2s"
+      onclick="document.getElementById('sesion-file-input').click()"
+      ondragover="event.preventDefault();this.style.background='#e5e7eb'"
+      ondragleave="this.style.background='#f3f4f6'"
+      ondrop="handleSesionDrop(event)">
+      <div style="font-size:2rem;margin-bottom:8px">📚</div>
+      <div style="font-family:'Montserrat',sans-serif;font-size:1rem;font-weight:600;margin-bottom:4px">Arrastra el archivo de Sesión del Registrador aquí</div>
+      <div style="font-size:0.8rem;color:var(--muted)">Archivo con <strong>todos los cursos y secciones de un trimestre</strong>. Formato: <code style="background:var(--cream);padding:2px 6px;border-radius:4px">REG_LISTA_CURSOS_SESION_C5Y.TXT</code></div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:4px">O haz clic para seleccionar archivo</div>
+      <input type="file" id="sesion-file-input" accept=".txt" style="display:none" onchange="handleSesionFileInput(this)">
+    </div>
+  </div>
+
   <div class="select-curso-bar">
     <label>🔍 Filtrar por curso:</label>
     <select id="filtro-curso-sec" onchange="renderSecciones()">
@@ -2121,6 +2137,30 @@
   </div>
 </div>
 
+<!-- Modal Importar Sesión Completa (Registrador) -->
+<div id="modal-importar-sesion" class="modal-overlay">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <div class="modal-title">📚 Importar Sesión del Registrador</div>
+      <button class="modal-close" onclick="closeModal('modal-importar-sesion')">✕</button>
+    </div>
+    <div id="sesion-semestre-info" style="font-size:0.85rem;background:var(--cream);border-radius:8px;padding:10px 14px;margin-bottom:14px"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="toggleAllSesionImport(true)">☑ Seleccionar todos</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllSesionImport(false)">☐ Deseleccionar todos</button>
+      </div>
+      <input type="text" id="sesion-filtro" placeholder="🔍 Filtrar por código de curso..." oninput="renderSesionImportPreview()"
+        style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:0.82rem;min-width:220px">
+    </div>
+    <div id="sesion-preview-body" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-importar-sesion')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarImportarSesion()">✓ Importar seleccionados</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Sección Manual -->
 <div id="modal-seccion" class="modal-overlay">
   <div class="modal" style="max-width:680px">
@@ -2592,7 +2632,13 @@ function renderCursos() {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">📚</div><p>Aún no hay cursos registrados</p></div>';
     return;
   }
-  el.innerHTML = `<div class="table-wrap"><table>
+  const sinCompetencias = db.cursos.filter(c => !db.competencias.some(x => x.cursoId === c.id));
+  const banner = sinCompetencias.length ? `
+    <div style="margin-bottom:14px;padding:12px 16px;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;font-size:0.85rem">
+      ⚠️ <strong>${sinCompetencias.length} curso(s) sin competencias asignadas:</strong>
+      ${sinCompetencias.map(c => `<span class="badge badge-gold" style="margin:2px">${c.codigo}</span>`).join(' ')}
+    </div>` : '';
+  el.innerHTML = banner + `<div class="table-wrap"><table>
     <thead><tr><th>Código</th><th>Nombre</th><th>Programa</th><th>Departamento</th><th>Competencias</th><th>Acciones</th></tr></thead>
     <tbody>${db.cursos.map(c => {
       const comps = db.competencias.filter(x => x.cursoId === c.id).length;
@@ -2608,7 +2654,7 @@ function renderCursos() {
         <td>${c.nombre}</td>
         <td><span class="badge ${progBadge}">${c.programa || 'MPH/MPHE'}</span></td>
         <td>${c.departamento || '—'}</td>
-        <td><span class="badge badge-blue">${comps} comp.</span></td>
+        <td><span class="badge ${comps === 0 ? 'badge-gold' : 'badge-blue'}">${comps} comp.</span></td>
         <td class="actions-cell">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCurso('${c.id}')">✏️</button>` : ''}
           ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarCurso('${c.id}')">🗑</button>` : ''}
@@ -2966,6 +3012,226 @@ function guardarRoster() {
   document.getElementById('roster-fields').style.display = 'none';
   document.getElementById('roster-save-btn').style.display = 'none';
   document.getElementById('roster-preview-tbody').innerHTML = '';
+}
+
+// ======================== IMPORTAR SESIÓN COMPLETA (Registrador) ========================
+// Archivo de texto del Registrador con TODOS los cursos/secciones de un
+// trimestre (formato de ancho fijo / columnas separadas por espacios).
+// El nombre del archivo codifica el trimestre al final, ej. "..._C5Y.TXT":
+//   1ra letra = década (A=2000, B=2010, C=2020, D=2030, ...)
+//   2do carácter = dígito del año dentro de la década (C5 = 2025)
+//   3ra letra = término: W=1er Trimestre, X=2do Trimestre, Y=3er Trimestre, Z=Verano
+// Nota: internamente el sistema guarda el "año" de un T3/Verano como año+1
+// (así lo hace también el import de roster individual), para que
+// getAcademicYear() calcule el año académico correcto — por eso el año
+// codificado en el archivo (ej. 2025 para C5Y = AY2025-2026) se ajusta aquí.
+let _sesionImportData = null; // { semestreLabel, cursos: [{curso, seccion, estudiantes, dbCursoId}] }
+
+function decodeSessionCode(filename) {
+  const matches = [...filename.matchAll(/([A-Za-z])(\d)([A-Za-z])/g)];
+  if (!matches.length) return null;
+  const [, decadeLetter, digit, termLetter] = matches[matches.length - 1]; // el más cercano al final del nombre
+  const base = 2000 + (decadeLetter.toUpperCase().charCodeAt(0) - 65) * 10;
+  const registrarYear = base + parseInt(digit, 10);
+  const termMap = { W: 'T1', X: 'T2', Y: 'T3', Z: 'V' };
+  const term = termMap[termLetter.toUpperCase()];
+  if (!term) return null;
+  const storedYear = (term === 'T3' || term === 'V') ? registrarYear + 1 : registrarYear;
+  const triMap = { T1: '1er Trimestre', T2: '2do Trimestre', T3: '3er Trimestre', V: 'Verano' };
+  return {
+    registrarYear, term, storedYear,
+    label: `${storedYear} – ${triMap[term]}`,
+    ayLabel: `AY ${registrarYear}-${registrarYear + 1}`,
+  };
+}
+
+function parseRegistradorRoster(text) {
+  const lines = text.split(/\r?\n/);
+  const cursos = [];
+  let current = null;
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) continue;
+    const courseMatch = line.match(/CURSO:\s*(\S+)\s+SECCION:\s*(\S+)/i);
+    if (courseMatch) {
+      current = { curso: courseMatch[1].toUpperCase(), seccion: courseMatch[2], estudiantes: [] };
+      cursos.push(current);
+      continue;
+    }
+    if (!current) continue;
+    if (/NUM\.\s*EST\./i.test(line)) continue;
+    if (/^-{5,}/.test(line.trim())) continue;
+    if (/TOTAL DE ESTUDIANTES|TOTAL DE RECORDS/i.test(line)) continue;
+    const cols = line.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+    if (cols.length >= 2 && /^\d+$/.test(cols[0])) {
+      current.estudiantes.push({
+        id: cols[0],
+        nombre: cols[1] || '',
+        email: cols[2] || '',
+        facultad: cols[3] || '',
+      });
+    }
+  }
+  return cursos;
+}
+
+function _normCodigo(c) { return String(c || '').replace(/\s+/g, '').toUpperCase(); }
+
+function handleSesionDrop(event) {
+  event.preventDefault();
+  document.getElementById('sesion-dropzone').style.background = '#f3f4f6';
+  const file = event.dataTransfer.files[0];
+  if (file) processSesionFile(file);
+}
+function handleSesionFileInput(input) {
+  const file = input.files[0];
+  if (file) processSesionFile(file);
+  input.value = '';
+}
+
+function processSesionFile(file) {
+  const sesionInfo = decodeSessionCode(file.name);
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const cursosParsed = parseRegistradorRoster(e.target.result);
+    if (!cursosParsed.length) {
+      notify('No se pudo leer ningún curso de ese archivo — revisa el formato', '⚠️');
+      return;
+    }
+    // Empareja cada curso del archivo con un curso existente en el sistema (por código)
+    cursosParsed.forEach(c => {
+      const match = db.cursos.find(dc => _normCodigo(dc.codigo) === _normCodigo(c.curso));
+      c.dbCursoId = match ? match.id : null;
+      c.dbCursoNombre = match ? match.nombre : null;
+      c.selected = !!match; // pre-seleccionar solo los que sí existen
+    });
+    _sesionImportData = { sesionInfo, cursos: cursosParsed };
+    document.getElementById('sesion-filtro').value = '';
+    renderSesionImportPreview();
+    openModal('modal-importar-sesion');
+  };
+  reader.readAsText(file);
+}
+
+function renderSesionImportPreview() {
+  if (!_sesionImportData) return;
+  const { sesionInfo, cursos } = _sesionImportData;
+  const infoEl = document.getElementById('sesion-semestre-info');
+  if (sesionInfo) {
+    infoEl.innerHTML = `📅 Trimestre detectado: <strong>${sesionInfo.label}</strong> <span style="color:var(--muted)">(${sesionInfo.ayLabel})</span> — se aplicará a todas las secciones importadas.`;
+  } else {
+    infoEl.innerHTML = `⚠️ No se pudo detectar el trimestre del nombre del archivo. Verifica que termine en un código como <code>C5Y</code> antes de la extensión.`;
+  }
+
+  const filtro = (document.getElementById('sesion-filtro')?.value || '').trim().toUpperCase();
+  const filtered = filtro ? cursos.filter(c => c.curso.includes(filtro)) : cursos;
+
+  const body = document.getElementById('sesion-preview-body');
+  if (!filtered.length) {
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">Sin resultados para ese filtro.</div>';
+    return;
+  }
+  body.innerHTML = `<table class="rpt-table" style="margin:0"><thead><tr>
+      <th style="width:34px"></th><th>Curso</th><th>Sección</th><th># Estudiantes</th><th>Estado</th>
+    </tr></thead><tbody>
+    ${filtered.map((c, i) => {
+      const idx = cursos.indexOf(c);
+      const noExiste = !c.dbCursoId;
+      return `<tr>
+        <td><input type="checkbox" data-idx="${idx}" ${c.selected ? 'checked' : ''} onchange="_sesionImportData.cursos[${idx}].selected=this.checked"></td>
+        <td><strong>${c.curso}</strong>${c.dbCursoNombre ? `<div style="font-size:0.72rem;color:var(--muted)">${c.dbCursoNombre}</div>` : ''}</td>
+        <td>${c.seccion}</td>
+        <td>${c.estudiantes.length}</td>
+        <td>${noExiste
+          ? `<label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer">
+               <input type="checkbox" ${c.crearCurso ? 'checked' : ''} onchange="_sesionImportData.cursos[${idx}].crearCurso=this.checked; if(this.checked){_sesionImportData.cursos[${idx}].selected=true; renderSesionImportPreview();}">
+               🆕 Curso no existe — crearlo e importar
+             </label>`
+          : '<span class="badge badge-green">✓ Curso encontrado</span>'}</td>
+      </tr>`;
+    }).join('')}
+  </tbody></table>`;
+}
+
+function toggleAllSesionImport(checked) {
+  if (!_sesionImportData) return;
+  _sesionImportData.cursos.forEach(c => { if (c.dbCursoId) c.selected = checked; });
+  renderSesionImportPreview();
+}
+
+function confirmarImportarSesion() {
+  if (!_sesionImportData) return;
+  const { sesionInfo, cursos } = _sesionImportData;
+  const semestreLabel = sesionInfo ? sesionInfo.label : '';
+  let creadas = 0, actualizadas = 0, omitidas = 0, cursosCreados = 0;
+  const noEncontrados = [];
+
+  cursos.forEach(c => {
+    if (!c.selected) return;
+
+    // Curso no existía en el sistema: si se marcó "crearlo", se agrega como
+    // curso básico (solo código) sin competencias — quedará listado en el
+    // aviso "cursos sin competencias asignadas" de la pestaña Cursos hasta
+    // que se complete manualmente.
+    if (!c.dbCursoId) {
+      if (!c.crearCurso) { omitidas++; noEncontrados.push(c.curso); return; }
+      const nuevoCurso = {
+        id: 'curso_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        codigo: c.curso,
+        nombre: '(Pendiente de completar)',
+        programa: '',
+        departamento: '',
+      };
+      db.cursos.push(nuevoCurso);
+      c.dbCursoId = nuevoCurso.id;
+      cursosCreados++;
+    }
+
+    // Una sección se identifica de forma única por curso + número + trimestre
+    // + AÑO ACADÉMICO — puede haber la misma sección/curso/trimestre en años
+    // académicos distintos, así que se compara con parseTermString() (que ya
+    // maneja el formato de "semestre" existente) en vez de comparar el texto
+    // tal cual, para que coincida sin importar cómo se haya escrito antes.
+    let seccion = db.secciones.find(s => {
+      if (s.cursoId !== c.dbCursoId || String(s.numero) !== String(c.seccion)) return false;
+      const parsed = parseTermString(s.semestre);
+      return parsed && sesionInfo && parsed.term === sesionInfo.term && parsed.year === sesionInfo.storedYear;
+    });
+
+    const estudiantesNuevos = c.estudiantes.map(e => ({
+      id: e.id, nombre: e.nombre, email: e.email,
+    }));
+
+    if (seccion) {
+      const idsExistentes = new Set((seccion.estudiantes || []).map(e => e.id));
+      let agregados = 0;
+      estudiantesNuevos.forEach(e => {
+        if (!idsExistentes.has(e.id)) { seccion.estudiantes.push(e); idsExistentes.add(e.id); agregados++; }
+      });
+      if (agregados > 0) actualizadas++;
+    } else {
+      db.secciones.push({
+        id: 'sec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        cursoId: c.dbCursoId,
+        numero: c.seccion,
+        semestre: semestreLabel,
+        profesor: '',
+        estudiantes: estudiantesNuevos,
+        origenRoster: true,
+      });
+      creadas++;
+    }
+  });
+
+  saveDB();
+  closeModal('modal-importar-sesion');
+  renderSecciones();
+  _sesionImportData = null;
+
+  let msg = `Sesión importada: ${creadas} sección(es) creada(s), ${actualizadas} actualizada(s)`;
+  if (cursosCreados > 0) msg += `, ${cursosCreados} curso(s) nuevo(s) creado(s) — recuerda asignarles competencias`;
+  if (omitidas > 0) msg += `, ${omitidas} omitida(s) por curso no encontrado (${[...new Set(noEncontrados)].join(', ')})`;
+  notify(msg, creadas + actualizadas > 0 ? '✓' : '⚠️');
 }
 
 function parsearListaTexto() {
@@ -6446,6 +6712,8 @@ function applyRoleUI() {
   if (btnNComp) btnNComp.style.display = authIsReadonly('competencias') ? 'none' : '';
   const btnNS = document.getElementById('btn-nueva-seccion');
   if (btnNS) btnNS.style.display = !authCan('secciones') ? 'none' : '';
+  const sesionWrap = document.getElementById('sesion-dropzone-wrap');
+  if (sesionWrap) sesionWrap.style.display = (rol === 'admin') ? '' : 'none';
 
   // Badge de solicitudes pendientes (solo cuenta para admin, que es quien aprueba/rechaza)
   const solBadge = document.getElementById('sol-pending-badge');
