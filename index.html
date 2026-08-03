@@ -1418,6 +1418,22 @@
     <span id="btn-nuevo-curso"><button class="btn btn-primary" onclick="openModal('modal-curso')">+ Nuevo Curso</button></span>
   </div>
   <div class="section-sub">Registra los cursos del programa académico</div>
+  <div class="rpt-filter-bar" style="margin-bottom:14px">
+    <div class="dash-filter-group" style="flex:1;min-width:200px"><label class="dash-filter-label">🔍 Buscar</label>
+      <input type="text" id="cursos-buscar" placeholder="Código o nombre..." oninput="renderCursos()"
+        class="dash-select" style="width:100%"></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
+      <select id="cursos-filtro-programa" class="dash-select" onchange="renderCursos()"><option value="">Todos</option></select></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Departamento</label>
+      <select id="cursos-filtro-departamento" class="dash-select" onchange="renderCursos()"><option value="">Todos</option></select></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Ordenar por</label>
+      <select id="cursos-orden" class="dash-select" onchange="renderCursos()">
+        <option value="codigo-asc">Código (A-Z)</option>
+        <option value="codigo-desc">Código (Z-A)</option>
+        <option value="nombre-asc">Nombre (A-Z)</option>
+        <option value="nombre-desc">Nombre (Z-A)</option>
+      </select></div>
+  </div>
   <div id="tabla-cursos">
     <div class="empty-state"><div class="empty-icon">📚</div><p>Aún no hay cursos registrados</p></div>
   </div>
@@ -1466,10 +1482,22 @@
     </div>
   </div>
 
-  <div class="select-curso-bar">
+  <div class="select-curso-bar" style="flex-wrap:wrap">
     <label>🔍 Filtrar por curso:</label>
     <select id="filtro-curso-sec" onchange="renderSecciones()">
       <option value="">— Todos los cursos —</option>
+    </select>
+    <label>Año académico:</label>
+    <select id="filtro-ay-sec" onchange="renderSecciones()">
+      <option value="">— Todos —</option>
+    </select>
+    <label>Trimestre:</label>
+    <select id="filtro-term-sec" onchange="renderSecciones()">
+      <option value="">— Todos —</option>
+      <option value="T1">1er Trimestre</option>
+      <option value="T2">2do Trimestre</option>
+      <option value="T3">3er Trimestre</option>
+      <option value="V">Verano</option>
     </select>
   </div>
 
@@ -2632,6 +2660,49 @@ function renderCursos() {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">📚</div><p>Aún no hay cursos registrados</p></div>';
     return;
   }
+
+  // Poblar los selects de Programa/Departamento con los valores que realmente existen
+  // (se reconstruyen cada vez, conservando la selección actual, por si se agregan
+  // cursos con programas/departamentos nuevos)
+  const progSel = document.getElementById('cursos-filtro-programa');
+  const deptSel = document.getElementById('cursos-filtro-departamento');
+  if (progSel) {
+    const prev = progSel.value;
+    const progs = [...new Set(db.cursos.map(c => c.programa).filter(Boolean))].sort();
+    progSel.innerHTML = '<option value="">Todos</option>' + progs.map(p => `<option value="${p}">${p}</option>`).join('');
+    progSel.value = prev;
+  }
+  if (deptSel) {
+    const prev = deptSel.value;
+    const depts = [...new Set(db.cursos.map(c => c.departamento).filter(Boolean))].sort();
+    deptSel.innerHTML = '<option value="">Todos</option>' + depts.map(d => `<option value="${d}">${d}</option>`).join('');
+    deptSel.value = prev;
+  }
+
+  const busqueda = (document.getElementById('cursos-buscar')?.value || '').trim().toLowerCase();
+  const filtroPrograma = document.getElementById('cursos-filtro-programa')?.value || '';
+  const filtroDepto = document.getElementById('cursos-filtro-departamento')?.value || '';
+  const orden = document.getElementById('cursos-orden')?.value || 'codigo-asc';
+
+  let cursosFiltrados = db.cursos.filter(c => {
+    if (busqueda && !`${c.codigo} ${c.nombre}`.toLowerCase().includes(busqueda)) return false;
+    if (filtroPrograma && c.programa !== filtroPrograma) return false;
+    if (filtroDepto && c.departamento !== filtroDepto) return false;
+    return true;
+  });
+
+  const [ordenCampo, ordenDir] = orden.split('-');
+  cursosFiltrados.sort((a, b) => {
+    const va = (a[ordenCampo] || '').toString().toLowerCase();
+    const vb = (b[ordenCampo] || '').toString().toLowerCase();
+    return ordenDir === 'desc' ? vb.localeCompare(va) : va.localeCompare(vb);
+  });
+
+  if (!cursosFiltrados.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>Sin resultados para esos filtros</p></div>';
+    return;
+  }
+
   const sinCompetencias = db.cursos.filter(c => !db.competencias.some(x => x.cursoId === c.id));
   const banner = sinCompetencias.length ? `
     <div style="margin-bottom:14px;padding:12px 16px;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;font-size:0.85rem">
@@ -2640,7 +2711,7 @@ function renderCursos() {
     </div>` : '';
   el.innerHTML = banner + `<div class="table-wrap"><table>
     <thead><tr><th>Código</th><th>Nombre</th><th>Programa</th><th>Departamento</th><th>Competencias</th><th>Acciones</th></tr></thead>
-    <tbody>${db.cursos.map(c => {
+    <tbody>${cursosFiltrados.map(c => {
       const comps = db.competencias.filter(x => x.cursoId === c.id).length;
       const progBadgeMap = {
         'MPH/MPHE':'badge-gold','MPHE':'badge-blue','MPH Gerontology':'badge-green',
@@ -3179,7 +3250,7 @@ function confirmarImportarSesion() {
       if (!c.crearCurso) { omitidas++; noEncontrados.push(c.curso); return; }
       const nuevoCurso = {
         id: 'curso_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        codigo: c.curso,
+        codigo: c.curso.replace(/^([A-Za-z]+)(\d+)$/, '$1 $2'), // ej. ADSS6568 -> ADSS 6568
         nombre: '(Pendiente de completar)',
         programa: '',
         departamento: '',
@@ -3327,9 +3398,31 @@ function guardarSeccion() {
 
 function renderSecciones() {
   if (!db.secciones) db.secciones = [];
+  const misSecciones = db.secciones.filter(s => canSeeSeccion(s));
+
+  // Poblar el filtro de Año Académico con los años que realmente existen
+  // entre las secciones visibles para este usuario (más reciente primero)
+  const aySel = document.getElementById('filtro-ay-sec');
+  if (aySel) {
+    const prevAY = aySel.value;
+    const ays = [...new Set(misSecciones.map(s => getAcademicYear(s.semestre)).filter(v => v !== null && v !== undefined))].sort((a,b) => b - a);
+    aySel.innerHTML = '<option value="">— Todos —</option>' + ays.map(y => `<option value="${y}">AY ${y}-${y+1}</option>`).join('');
+    aySel.value = prevAY;
+  }
+
   const filtroCurso = document.getElementById('filtro-curso-sec')?.value || '';
-  let secs = filtroCurso ? db.secciones.filter(s => s.cursoId === filtroCurso) : db.secciones;
-  secs = secs.filter(s => canSeeSeccion(s));
+  const filtroAY = document.getElementById('filtro-ay-sec')?.value || '';
+  const filtroTerm = document.getElementById('filtro-term-sec')?.value || '';
+
+  let secs = misSecciones.filter(s => {
+    if (filtroCurso && s.cursoId !== filtroCurso) return false;
+    if (filtroAY !== '' && String(getAcademicYear(s.semestre)) !== filtroAY) return false;
+    if (filtroTerm) {
+      const parsed = parseTermString(s.semestre);
+      if (!parsed || parsed.term !== filtroTerm) return false;
+    }
+    return true;
+  });
   const el = document.getElementById('lista-secciones');
 
   if (!secs.length) {
