@@ -3137,16 +3137,18 @@ function renderSesionImportPreview() {
     ${filtered.map((c, i) => {
       const idx = cursos.indexOf(c);
       const noExiste = !c.dbCursoId;
+      const onChangeAttr = noExiste
+        ? `_sesionImportData.cursos[${idx}].selected=this.checked; _sesionImportData.cursos[${idx}].crearCurso=this.checked; renderSesionImportPreview();`
+        : `_sesionImportData.cursos[${idx}].selected=this.checked;`;
       return `<tr>
-        <td><input type="checkbox" data-idx="${idx}" ${c.selected ? 'checked' : ''} onchange="_sesionImportData.cursos[${idx}].selected=this.checked"></td>
+        <td><input type="checkbox" data-idx="${idx}" ${c.selected ? 'checked' : ''} onchange="${onChangeAttr}"></td>
         <td><strong>${c.curso}</strong>${c.dbCursoNombre ? `<div style="font-size:0.72rem;color:var(--muted)">${c.dbCursoNombre}</div>` : ''}</td>
         <td>${c.seccion}</td>
         <td>${c.estudiantes.length}</td>
         <td>${noExiste
-          ? `<label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer">
-               <input type="checkbox" ${c.crearCurso ? 'checked' : ''} onchange="_sesionImportData.cursos[${idx}].crearCurso=this.checked; if(this.checked){_sesionImportData.cursos[${idx}].selected=true; renderSesionImportPreview();}">
-               🆕 Curso no existe — crearlo e importar
-             </label>`
+          ? (c.selected
+              ? '<span class="badge badge-gold">🆕 Se creará como curso nuevo</span>'
+              : '<span class="badge badge-red">⚠️ Curso no existe — marca la casilla para crearlo</span>')
           : '<span class="badge badge-green">✓ Curso encontrado</span>'}</td>
       </tr>`;
     }).join('')}
