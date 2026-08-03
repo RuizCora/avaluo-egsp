@@ -1465,7 +1465,7 @@
   <div id="readonly-notice-competencias" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar competencias. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('competencias')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div class="section-title">Competencias por Curso</div>
-    <button class="btn btn-primary" onclick="openModal('modal-competencia')">+ Nueva Competencia</button>
+    <button id="btn-nueva-competencia" class="btn btn-primary" onclick="openModal('modal-competencia')">+ Nueva Competencia</button>
   </div>
   <div class="section-sub">Define las competencias que se miden en cada curso</div>
   <div class="select-curso-bar">
@@ -2574,6 +2574,7 @@ function notify(msg, icon = '✅') {
 
 // ======================== CURSOS ========================
 function guardarCurso() {
+  if (authIsReadonly('cursos')) { notify('Tu rol no permite crear o editar cursos', '🔒'); return; }
   const codigo = document.getElementById('c-codigo').value.trim();
   const nombre = document.getElementById('c-nombre').value.trim();
   if (!codigo || !nombre) { notify('Complete los campos requeridos', '⚠️'); return; }
@@ -2654,7 +2655,7 @@ function renderCursos() {
         <td><span class="badge badge-blue">${comps} comp.</span></td>
         <td class="actions-cell">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCurso('${c.id}')">✏️</button>` : ''}
-          <button class="btn btn-danger btn-sm" onclick="eliminarCurso('${c.id}')">🗑</button>
+          ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarCurso('${c.id}')">🗑</button>` : ''}
         </td>
       </tr>`;
     }).join('')}</tbody>
@@ -2662,6 +2663,7 @@ function renderCursos() {
 }
 
 function eliminarCurso(id) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar cursos', '🔒'); return; }
   if (!confirm('¿Eliminar este curso? También se eliminarán sus competencias y avalúos.')) return;
   db.cursos = db.cursos.filter(c => c.id !== id);
   db.competencias = db.competencias.filter(c => c.cursoId !== id);
@@ -2671,6 +2673,7 @@ function eliminarCurso(id) {
 
 // ======================== COMPETENCIAS ========================
 function guardarCompetencia() {
+  if (authIsReadonly('competencias')) { notify('Tu rol no permite crear o editar competencias', '🔒'); return; }
   const cursoId = document.getElementById('comp-curso').value;
   const codigo = document.getElementById('comp-codigo').value.trim();
   const desc = document.getElementById('comp-desc').value.trim();
@@ -2748,7 +2751,7 @@ function renderCompetencias() {
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCompetencia('${c.id}')">✏️</button>` : ''}
-          <button class="btn btn-danger btn-sm" onclick="eliminarCompetencia('${c.id}')">🗑</button>
+          ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarCompetencia('${c.id}')">🗑</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -2756,6 +2759,7 @@ function renderCompetencias() {
 }
 
 function eliminarCompetencia(id) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar competencias', '🔒'); return; }
   if (!confirm('¿Eliminar esta competencia?')) return;
   db.competencias = db.competencias.filter(c => c.id !== id);
   saveDB(); renderCompetencias(); notify('Competencia eliminada', '🗑');
@@ -3097,7 +3101,8 @@ function guardarSeccion() {
 function renderSecciones() {
   if (!db.secciones) db.secciones = [];
   const filtroCurso = document.getElementById('filtro-curso-sec')?.value || '';
-  const secs = filtroCurso ? db.secciones.filter(s => s.cursoId === filtroCurso) : db.secciones;
+  let secs = filtroCurso ? db.secciones.filter(s => s.cursoId === filtroCurso) : db.secciones;
+  secs = secs.filter(s => canSeeSeccion(s));
   const el = document.getElementById('lista-secciones');
 
   if (!secs.length) {
@@ -3121,8 +3126,8 @@ function renderSecciones() {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarSeccion('${sec.id}')">✏️ Editar</button>` : ''}
-          <button class="btn btn-outline btn-sm" onclick="openAddEstudiante('${sec.id}')">+ Estudiante</button>
-          <button class="btn btn-danger btn-sm" onclick="eliminarSeccion('${sec.id}')">🗑</button>
+          ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="openAddEstudiante('${sec.id}')">+ Estudiante</button>` : ''}
+          ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarSeccion('${sec.id}')">🗑</button>` : ''}
         </div>
       </div>
       ${sec.estudiantes?.length ? `
@@ -3137,7 +3142,7 @@ function renderSecciones() {
                 <td style="font-size:0.78rem;color:var(--muted)">${e.email||'—'}</td>
                 <td style="display:flex;gap:4px">
                   ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" style="padding:3px 7px" onclick="abrirEditarEstudiante('${sec.id}','${e.id}')">✏️</button>` : ''}
-                  <button class="btn btn-danger btn-sm" onclick="eliminarEstudianteDeSeccion('${sec.id}','${e.id}')">✕</button>
+                  ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarEstudianteDeSeccion('${sec.id}','${e.id}')">✕</button>` : ''}
                 </td>
               </tr>`).join('')}
             </tbody>
@@ -3233,6 +3238,7 @@ function guardarEdicionEstudiante() {
 }
 
 function eliminarEstudianteDeSeccion(secId, estId) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar estudiantes de una sección', '🔒'); return; }
   if (!db.secciones) return;
   const sec = db.secciones.find(s => s.id === secId);
   if (!sec) return;
@@ -3241,6 +3247,7 @@ function eliminarEstudianteDeSeccion(secId, estId) {
 }
 
 function eliminarSeccion(id) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar secciones', '🔒'); return; }
   if (!confirm('¿Eliminar esta sección y su lista de estudiantes?')) return;
   db.secciones = (db.secciones || []).filter(s => s.id !== id);
   saveDB(); renderSecciones(); notify('Sección eliminada', '🗑');
@@ -3281,7 +3288,7 @@ function onCursoChange() {
 
   if (!cursoId) return;
 
-  const secciones = (db.secciones || []).filter(s => s.cursoId === cursoId);
+  const secciones = (db.secciones || []).filter(s => s.cursoId === cursoId && canSeeSeccion(s));
   if (!secciones.length) {
     selSec.innerHTML = '<option value="">⚠️ No hay secciones para este curso</option>';
     return;
@@ -3655,7 +3662,7 @@ function renderBaseDatos() {
   const filtroSem     = document.getElementById('filtro-bd-semestre')?.value?.toLowerCase() || '';
   const filtroEst     = document.getElementById('filtro-bd-estudiante')?.value?.toLowerCase() || '';
 
-  let avaluos = db.avaluos.filter(a => {
+  let avaluos = _filterAvaluosByRole(db.avaluos).filter(a => {
     if (filtroProg) {
       const curso = db.cursos.find(c=>c.id===a.cursoId);
       if (curso?.programa !== filtroProg) return false;
@@ -5451,7 +5458,13 @@ function populateCursoSelects() {
     const first = el.options[0];
     el.innerHTML = '';
     el.appendChild(first.cloneNode(true));
-    db.cursos.forEach(c => {
+    let cursosParaSelect = db.cursos;
+    if (id === 'av-curso') {
+      cursosParaSelect = db.cursos.filter(c =>
+        (db.secciones||[]).some(s => s.cursoId === c.id && canSeeSeccion(s))
+      );
+    }
+    cursosParaSelect.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c.id; opt.textContent = `${c.codigo} · ${c.nombre}`;
       el.appendChild(opt);
@@ -6134,7 +6147,7 @@ const ROLE_ACCESS = {
   admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, sincronizar:true, solicitudes:true },
   director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:true, solicitudes:true },
   coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true, solicitudes:true },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':true,        reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true, solicitudes:true },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, sincronizar:true, solicitudes:true },
   viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, sincronizar:false, solicitudes:false },
 };
 
@@ -6466,6 +6479,8 @@ function applyRoleUI() {
 
   const btnNC = document.getElementById('btn-nuevo-curso');
   if (btnNC) btnNC.style.display = authIsReadonly('cursos') ? 'none' : '';
+  const btnNComp = document.getElementById('btn-nueva-competencia');
+  if (btnNComp) btnNComp.style.display = authIsReadonly('competencias') ? 'none' : '';
   const btnNS = document.getElementById('btn-nueva-seccion');
   if (btnNS) btnNS.style.display = !authCan('secciones') ? 'none' : '';
 
