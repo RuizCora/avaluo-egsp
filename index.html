@@ -2560,6 +2560,15 @@ function showTab(tabId, btn) {
 
 function openModal(id) {
   populateCursoSelects();
+  // Para profesores (no-admin), auto-completa y bloquea el campo "Profesor" con
+  // su propio nombre de cuenta, para que la sección quede correctamente
+  // identificada como suya (canSeeSeccion la reconoce por nombre/email) y no
+  // se pierda de vista por un error de tecleo.
+  if ((id === 'modal-roster' || id === 'modal-seccion') && currentUser?.rol !== 'admin') {
+    const fieldId = id === 'modal-roster' ? 'roster-profesor' : 'sec-profesor';
+    const f = document.getElementById(fieldId);
+    if (f) { f.value = currentUser.nombre; f.readOnly = true; f.style.background = 'var(--cream)'; }
+  }
   document.getElementById(id).classList.add('open');
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
