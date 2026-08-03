@@ -1880,6 +1880,21 @@
       <button class="btn btn-ghost btn-sm" onclick="exportarFacultadCSV()">⬇ Exportar CSV</button>
       <a id="fac-csv-template" href="#" onclick="descargarPlantillaFacultad();return false" style="font-size:0.78rem;color:var(--egsp-coral);margin-left:6px">📄 Plantilla CSV</a>
     </div>
+
+    <!-- Distribución de Salones drop zone: importa profesores y los asigna a secciones -->
+    <div id="dist-dropzone"
+      style="border:2.5px dashed #6b7280;border-radius:14px;background:#f3f4f6;padding:24px;text-align:center;margin-bottom:20px;cursor:pointer;transition:all 0.2s"
+      onclick="document.getElementById('dist-file-input').click()"
+      ondragover="event.preventDefault();this.style.background='#e5e7eb'"
+      ondragleave="this.style.background='#f3f4f6'"
+      ondrop="handleDistDrop(event)">
+      <div style="font-size:1.8rem;margin-bottom:6px">👩‍🏫</div>
+      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra el Excel de "Distribución de Salones" aquí</div>
+      <div style="font-size:0.78rem;color:var(--muted)">Crea profesores nuevos (si hace falta) y los asigna a sus secciones del trimestre indicado en el archivo</div>
+      <div style="font-size:0.76rem;color:var(--muted);margin-top:4px">O haz clic para seleccionar archivo (.xlsx)</div>
+      <input type="file" id="dist-file-input" accept=".xlsx" style="display:none" onchange="handleDistFileInput(this)">
+    </div>
+
     <div id="facultad-list"></div>
   </div>
 
@@ -3305,6 +3320,237 @@ function confirmarImportarSesion() {
   if (cursosCreados > 0) msg += `, ${cursosCreados} curso(s) nuevo(s) creado(s) — recuerda asignarles competencias`;
   if (omitidas > 0) msg += `, ${omitidas} omitida(s) por curso no encontrado (${[...new Set(noEncontrados)].join(', ')})`;
   notify(msg, creadas + actualizadas > 0 ? '✓' : '⚠️');
+}
+
+// ======================== IMPORTAR PROFESORES (Distribución de Salones) ========================
+// Excel oficial con curso/sección/profesor/correo para un trimestre. El correo
+// es el identificador único; el nombre se DERIVA del correo (no de la columna
+// "Profesor", que trae inconsistencias de tildes/abreviaturas/errores de
+// digitación entre filas del mismo profesor). Crea la cuenta de acceso
+// (rol profesor) si hace falta, y asigna profesorEmail/profesor a cada
+// sección que coincida en el trimestre detectado del archivo.
+let _distImportData = null;
+
+function deriveNameFromEmail(email) {
+  const local = email.split('@')[0];
+  const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+  const parts = local.split('.').map(p => p.replace(/\d+$/, '')).filter(Boolean).map(cap);
+  return parts.length ? parts.join(' ') : email;
+}
+
+function parseTrimestreTitle(rows) {
+  let term = null, ayStart = null;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const line = (rows[i] || []).map(c => c == null ? '' : String(c)).join(' ').toUpperCase();
+    if (!term) {
+      if (/PRIMER\s+TRIMESTRE/.test(line)) term = 'T1';
+      else if (/SEGUNDO\s+TRIMESTRE/.test(line)) term = 'T2';
+      else if (/TERCER\s+TRIMESTRE/.test(line)) term = 'T3';
+      else if (/VERANO/.test(line)) term = 'V';
+    }
+    const ym = line.match(/(\d{4})\s*-\s*(\d{4})/);
+    if (ym && !ayStart) ayStart = parseInt(ym[1], 10);
+  }
+  if (!term || !ayStart) return null;
+  // Mismo ajuste que en el import del Registrador: T1/T2 guardan year=AY;
+  // T3/V guardan year=AY+1 (así funciona getAcademicYear() en el resto de la app).
+  const storedYear = (term === 'T3' || term === 'V') ? ayStart + 1 : ayStart;
+  const triMap = { T1: '1er Trimestre', T2: '2do Trimestre', T3: '3er Trimestre', V: 'Verano' };
+  return { term, ayStart, storedYear, label: `${storedYear} – ${triMap[term]}`, ayLabel: `AY ${ayStart}-${ayStart + 1}` };
+}
+
+function parseDistribucionSalones(rows) {
+  const termInfo = parseTrimestreTitle(rows);
+  let headerIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const line = (rows[i] || []).map(c => c == null ? '' : String(c).toUpperCase());
+    if (line.some(c => c.includes('CURSO')) && line.some(c => c.includes('CORREO'))) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return { termInfo, profesores: [], erroresEmail: [] };
+  const header = (rows[headerIdx] || []).map(c => c == null ? '' : String(c).trim().toUpperCase());
+  const idxCurso = header.findIndex(h => h.includes('CURSO'));
+  const idxSeccion = header.findIndex(h => h.includes('SECCIÓN') || h.includes('SECCION'));
+  const idxProfesor = header.findIndex(h => h.includes('PROFESOR'));
+  const idxCorreo = header.findIndex(h => h.includes('CORREO') || h.includes('EMAIL'));
+
+  const map = {};
+  const erroresEmail = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const curso = row[idxCurso], seccion = row[idxSeccion], correoRaw = row[idxCorreo];
+    if (!curso && !correoRaw) continue;
+    if (!correoRaw) continue; // sin correo no hay forma de identificar al profesor
+    const correo = String(correoRaw).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+      erroresEmail.push({ curso, seccion, profesor: row[idxProfesor], correo: correoRaw });
+      continue;
+    }
+    if (!map[correo]) map[correo] = { email: correo, nombre: deriveNameFromEmail(correo), filas: [] };
+    if (curso) map[correo].filas.push({ curso: String(curso).trim(), seccion: seccion != null ? String(seccion).trim() : '' });
+  }
+  return { termInfo, profesores: Object.values(map), erroresEmail };
+}
+
+function handleDistDrop(event) {
+  event.preventDefault();
+  document.getElementById('dist-dropzone').style.background = '#f3f4f6';
+  const file = event.dataTransfer.files[0];
+  if (file) processDistFile(file);
+}
+function handleDistFileInput(input) {
+  const file = input.files[0];
+  if (file) processDistFile(file);
+  input.value = '';
+}
+
+async function processDistFile(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  const parsed = parseDistribucionSalones(rows);
+  if (!parsed.profesores.length) {
+    notify('No se encontraron profesores con correo válido en ese archivo', '⚠️');
+    return;
+  }
+  const usuarios = await loadUsers() || [];
+  parsed.profesores.forEach(p => {
+    p.existeUsuario = usuarios.some(u => (u.email || '').toLowerCase() === p.email || (u.username || '').toLowerCase() === p.email);
+    p.existeFacultad = (db.facultad || []).some(f => (f.email || '').toLowerCase() === p.email);
+    p.selected = true;
+  });
+  _distImportData = parsed;
+  const filtroEl = document.getElementById('dist-filtro');
+  if (filtroEl) filtroEl.value = '';
+  renderDistImportPreview();
+  openModal('modal-importar-profesores');
+}
+
+function _matchDistFila(fila, termInfo) {
+  const cursoObj = db.cursos.find(c => _normCodigo(c.codigo) === _normCodigo(fila.curso));
+  if (!cursoObj) return { estado: 'curso-no-existe' };
+  if (!termInfo) return { estado: 'sin-trimestre', cursoObj };
+  const seccionObj = db.secciones.find(s => {
+    if (s.cursoId !== cursoObj.id || String(s.numero) !== String(fila.seccion)) return false;
+    const parsed = parseTermString(s.semestre);
+    return parsed && parsed.term === termInfo.term && parsed.year === termInfo.storedYear;
+  });
+  return seccionObj ? { estado: 'ok', cursoObj, seccionObj } : { estado: 'seccion-no-existe', cursoObj };
+}
+
+function renderDistImportPreview() {
+  if (!_distImportData) return;
+  const { termInfo, profesores, erroresEmail } = _distImportData;
+  const infoEl = document.getElementById('dist-term-info');
+  infoEl.innerHTML = termInfo
+    ? `📅 Trimestre detectado en el archivo: <strong>${termInfo.label}</strong> <span style="color:var(--muted)">(${termInfo.ayLabel})</span> — las secciones se buscarán dentro de ese trimestre.`
+    : `⚠️ No se pudo detectar el trimestre/año del título del archivo. No se podrán emparejar secciones hasta que se corrija.`;
+  if (erroresEmail.length) {
+    infoEl.innerHTML += `<div style="margin-top:6px;color:#9a3412">⚠️ ${erroresEmail.length} fila(s) con correo inválido, se ignoraron.</div>`;
+  }
+
+  const filtro = (document.getElementById('dist-filtro')?.value || '').trim().toLowerCase();
+  const filtered = filtro ? profesores.filter(p => p.nombre.toLowerCase().includes(filtro) || p.email.includes(filtro)) : profesores;
+
+  const body = document.getElementById('dist-preview-body');
+  if (!filtered.length) { body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">Sin resultados.</div>'; return; }
+
+  body.innerHTML = `<table class="rpt-table" style="margin:0"><thead><tr>
+    <th style="width:34px"></th><th>Nombre (del correo)</th><th>Correo</th><th>Secciones</th><th>Estado cuenta</th>
+  </tr></thead><tbody>
+  ${filtered.map(p => {
+    const idx = profesores.indexOf(p);
+    const badges = p.filas.map(f => {
+      const m = _matchDistFila(f, termInfo);
+      const label = `${f.curso} ${f.seccion}`;
+      if (m.estado === 'ok') return `<span class="badge badge-green" style="margin:1px">${label}</span>`;
+      if (m.estado === 'curso-no-existe') return `<span class="badge badge-red" style="margin:1px" title="Curso no existe en el sistema">${label} ✕</span>`;
+      return `<span class="badge badge-gold" style="margin:1px" title="Sección aún no incorporada">${label} ⏳</span>`;
+    }).join(' ');
+    return `<tr>
+      <td><input type="checkbox" ${p.selected ? 'checked' : ''} onchange="_distImportData.profesores[${idx}].selected=this.checked"></td>
+      <td><strong>${p.nombre}</strong></td>
+      <td style="font-size:0.78rem">${p.email}</td>
+      <td style="font-size:0.75rem;max-width:280px">${badges}</td>
+      <td>${p.existeUsuario ? '<span class="badge badge-blue">✓ Ya existe</span>' : '<span class="badge badge-gold">🆕 Se creará</span>'}</td>
+    </tr>`;
+  }).join('')}
+  </tbody></table>`;
+}
+
+function toggleAllDistImport(checked) {
+  if (!_distImportData) return;
+  _distImportData.profesores.forEach(p => p.selected = checked);
+  renderDistImportPreview();
+}
+
+async function confirmarImportarProfesores() {
+  if (!_distImportData) return;
+  const { termInfo, profesores } = _distImportData;
+  const usuarios = await loadUsers() || [];
+  const cuentasNuevas = [];
+  let facultadCreados = 0, asignaciones = 0;
+  const pendientes = [];
+
+  profesores.forEach(p => {
+    if (!p.selected) return;
+
+    if (!p.existeFacultad) {
+      db.facultad.push({
+        id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        nombre: p.nombre, email: p.email, departamento: '', telefono: '', programas: '',
+        coordinator: false, director: false, fechaCreacion: new Date().toISOString(),
+      });
+      facultadCreados++;
+    }
+    if (!p.existeUsuario) {
+      cuentasNuevas.push({ email: p.email, nombre: p.nombre, tempPwd: 'EGSP' + Math.floor(1000 + Math.random() * 9000) });
+    }
+
+    let algunaPendiente = false;
+    p.filas.forEach(f => {
+      const m = _matchDistFila(f, termInfo);
+      if (m.estado === 'ok') {
+        m.seccionObj.profesor = p.nombre;
+        m.seccionObj.profesorEmail = p.email;
+        asignaciones++;
+      } else {
+        algunaPendiente = true;
+      }
+    });
+    if (algunaPendiente) pendientes.push(p.nombre);
+  });
+
+  for (const cuenta of cuentasNuevas) {
+    usuarios.push({
+      username: cuenta.email, nombre: cuenta.nombre, rol: 'profesor', email: cuenta.email,
+      pwdHash: await sha256(cuenta.tempPwd), createdAt: new Date().toISOString(), mustChangePwd: true,
+    });
+  }
+  if (cuentasNuevas.length) await saveUsers(usuarios);
+
+  saveDB();
+  closeModal('modal-importar-profesores');
+  renderFacultadList();
+  _distImportData = null;
+
+  let html = `<p>✓ <strong>${asignaciones}</strong> sección(es) asignada(s) a su profesor(a).</p>`;
+  if (facultadCreados) html += `<p>✓ <strong>${facultadCreados}</strong> profesor(es) añadido(s) a la lista maestra de Facultad.</p>`;
+  if (cuentasNuevas.length) {
+    html += `<p>✓ <strong>${cuentasNuevas.length}</strong> cuenta(s) de acceso nueva(s), con rol <strong>profesor</strong>:</p>
+      <div style="background:var(--cream);border-radius:8px;padding:10px 14px;max-height:220px;overflow-y:auto">
+        <table style="width:100%;font-size:0.8rem"><thead><tr><th style="text-align:left">Correo</th><th style="text-align:left">Contraseña temporal</th></tr></thead><tbody>
+        ${cuentasNuevas.map(c => `<tr><td>${c.email}</td><td><code>${c.tempPwd}</code></td></tr>`).join('')}
+        </tbody></table>
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin-top:6px">Comparte estas contraseñas de forma segura — se les pedirá cambiarla al entrar por primera vez.</p>`;
+  }
+  if (pendientes.length) {
+    html += `<p style="margin-top:10px">⏳ <strong>${pendientes.length} profesor(es)</strong> tienen cursos/secciones que aún no existen en el sistema. Se procesaron igual, pero <strong>vuelve a arrastrar este mismo Excel una vez esas secciones estén incorporadas</strong> para completar la asignación:</p>
+      <div style="font-size:0.8rem">${pendientes.join(', ')}</div>`;
+  }
+  document.getElementById('dist-resultado-body').innerHTML = html;
+  openModal('modal-resultado-profesores');
 }
 
 function parsearListaTexto() {
@@ -9548,6 +9794,44 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-nueva-facultad')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarFacultad()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Importar Profesores (Distribución de Salones) -->
+<div id="modal-importar-profesores" class="modal-overlay">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-header">
+      <div class="modal-title">👩‍🏫 Asignar Profesores a Secciones</div>
+      <button class="modal-close" onclick="closeModal('modal-importar-profesores')">✕</button>
+    </div>
+    <div id="dist-term-info" style="font-size:0.85rem;background:var(--cream);border-radius:8px;padding:10px 14px;margin-bottom:14px"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="toggleAllDistImport(true)">☑ Seleccionar todos</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllDistImport(false)">☐ Deseleccionar todos</button>
+      </div>
+      <input type="text" id="dist-filtro" placeholder="🔍 Filtrar por nombre o correo..." oninput="renderDistImportPreview()"
+        style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:0.82rem;min-width:220px">
+    </div>
+    <div id="dist-preview-body" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-importar-profesores')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarImportarProfesores()">✓ Procesar seleccionados</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Resultado Importar Profesores -->
+<div id="modal-resultado-profesores" class="modal-overlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title">✅ Resultado de la Importación</div>
+      <button class="modal-close" onclick="closeModal('modal-resultado-profesores')">✕</button>
+    </div>
+    <div id="dist-resultado-body" style="font-size:0.85rem;line-height:1.7"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-resultado-profesores')">Entendido</button>
     </div>
   </div>
 </div>
