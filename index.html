@@ -1251,6 +1251,7 @@
   <button class="tab-btn" data-tab="facultad" onclick="showTab('facultad', this)" style="display:none">Facultad</button>
   <button class="tab-btn" data-tab="solicitudes" onclick="showTab('solicitudes', this)">📋 Solicitudes<span id="sol-pending-badge" class="badge badge-rust" style="display:none;margin-left:6px"></span></button>
   <button class="tab-btn" data-tab="configuracion" onclick="showTab('configuracion', this)" style="display:none">⚙️ Configuración</button>
+  <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">🏛️ Departamentos y Programas</button>
   <button class="tab-btn" data-tab="adiestramientos" onclick="showTab('adiestramientos', this)">Adiestramientos</button>
 </aside>
 
@@ -1989,6 +1990,73 @@
   </div>
 </div>
 
+<!-- ==================== DEPARTAMENTOS Y PROGRAMAS ==================== -->
+<div id="panel-departamentos" class="panel">
+  <div style="margin-bottom:18px">
+    <div class="section-title">🏛️ Departamentos y Programas</div>
+    <div class="section-sub">Catálogo maestro — cada programa pertenece a un departamento</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;align-items:start">
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong style="font-size:0.92rem">Departamentos</strong>
+        <button class="btn btn-primary btn-sm" onclick="abrirNuevoDepartamento()">+ Nuevo</button>
+      </div>
+      <div id="departamentos-list"></div>
+    </div>
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong style="font-size:0.92rem">Programas</strong>
+        <button class="btn btn-primary btn-sm" onclick="abrirNuevoPrograma()">+ Nuevo</button>
+      </div>
+      <div id="programas-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Departamento -->
+<div id="modal-departamento" class="modal-overlay">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title" id="depto-modal-title">🏛️ Nuevo Departamento</div>
+      <button class="modal-close" onclick="closeModal('modal-departamento')">✕</button>
+    </div>
+    <input type="hidden" id="depto-edit-id">
+    <div class="form-group">
+      <label>Nombre *</label>
+      <input type="text" id="depto-nombre" placeholder="ej. Administración de Servicios de Salud">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-departamento')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarDepartamento()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Programa -->
+<div id="modal-programa-catalogo" class="modal-overlay">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title" id="prog-cat-modal-title">🎓 Nuevo Programa</div>
+      <button class="modal-close" onclick="closeModal('modal-programa-catalogo')">✕</button>
+    </div>
+    <input type="hidden" id="prog-cat-edit-id">
+    <div class="form-group">
+      <label>Nombre *</label>
+      <input type="text" id="prog-cat-nombre" placeholder="ej. MPH Epidemiology">
+    </div>
+    <div class="form-group">
+      <label>Departamento</label>
+      <select id="prog-cat-departamento"><option value="">— Sin asignar —</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-programa-catalogo')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarProgramaCatalogo()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== ADIESTRAMIENTOS Y TUTORIALES ==================== -->
 <div id="panel-adiestramientos" class="panel">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
@@ -2453,7 +2521,8 @@ let db = {
   facultad: [],        // faculty master list
   codigosProg: [],     // student program code -> program name map
   asesorias: [],       // student_id -> profesor_email advising assignments
-  solicitudes: []       // edit requests for locked/readonly records, admin-reviewed
+  solicitudes: [],      // edit requests for locked/readonly records, admin-reviewed
+  departamentos: []     // catálogo de departamentos (cada programa pertenece a uno)
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2471,7 +2540,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2500,6 +2569,7 @@ function loadDB() {
   if (!db.codigosProg)  db.codigosProg = [];
   if (!db.asesorias)    db.asesorias = [];
   if (!db.solicitudes)  db.solicitudes = [];
+  if (!db.departamentos) db.departamentos = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -2586,6 +2656,7 @@ function showTab(tabId, btn) {
   if (tabId === 'adiestramientos') renderAdiestramientos();
   if (tabId === 'solicitudes') renderSolicitudes();
   if (tabId === 'configuracion') renderConfiguracion();
+  if (tabId === 'departamentos') renderDepartamentosProgramas();
 }
 
 function openModal(id) {
@@ -3551,6 +3622,171 @@ async function confirmarImportarProfesores() {
   }
   document.getElementById('dist-resultado-body').innerHTML = html;
   openModal('modal-resultado-profesores');
+}
+
+// ======================== DEPARTAMENTOS Y PROGRAMAS ========================
+// Catálogo maestro. Fase 1: solo organización/directorio — todavía NO cambia
+// cómo se guarda curso.programa (eso es Fase 2). Aquí simplemente se crea el
+// catálogo y se migran (una sola vez) los 10 programas que hoy viven
+// hardcodeados en PROG_ORDER (usado en Matriz/Alineación) para que también
+// aparezcan aquí como registros reales y editables.
+const PROG_ORDER_DEFAULT = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
+  'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM'];
+
+function _ensureProgramCatalogSeeded() {
+  if (!db.programas) db.programas = [];
+  let changed = false;
+  // Asegura que todo programa existente tenga id (los agregados antes de esta
+  // fase no lo tenían, ya que solo se identificaban por nombre)
+  db.programas.forEach(p => {
+    if (!p.id) { p.id = 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); changed = true; }
+    if (p.departamentoId === undefined) { p.departamentoId = null; changed = true; }
+  });
+  // Agrega como registros reales los 10 programas que hoy solo existen
+  // hardcodeados en PROG_ORDER, si todavía no están en el catálogo por nombre
+  const nombresExistentes = new Set(db.programas.map(p => p.nombre));
+  PROG_ORDER_DEFAULT.forEach(nombre => {
+    if (!nombresExistentes.has(nombre)) {
+      db.programas.push({
+        id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        nombre, tipo: '', descripcion: '', departamentoId: null,
+        fechaCreacion: new Date().toISOString(),
+      });
+      changed = true;
+    }
+  });
+  if (changed) saveDB();
+}
+
+function renderDepartamentosProgramas() {
+  _ensureProgramCatalogSeeded();
+
+  const deptEl = document.getElementById('departamentos-list');
+  if (!db.departamentos.length) {
+    deptEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🏛️</div><p>Aún no hay departamentos</p></div>';
+  } else {
+    deptEl.innerHTML = db.departamentos.map(d => {
+      const numProgs = db.programas.filter(p => p.departamentoId === d.id).length;
+      return `<div class="card" style="margin-bottom:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div><strong>${d.nombre}</strong><div style="font-size:0.76rem;color:var(--muted)">${numProgs} programa(s)</div></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${d.id}')">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="eliminarDepartamento('${d.id}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const progEl = document.getElementById('programas-list');
+  if (!db.programas.length) {
+    progEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🎓</div><p>Aún no hay programas</p></div>';
+  } else {
+    progEl.innerHTML = db.programas.map(p => {
+      const depto = db.departamentos.find(d => d.id === p.departamentoId);
+      return `<div class="card" style="margin-bottom:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div><strong>${p.nombre}</strong><div style="font-size:0.76rem;color:var(--muted)">${depto ? depto.nombre : '⚠️ Sin departamento asignado'}</div></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${p.id}')">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="eliminarPrograma('${p.id}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
+function abrirNuevoDepartamento() {
+  document.getElementById('depto-modal-title').textContent = '🏛️ Nuevo Departamento';
+  document.getElementById('depto-edit-id').value = '';
+  document.getElementById('depto-nombre').value = '';
+  openModal('modal-departamento');
+}
+function abrirEditarDepartamento(id) {
+  const d = db.departamentos.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById('depto-modal-title').textContent = '🏛️ Editar Departamento';
+  document.getElementById('depto-edit-id').value = id;
+  document.getElementById('depto-nombre').value = d.nombre;
+  openModal('modal-departamento');
+}
+function guardarDepartamento() {
+  const nombre = document.getElementById('depto-nombre').value.trim();
+  if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
+  const editId = document.getElementById('depto-edit-id').value;
+  if (editId) {
+    const d = db.departamentos.find(x => x.id === editId);
+    if (d) d.nombre = nombre;
+  } else {
+    if (db.departamentos.some(d => d.nombre.toLowerCase() === nombre.toLowerCase())) {
+      notify('Ya existe un departamento con ese nombre', '⚠️'); return;
+    }
+    db.departamentos.push({ id: 'depto_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nombre });
+  }
+  saveDB();
+  closeModal('modal-departamento');
+  renderDepartamentosProgramas();
+  notify('Departamento guardado ✓');
+}
+function eliminarDepartamento(id) {
+  const enUso = db.programas.filter(p => p.departamentoId === id).length;
+  if (enUso > 0 && !confirm(`${enUso} programa(s) están asignados a este departamento y quedarán "sin asignar". ¿Continuar?`)) return;
+  db.departamentos = db.departamentos.filter(d => d.id !== id);
+  db.programas.forEach(p => { if (p.departamentoId === id) p.departamentoId = null; });
+  saveDB();
+  renderDepartamentosProgramas();
+  notify('Departamento eliminado', '🗑');
+}
+
+function abrirNuevoPrograma() {
+  document.getElementById('prog-cat-modal-title').textContent = '🎓 Nuevo Programa';
+  document.getElementById('prog-cat-edit-id').value = '';
+  document.getElementById('prog-cat-nombre').value = '';
+  _populateDeptoSelect();
+  document.getElementById('prog-cat-departamento').value = '';
+  openModal('modal-programa-catalogo');
+}
+function abrirEditarPrograma(id) {
+  const p = db.programas.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('prog-cat-modal-title').textContent = '🎓 Editar Programa';
+  document.getElementById('prog-cat-edit-id').value = id;
+  document.getElementById('prog-cat-nombre').value = p.nombre;
+  _populateDeptoSelect();
+  document.getElementById('prog-cat-departamento').value = p.departamentoId || '';
+  openModal('modal-programa-catalogo');
+}
+function _populateDeptoSelect() {
+  const sel = document.getElementById('prog-cat-departamento');
+  sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+    db.departamentos.map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+}
+function guardarProgramaCatalogo() {
+  const nombre = document.getElementById('prog-cat-nombre').value.trim();
+  if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
+  const departamentoId = document.getElementById('prog-cat-departamento').value || null;
+  const editId = document.getElementById('prog-cat-edit-id').value;
+  if (editId) {
+    const p = db.programas.find(x => x.id === editId);
+    if (p) { p.nombre = nombre; p.departamentoId = departamentoId; }
+  } else {
+    if (db.programas.some(p => p.nombre.toLowerCase() === nombre.toLowerCase())) {
+      notify('Ya existe un programa con ese nombre', '⚠️'); return;
+    }
+    db.programas.push({
+      id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      nombre, tipo: '', descripcion: '', departamentoId, fechaCreacion: new Date().toISOString(),
+    });
+  }
+  saveDB();
+  closeModal('modal-programa-catalogo');
+  renderDepartamentosProgramas();
+  notify('Programa guardado ✓');
+}
+function eliminarPrograma(id) {
+  if (!confirm('¿Eliminar este programa del catálogo? Los cursos que ya lo usan no se modifican (todavía es texto libre).')) return;
+  db.programas = db.programas.filter(p => p.id !== id);
+  saveDB();
+  renderDepartamentosProgramas();
+  notify('Programa eliminado', '🗑');
 }
 
 function parsearListaTexto() {
@@ -6714,11 +6950,11 @@ const USERS_KEY = 'avaluo_users_v1';
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false },
 };
 
 function setViewAs(role) {
