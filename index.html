@@ -3567,7 +3567,7 @@ async function confirmarImportarProfesores() {
     if (!fac) {
       fac = {
         id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        nombre: p.nombre, email: p.email, departamento: '', telefono: '', programas: '',
+        nombre: p.nombre, email: p.email, departamento: '', departamentoId: null, telefono: '', programas: '', programaIds: [],
         coordinator: false, director: false, fechaCreacion: new Date().toISOString(),
       };
       db.facultad.push(fac);
@@ -3575,9 +3575,10 @@ async function confirmarImportarProfesores() {
     }
     // Si el registro de Facultad ya existía solo como directorio (sin rol),
     // esta importación también le da acceso de login como profesor.
-    if (!fac.rol) {
+    if (!fac.rolBase && !fac.esAdmin) {
       const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
-      fac.rol = 'profesor';
+      fac.rolBase = 'profesor';
+      fac.esAdmin = false;
       fac.pwdHash = await sha256(tempPwd);
       fac.mustChangePwd = true;
       cuentasNuevas.push({ email: p.email, nombre: p.nombre, tempPwd });
@@ -6890,6 +6891,7 @@ function waitForFb(timeoutMs = 8000) {
   }
 
   await loadDB();
+  _ensureFacultadRolMigrado();
   _dbReadyResolve();
   preloadExcelData();
   db.cursos = db.cursos.filter(c => !['c1','c2','c3','c4','c5'].includes(c.id));
@@ -6948,11 +6950,12 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true },
+  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
   profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false },
 };
 
 function setViewAs(role) {
@@ -7014,14 +7017,15 @@ async function sha256(str) {
 async function ensureDefaultAdmin() {
   await _dbReadyPromise; // espera a que loadDB() haya traído db.facultad real
   if (!db.facultad) db.facultad = [];
-  const yaHayAdmin = db.facultad.some(f => f.rol === 'admin');
+  _ensureFacultadRolMigrado();
+  const yaHayAdmin = db.facultad.some(f => f.esAdmin === true);
   if (yaHayAdmin) return;
   const hash = await sha256('EGSPAdmin2026!');
   db.facultad.push({
     id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     nombre: 'Administrador', email: 'admin@egsp.local',
-    departamento: '', telefono: '', programas: '', coordinator: false, director: false,
-    rol: 'admin', pwdHash: hash, mustChangePwd: true,
+    departamento: '', departamentoId: null, telefono: '', programas: '', programaIds: [], coordinator: false, director: false,
+    rolBase: '', esAdmin: true, pwdHash: hash, mustChangePwd: true,
     createdAt: new Date().toISOString(),
   });
   saveDB();
@@ -7047,7 +7051,11 @@ async function doLogin() {
   // Success — username se mantiene igual al correo, para no tener que tocar
   // el resto de la app (secciones, solicitudes, progreso de adiestramientos,
   // etc.) que ya identifica a cada persona por currentUser.username.
-  currentUser = { username: user.email, nombre: user.nombre, rol: user.rol,
+  // rol EFECTIVO: si es admin (esAdmin), eso manda sobre cualquier rol base
+  // (ej. alguien puede ser "decano" y "admin" a la vez — admin gana porque
+  // ya incluye todo lo que decano puede ver, más la capacidad de editar).
+  const rolEfectivo = user.esAdmin ? 'admin' : (user.rolBase || '');
+  currentUser = { username: user.email, nombre: user.nombre, rol: rolEfectivo, rolBase: user.rolBase || '', esAdmin: !!user.esAdmin,
     email: user.email, mustChangePwd: user.mustChangePwd };
   enrichCurrentUserPermissions();
   document.getElementById('auth-overlay').style.display = 'none';
@@ -7099,6 +7107,7 @@ function enrichCurrentUserPermissions() {
 function getEffectiveRoleLabel() {
   if (!currentUser) return '';
   if (currentUser.rol === 'admin') return 'Admin';
+  if (currentUser.rol === 'decano') return 'Decano/a';
   const e = currentUser.efectivo;
   if (e.isDirector)    return 'Director/a';
   if (e.isCoordinator) return 'Coordinador/a';
@@ -7924,12 +7933,14 @@ function renderFacultadTab() {
 function renderFacultadList() {
   const el = document.getElementById('facultad-list');
   if (!el) return;
+  _ensureFacultadRolMigrado();
   const list = db.facultad || [];
   if (!list.length) {
     el.innerHTML = '<div class="empty-state"><p>No hay profesores en la lista maestra. Añade uno o importa un CSV.</p></div>';
     return;
   }
-  const rolLabelMap = { admin:'Admin', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
+  const isAdmin = currentUser?.rol === 'admin';
+  const rolLabelMap = { decano:'Decano/a', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
   el.innerHTML = list.map(f => {
     const initials = (f.nombre||'?').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
     const progs = f.programas ? f.programas.split('|').map(p=>p.trim()) : [];
@@ -7939,16 +7950,18 @@ function renderFacultadList() {
         <div class="fac-name">${f.nombre}</div>
         <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
         <div class="fac-tags">
-          ${f.rol ? `<span class="badge badge-blue">🔑 ${rolLabelMap[f.rol]||f.rol}</span>` : '<span class="badge badge-gold">Sin acceso</span>'}
+          ${f.esAdmin ? '<span class="badge badge-red">🔑 Administrador</span>' : ''}
+          ${f.rolBase ? `<span class="badge badge-blue">${rolLabelMap[f.rolBase]||f.rolBase}</span>` : ''}
+          ${!f.rolBase && !f.esAdmin ? '<span class="badge badge-gold">Sin acceso</span>' : ''}
           ${f.director==='true'||f.director===true ? '<span class="fac-tag fac-tag-dir">🏛 Director/a</span>' : ''}
           ${f.coordinator==='true'||f.coordinator===true ? '<span class="fac-tag fac-tag-coord">📋 Coordinador/a</span>' : ''}
           ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${p}</span>`).join('')}
         </div>
       </div>
       <div style="display:flex;gap:6px">
-        ${f.rol ? `<button class="btn btn-outline btn-sm" onclick="resetearPasswordFacultad('${f.id}')" title="Resetear contraseña">🔑</button>` : ''}
-        <button class="btn btn-outline btn-sm" onclick="editarFacultad('${f.id}')">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarFacultad('${f.id}')">🗑</button>
+        ${isAdmin && (f.rolBase || f.esAdmin) ? `<button class="btn btn-outline btn-sm" onclick="resetearPasswordFacultad('${f.id}')" title="Resetear contraseña">🔑</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="editarFacultad('${f.id}')">✏️</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="eliminarFacultad('${f.id}')">🗑</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -8005,13 +8018,70 @@ function renderAsesoriasList() {
 
 // ── CRUD FACULTAD ─────────────────────────────────────────────
 
+// Migración (Fase 4): separa el antiguo campo único "rol" en dos —
+// rolBase (profesor/coordinator/director/decano/viewer, el rol funcional)
+// y esAdmin (booleano aparte, se puede combinar con cualquier rolBase, ej.
+// alguien puede ser "decano" Y "admin" a la vez). También liga
+// departamento/programas al catálogo por ID cuando el texto coincide.
+function _ensureFacultadRolMigrado() {
+  if (!db.facultad) return;
+  _ensureProgramCatalogSeeded();
+  let changed = false;
+  db.facultad.forEach(f => {
+    if (f.rolBase === undefined || f.esAdmin === undefined) {
+      const rolViejo = f.rol;
+      if (rolViejo === 'admin') { f.rolBase = ''; f.esAdmin = true; }
+      else if (rolViejo) { f.rolBase = rolViejo; f.esAdmin = false; }
+      else { f.rolBase = ''; f.esAdmin = false; }
+      if ('rol' in f) delete f.rol;
+      changed = true;
+    }
+    if (f.departamentoId === undefined) {
+      f.departamentoId = null;
+      if (f.departamento) {
+        const match = (db.departamentos||[]).find(d => d.nombre.toLowerCase() === f.departamento.toLowerCase());
+        if (match) f.departamentoId = match.id;
+      }
+      changed = true;
+    }
+    if (f.programaIds === undefined) {
+      f.programaIds = [];
+      if (f.programas) {
+        const nombres = f.programas.split('|').map(p => p.trim().toLowerCase());
+        f.programaIds = (db.programas||[]).filter(p => nombres.includes(p.nombre.toLowerCase())).map(p => p.id);
+      }
+      changed = true;
+    }
+  });
+  if (changed) saveDB();
+}
+
+function _populateFacultadDeptoProgSelects() {
+  _ensureProgramCatalogSeeded();
+  const deptSel = document.getElementById('fac-departamento');
+  const prevDept = deptSel.value;
+  deptSel.innerHTML = '<option value="">— Sin asignar —</option>' +
+    db.departamentos.map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+  deptSel.value = prevDept;
+
+  const progSel = document.getElementById('fac-programa-ids');
+  const prevSelected = new Set([...progSel.selectedOptions].map(o => o.value));
+  progSel.innerHTML = [...db.programas].sort((a,b) => a.nombre.localeCompare(b.nombre))
+    .map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  [...progSel.options].forEach(o => { o.selected = prevSelected.has(o.value); });
+}
+
 function openNuevaFacultad() {
   document.getElementById('fac-edit-id').value = '';
   document.getElementById('fac-modal-title').textContent = '👩‍🏫 Añadir Profesor/a';
-  ['fac-nombre','fac-email','fac-dept','fac-tel','fac-programas'].forEach(id=>document.getElementById(id).value='');
+  ['fac-nombre','fac-email','fac-tel'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fac-coordinator').checked = false;
   document.getElementById('fac-director').checked = false;
   document.getElementById('fac-rol').value = '';
+  document.getElementById('fac-es-admin').checked = false;
+  _populateFacultadDeptoProgSelects();
+  document.getElementById('fac-departamento').value = '';
+  [...document.getElementById('fac-programa-ids').options].forEach(o => o.selected = false);
   openModal('modal-nueva-facultad');
 }
 
@@ -8022,12 +8092,15 @@ function editarFacultad(id) {
   document.getElementById('fac-modal-title').textContent = '✏️ Editar Profesor/a';
   document.getElementById('fac-nombre').value = f.nombre||'';
   document.getElementById('fac-email').value = f.email||'';
-  document.getElementById('fac-dept').value = f.departamento||'';
   document.getElementById('fac-tel').value = f.telefono||'';
-  document.getElementById('fac-programas').value = f.programas||'';
   document.getElementById('fac-coordinator').checked = f.coordinator===true||f.coordinator==='true';
   document.getElementById('fac-director').checked = f.director===true||f.director==='true';
-  document.getElementById('fac-rol').value = f.rol || '';
+  document.getElementById('fac-rol').value = f.rolBase || '';
+  document.getElementById('fac-es-admin').checked = !!f.esAdmin;
+  _populateFacultadDeptoProgSelects();
+  document.getElementById('fac-departamento').value = f.departamentoId || '';
+  const progIds = new Set(f.programaIds || []);
+  [...document.getElementById('fac-programa-ids').options].forEach(o => { o.selected = progIds.has(o.value); });
   openModal('modal-nueva-facultad');
 }
 
@@ -8035,56 +8108,65 @@ async function guardarFacultad() {
   const nombre = document.getElementById('fac-nombre').value.trim();
   const email  = document.getElementById('fac-email').value.trim().toLowerCase();
   if (!nombre||!email) { notify('Nombre y email son requeridos','⚠️'); return; }
-  const nuevoRol = document.getElementById('fac-rol').value || '';
+
+  const nuevoRolBase = document.getElementById('fac-rol').value || '';
+  const nuevoEsAdmin = document.getElementById('fac-es-admin').checked;
+  const departamentoId = document.getElementById('fac-departamento').value || null;
+  const departamentoObj = departamentoId ? db.departamentos.find(d => d.id === departamentoId) : null;
+  const programaIds = [...document.getElementById('fac-programa-ids').selectedOptions].map(o => o.value);
+  const programaNombres = programaIds.map(id => db.programas.find(p => p.id === id)?.nombre).filter(Boolean);
+
   const editId = document.getElementById('fac-edit-id').value;
   const record = {
     nombre, email,
-    departamento: document.getElementById('fac-dept').value.trim(),
-    telefono:     document.getElementById('fac-tel').value.trim(),
-    programas:    document.getElementById('fac-programas').value.trim(),
-    coordinator:  document.getElementById('fac-coordinator').checked,
-    director:     document.getElementById('fac-director').checked,
+    departamentoId, departamento: departamentoObj ? departamentoObj.nombre : '',
+    telefono: document.getElementById('fac-tel').value.trim(),
+    programaIds, programas: programaNombres.join('|'),
+    coordinator: document.getElementById('fac-coordinator').checked,
+    director:    document.getElementById('fac-director').checked,
   };
 
   let tempPwdParaMostrar = null;
+  const teniaAccesoAntes = (actual) => !!(actual.rolBase || actual.esAdmin);
+  const tendrAccesoAhora = !!(nuevoRolBase || nuevoEsAdmin);
 
   if (editId) {
     const idx = db.facultad.findIndex(f=>f.id===editId);
     if (idx>=0) {
       const actual = db.facultad[idx];
-      // Evita que el admin se quite su propio acceso por accidente y se bloquee
-      if (actual.email === currentUser?.username && actual.rol === 'admin' && nuevoRol !== 'admin') {
-        notify('No puedes quitarte tu propio rol de admin — pídele a otro admin que lo haga', '🔒');
+      // Evita que un admin se quite su propio acceso de admin por accidente y se bloquee
+      if (actual.email === currentUser?.username && actual.esAdmin && !nuevoEsAdmin) {
+        notify('No puedes quitarte tu propio acceso de administrador — pídele a otro admin que lo haga', '🔒');
         return;
       }
-      if (!actual.rol && nuevoRol) {
+      if (!teniaAccesoAntes(actual) && tendrAccesoAhora) {
         // Ganó acceso por primera vez: generar contraseña temporal
         const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
-        record.rol = nuevoRol;
+        record.rolBase = nuevoRolBase; record.esAdmin = nuevoEsAdmin;
         record.pwdHash = await sha256(tempPwd);
         record.mustChangePwd = true;
         tempPwdParaMostrar = tempPwd;
-      } else if (actual.rol && !nuevoRol) {
-        // Se le quitó el acceso: revoca la contraseña por completo
-        record.rol = '';
+      } else if (teniaAccesoAntes(actual) && !tendrAccesoAhora) {
+        // Se le quitó todo acceso: revoca la contraseña por completo
+        record.rolBase = ''; record.esAdmin = false;
         record.pwdHash = null;
         record.mustChangePwd = false;
       } else {
-        // Mismo estado (con o sin rol) o cambio de un rol a otro: no se toca la contraseña
-        record.rol = nuevoRol;
+        // Ya tenía acceso y lo conserva (aunque cambien rolBase/esAdmin): no se toca la contraseña
+        record.rolBase = nuevoRolBase; record.esAdmin = nuevoEsAdmin;
       }
       db.facultad[idx] = { ...actual, ...record };
     }
   } else {
     if (db.facultad.find(f=>f.email===email)) { notify('Ya existe un profesor con ese email','⚠️'); return; }
-    if (nuevoRol) {
+    if (tendrAccesoAhora) {
       const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
-      record.rol = nuevoRol;
+      record.rolBase = nuevoRolBase; record.esAdmin = nuevoEsAdmin;
       record.pwdHash = await sha256(tempPwd);
       record.mustChangePwd = true;
       tempPwdParaMostrar = tempPwd;
     } else {
-      record.rol = '';
+      record.rolBase = ''; record.esAdmin = false;
     }
     db.facultad.push({ id: 'fac_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), ...record, fechaCreacion: new Date().toISOString() });
   }
@@ -8102,7 +8184,7 @@ function eliminarFacultad(id) {
   const f = db.facultad.find(x=>x.id===id);
   if (!f) return;
   if (f.email === currentUser?.username) { notify('No puedes eliminarte a ti mismo', '🔒'); return; }
-  if (f.rol === 'admin' && db.facultad.filter(x=>x.rol==='admin').length <= 1) {
+  if (f.esAdmin && db.facultad.filter(x=>x.esAdmin).length <= 1) {
     notify('No puedes eliminar el único administrador del sistema', '🔒'); return;
   }
   if (!confirm('¿Eliminar este profesor de la lista maestra? Si tiene acceso al sistema, también lo perderá.')) return;
@@ -8113,7 +8195,7 @@ function eliminarFacultad(id) {
 
 async function resetearPasswordFacultad(id) {
   const f = db.facultad.find(x=>x.id===id);
-  if (!f || !f.rol) return;
+  if (!f || !(f.rolBase || f.esAdmin)) return;
   if (!confirm(`¿Generar una contraseña temporal nueva para ${f.nombre}?`)) return;
   const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
   f.pwdHash = await sha256(tempPwd);
@@ -9260,7 +9342,8 @@ async function adiesShowReport() {
   const data = await adiesLoadData();
   const prog = await adiesLoadProgress();
   const allBlocks = data.sections.flatMap(s=>s.blocks||[]);
-  const users = (db.facultad || []).filter(f => f.rol).map(f => ({ username: f.email, nombre: f.nombre, rol: f.rol }));
+  const users = (db.facultad || []).filter(f => f.rolBase || f.esAdmin)
+    .map(f => ({ username: f.email, nombre: f.nombre, rol: f.esAdmin ? 'admin' : f.rolBase }));
   const reportEl = document.getElementById('adies-report-body');
   if (!users.length || !allBlocks.length) {
     reportEl.innerHTML = '<p style="color:var(--muted)">No hay datos suficientes.</p>';
@@ -9554,15 +9637,16 @@ async function dummyLoadAll() {
   const pwdHash = await sha256('Test1234!');
   if (!db.facultad) db.facultad = [];
   const newFacultad = [
-    { nombre:'Prof. Ana Villanueva (Prueba)', email:'avillanueva.dummy@rcm.upr.edu', rol:'profesor',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:false, [DUMMY_TAG]:true },
-    { nombre:'Dr. Marcos Soto (Prueba)',      email:'msoto.dummy@rcm.upr.edu',       rol:'director',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:true,  [DUMMY_TAG]:true },
-    { nombre:'Dra. Elena Reyes (Prueba)',     email:'ereyes.dummy@rcm.upr.edu',      rol:'coordinator', pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:true,  director:false, [DUMMY_TAG]:true },
-    { nombre:'Visitante (Prueba)',            email:'visitante.dummy@rcm.upr.edu',   rol:'viewer',      pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:false, [DUMMY_TAG]:true },
+    { nombre:'Prof. Ana Villanueva (Prueba)', email:'avillanueva.dummy@rcm.upr.edu', rolBase:'profesor',    esAdmin:false, pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', departamentoId:null, telefono:'', programas:'', programaIds:[], coordinator:false, director:false, [DUMMY_TAG]:true },
+    { nombre:'Dr. Marcos Soto (Prueba)',      email:'msoto.dummy@rcm.upr.edu',       rolBase:'director',    esAdmin:false, pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', departamentoId:null, telefono:'', programas:'', programaIds:[], coordinator:false, director:true,  [DUMMY_TAG]:true },
+    { nombre:'Dra. Elena Reyes (Prueba)',     email:'ereyes.dummy@rcm.upr.edu',      rolBase:'coordinator', esAdmin:false, pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', departamentoId:null, telefono:'', programas:'', programaIds:[], coordinator:true,  director:false, [DUMMY_TAG]:true },
+    { nombre:'Decana Carmen Ruiz (Prueba)',   email:'cruiz.dummy@rcm.upr.edu',       rolBase:'decano',      esAdmin:false, pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', departamentoId:null, telefono:'', programas:'', programaIds:[], coordinator:false, director:false, [DUMMY_TAG]:true },
+    { nombre:'Visitante (Prueba)',            email:'visitante.dummy@rcm.upr.edu',   rolBase:'viewer',      esAdmin:false, pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', departamentoId:null, telefono:'', programas:'', programaIds:[], coordinator:false, director:false, [DUMMY_TAG]:true },
   ];
   newFacultad.forEach(nf => {
     const idx = db.facultad.findIndex(f => (f.email||'').toLowerCase() === nf.email);
     if (idx === -1) db.facultad.push({ id: 'fac_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), ...nf });
-    else if (!db.facultad[idx].rol) db.facultad[idx] = { ...db.facultad[idx], ...nf }; // ya existía como directorio, ahora gana acceso
+    else if (!db.facultad[idx].rolBase && !db.facultad[idx].esAdmin) db.facultad[idx] = { ...db.facultad[idx], ...nf }; // ya existía como directorio, ahora gana acceso
   });
   saveDB();
 
@@ -9618,7 +9702,7 @@ async function dummyLoadAll() {
   await adiesSaveData();
 
   // ── Update modal UI ──
-  dummyShowStatus(`✅ <strong>${avaluoEntries.length} avalúos</strong> cargados en <strong>${secciones.length} secciones</strong> para <strong>${cursos.length} cursos</strong> a lo largo de 5 trimestres (2023T2 → 2025T1).<br>Usuarios: <strong>prof.dummy</strong>, <strong>director.dummy</strong>, <strong>coord.dummy</strong>, <strong>viewer.dummy</strong> — contraseña: <code>Test1234!</code>`, 'success');
+  dummyShowStatus(`✅ <strong>${avaluoEntries.length} avalúos</strong> cargados en <strong>${secciones.length} secciones</strong> para <strong>${cursos.length} cursos</strong> a lo largo de 5 trimestres (2023T2 → 2025T1).<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, 'success');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
@@ -9946,7 +10030,7 @@ function dummyShowStatus(msg, type) {
     <div class="form-row">
       <div class="form-group">
         <label>Departamento</label>
-        <input type="text" id="fac-dept" placeholder="Epidemiología">
+        <select id="fac-departamento"><option value="">— Sin asignar —</option></select>
       </div>
       <div class="form-group">
         <label>Teléfono</label>
@@ -9954,9 +10038,9 @@ function dummyShowStatus(msg, type) {
       </div>
     </div>
     <div class="form-group">
-      <label>Programas (pipe-separados)</label>
-      <input type="text" id="fac-programas" placeholder="MPH/MPHE|MPH Epidemiology">
-      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Separa múltiples programas con |</div>
+      <label>Programa(s)</label>
+      <select id="fac-programa-ids" multiple size="4"></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Ctrl/Cmd + clic para seleccionar más de uno.</div>
     </div>
     <div class="form-row">
       <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
@@ -9972,7 +10056,7 @@ function dummyShowStatus(msg, type) {
       <label>Rol de acceso al sistema</label>
       <select id="fac-rol">
         <option value="">— Sin acceso (solo directorio) —</option>
-        <option value="admin">Administrador</option>
+        <option value="decano">Decano/a</option>
         <option value="director">Director</option>
         <option value="coordinator">Coordinador</option>
         <option value="profesor">Profesor</option>
@@ -9980,7 +10064,12 @@ function dummyShowStatus(msg, type) {
       </select>
       <div id="fac-rol-hint" style="font-size:0.72rem;color:var(--muted);margin-top:3px">
         "Sin acceso" significa que la persona queda en el directorio pero no puede iniciar sesión. Si le das un rol a alguien nuevo, se le genera una contraseña temporal que verás al guardar.
+        Decano/a puede ver todo el sistema, pero no editar (a menos que también marques "Es Administrador" abajo).
       </div>
+    </div>
+    <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;background:var(--cream);padding:10px 14px;border-radius:8px">
+      <input type="checkbox" id="fac-es-admin" style="width:auto">
+      <label style="margin:0">🔑 Es Administrador (acceso total, independiente del rol de arriba — ej. puede ser Decano/a Y Administrador a la vez)</label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-nueva-facultad')">Cancelar</button>
@@ -10071,6 +10160,7 @@ function dummyShowStatus(msg, type) {
         <button class="btn btn-outline btn-sm" onclick="setViewAs('profesor');closeModal('modal-perfil')">👩‍🏫 Profesor/a</button>
         <button class="btn btn-outline btn-sm" onclick="setViewAs('coordinator');closeModal('modal-perfil')">📋 Coordinador/a</button>
         <button class="btn btn-outline btn-sm" onclick="setViewAs('director');closeModal('modal-perfil')">🏛 Director/a</button>
+        <button class="btn btn-outline btn-sm" onclick="setViewAs('decano');closeModal('modal-perfil')">🎓 Decano/a</button>
         <button class="btn btn-outline btn-sm" onclick="setViewAs('viewer');closeModal('modal-perfil')">👁 Viewer</button>
         <button class="btn btn-primary btn-sm" onclick="setViewAs(null);closeModal('modal-perfil')">↩ Vista Admin</button>
       </div>
