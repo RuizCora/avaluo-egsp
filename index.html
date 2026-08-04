@@ -1141,51 +1141,6 @@
   </div>
 </div>
 
-<!-- ==================== USERS PANEL MODAL (Admin) ==================== -->
-<div id="modal-usuarios" class="modal-overlay">
-  <div class="modal" style="max-width:680px">
-    <div class="modal-header">
-      <div class="modal-title">👥 Gestión de Usuarios</div>
-      <button class="modal-close" onclick="closeModal('modal-usuarios')">✕</button>
-    </div>
-    <div id="usuarios-list" style="margin-bottom:20px"></div>
-    <div style="background:var(--cream);border-radius:12px;padding:18px">
-      <div style="font-weight:700;font-size:0.9rem;margin-bottom:14px">➕ Nuevo Usuario</div>
-      <div class="form-row three">
-        <div class="form-group">
-          <label>Nombre completo</label>
-          <input type="text" id="nu-nombre" placeholder="Dra. López">
-        </div>
-        <div class="form-group">
-          <label>Correo electrónico (usuario)</label>
-          <input type="text" id="nu-user" placeholder="dlopez@rcm.upr.edu" autocomplete="email">
-        </div>
-        <div class="form-group">
-          <label>Rol</label>
-          <select id="nu-rol">
-            <option value="profesor">Profesor</option>
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Contraseña inicial</label>
-          <input type="password" id="nu-pwd" placeholder="Mínimo 8 caracteres">
-        </div>
-        <div class="form-group">
-          <label>Confirmar</label>
-          <input type="password" id="nu-pwd2" placeholder="Repetir">
-        </div>
-      </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
-        <div id="nu-error" style="color:var(--rust);font-size:0.82rem;align-self:center"></div>
-        <button class="btn btn-primary" onclick="crearUsuario()">Crear Usuario</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- View-As Banner -->
 <div id="view-as-banner" style="display:none;background:var(--egsp-coral);color:#fff;padding:6px 24px;font-size:0.8rem;font-weight:700;align-items:center;justify-content:center;gap:12px;letter-spacing:0.03em">
@@ -1214,7 +1169,6 @@
           <span id="hdr-user-role" class="role-pill"></span>
           <button id="hdr-profile-btn" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;cursor:pointer;font-size:0.82rem;padding:4px 10px;border-radius:6px;display:none;gap:4px;align-items:center" onclick="openPerfil()" title="Mi Perfil">👤 <span style="font-size:0.78rem">Perfil</span></button>
           <button style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;cursor:pointer;font-size:0.82rem;padding:4px 10px;border-radius:6px;display:inline-flex;gap:4px;align-items:center" onclick="openModal('modal-cambiar-pwd')" title="Cambiar contraseña">🔑 <span style="font-size:0.78rem">Contraseña</span></button>
-          <button id="hdr-manage-users" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;cursor:pointer;font-size:0.82rem;padding:4px 10px;border-radius:6px;display:none;gap:4px;align-items:center" onclick="openUsuarios()" title="Gestionar usuarios">👥 <span style="font-size:0.78rem">Usuarios</span></button>
           <button id="hdr-dummy-btn" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;cursor:pointer;font-size:0.82rem;padding:4px 10px;border-radius:6px;display:none;gap:4px;align-items:center" onclick="dummyCheckLoaded();openModal('modal-dummy-data')" title="Datos de prueba">🧪 <span style="font-size:0.78rem">Prueba</span></button>
           <button style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;cursor:pointer;font-size:0.82rem;padding:4px 10px;border-radius:6px;display:inline-flex;gap:4px;align-items:center" onclick="doLogout()" title="Cerrar sesión">⏻ <span style="font-size:0.78rem">Salir</span></button>
         </div>
@@ -1234,6 +1188,7 @@
 
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Gestión</div>
+  <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">🏛️ Departamentos y Programas</button>
   <button class="tab-btn" data-tab="cursos" onclick="showTab('cursos', this)">Cursos</button>
   <button class="tab-btn" data-tab="secciones" onclick="showTab('secciones', this)">Secciones</button>
   <button class="tab-btn" data-tab="competencias" onclick="showTab('competencias', this)">Competencias</button>
@@ -1251,7 +1206,6 @@
   <button class="tab-btn" data-tab="facultad" onclick="showTab('facultad', this)" style="display:none">Facultad</button>
   <button class="tab-btn" data-tab="solicitudes" onclick="showTab('solicitudes', this)">📋 Solicitudes<span id="sol-pending-badge" class="badge badge-rust" style="display:none;margin-left:6px"></span></button>
   <button class="tab-btn" data-tab="configuracion" onclick="showTab('configuracion', this)" style="display:none">⚙️ Configuración</button>
-  <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">🏛️ Departamentos y Programas</button>
   <button class="tab-btn" data-tab="adiestramientos" onclick="showTab('adiestramientos', this)">Adiestramientos</button>
 </aside>
 
@@ -2519,6 +2473,12 @@ let db = {
 let _viewAsRole = null;   // admin View-As impersonation role
 let currentUser = null;    // { username, nombre, rol, efectivo }
 
+// Señal compartida: se resuelve cuando loadDB() termina su primera carga.
+// El arranque de login (ensureDefaultAdmin) la espera antes de revisar
+// db.facultad, para no adelantarse a que los datos reales lleguen de Firebase.
+let _dbReadyResolve;
+const _dbReadyPromise = new Promise(r => { _dbReadyResolve = r; });
+
 const NIVELES = {
   L: { label: 'Logrado', color: 'L', desc: 'Cumple completamente la competencia' },
   P: { label: 'En Progreso', color: 'P', desc: 'Cumple parcialmente la competencia' },
@@ -3522,10 +3482,10 @@ async function processDistFile(file) {
     notify('No se encontraron profesores con correo válido en ese archivo', '⚠️');
     return;
   }
-  const usuarios = await loadUsers() || [];
   parsed.profesores.forEach(p => {
-    p.existeUsuario = usuarios.some(u => (u.email || '').toLowerCase() === p.email || (u.username || '').toLowerCase() === p.email);
-    p.existeFacultad = (db.facultad || []).some(f => (f.email || '').toLowerCase() === p.email);
+    const facExistente = (db.facultad || []).find(f => (f.email || '').toLowerCase() === p.email);
+    p.existeUsuario = !!(facExistente && facExistente.rol); // ya tiene cuenta de acceso (no solo directorio)
+    p.existeFacultad = !!facExistente;
     p.selected = true;
   });
   _distImportData = parsed;
@@ -3596,24 +3556,31 @@ function toggleAllDistImport(checked) {
 async function confirmarImportarProfesores() {
   if (!_distImportData) return;
   const { termInfo, profesores } = _distImportData;
-  const usuarios = await loadUsers() || [];
   const cuentasNuevas = [];
   let facultadCreados = 0, asignaciones = 0;
   const pendientes = [];
 
-  profesores.forEach(p => {
-    if (!p.selected) return;
+  for (const p of profesores) {
+    if (!p.selected) continue;
 
-    if (!p.existeFacultad) {
-      db.facultad.push({
+    let fac = db.facultad.find(f => (f.email || '').toLowerCase() === p.email);
+    if (!fac) {
+      fac = {
         id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         nombre: p.nombre, email: p.email, departamento: '', telefono: '', programas: '',
         coordinator: false, director: false, fechaCreacion: new Date().toISOString(),
-      });
+      };
+      db.facultad.push(fac);
       facultadCreados++;
     }
-    if (!p.existeUsuario) {
-      cuentasNuevas.push({ email: p.email, nombre: p.nombre, tempPwd: 'EGSP' + Math.floor(1000 + Math.random() * 9000) });
+    // Si el registro de Facultad ya existía solo como directorio (sin rol),
+    // esta importación también le da acceso de login como profesor.
+    if (!fac.rol) {
+      const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
+      fac.rol = 'profesor';
+      fac.pwdHash = await sha256(tempPwd);
+      fac.mustChangePwd = true;
+      cuentasNuevas.push({ email: p.email, nombre: p.nombre, tempPwd });
     }
 
     let algunaPendiente = false;
@@ -3628,15 +3595,7 @@ async function confirmarImportarProfesores() {
       }
     });
     if (algunaPendiente) pendientes.push(p.nombre);
-  });
-
-  for (const cuenta of cuentasNuevas) {
-    usuarios.push({
-      username: cuenta.email, nombre: cuenta.nombre, rol: 'profesor', email: cuenta.email,
-      pwdHash: await sha256(cuenta.tempPwd), createdAt: new Date().toISOString(), mustChangePwd: true,
-    });
   }
-  if (cuentasNuevas.length) await saveUsers(usuarios);
 
   saveDB();
   closeModal('modal-importar-profesores');
@@ -6931,6 +6890,7 @@ function waitForFb(timeoutMs = 8000) {
   }
 
   await loadDB();
+  _dbReadyResolve();
   preloadExcelData();
   db.cursos = db.cursos.filter(c => !['c1','c2','c3','c4','c5'].includes(c.id));
   db.competencias = db.competencias.filter(c => !c.id.startsWith('comp'));
@@ -6982,8 +6942,8 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 
 // ── Current session (in-memory only) ──────────────────────
 
-// ── Storage key for user accounts ─────────────────────────
-const USERS_KEY = 'avaluo_users_v1';
+// ── Storage key for user accounts (histórico; ya no se usa desde la Fase 3,
+// donde el login se unificó en db.facultad) ────────────────
 
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
@@ -7050,64 +7010,22 @@ async function sha256(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── Load / save user accounts (Firebase 'usuarios' node; POC) ──
-// loadUsers() devuelve:
-//   - un array (posiblemente vacío) si la lectura fue exitosa
-//   - null si NO se pudo confirmar el estado real (error de red/Firebase) —
-//     null es distinto de "lista vacía" para que ensureDefaultAdmin() nunca
-//     confunda un fallo transitorio con "no hay usuarios" y sobrescriba a todos.
-async function loadUsers() {
-  if (window._fb) {
-    try {
-      const snap = await window._fb.get(window._fb.ref(window._fb.database, 'usuarios'));
-      return snap.val() || [];
-    } catch(e) {
-      console.error('Firebase loadUsers error:', e);
-      return null;
-    }
-  }
-  // Fallback: window.storage (entorno de artifacts de Claude.ai) o localStorage
-  try {
-    if (window.storage) {
-      const res = await window.storage.get(USERS_KEY);
-      if (res) return JSON.parse(res.value);
-    }
-  } catch(e) {}
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch(e) { return null; }
-}
-async function saveUsers(users) {
-  const json = JSON.stringify(users);
-  if (window._fb) {
-    try {
-      await window._fb.set(window._fb.ref(window._fb.database, 'usuarios'), users);
-    } catch(e) { console.error('Firebase saveUsers error:', e); }
-  }
-  try { if (window.storage) await window.storage.set(USERS_KEY, json); } catch(e) {}
-  try { localStorage.setItem(USERS_KEY, json); } catch(e) {}
-}
-
-// ── Seed default admin on first run ───────────────────────
+// ── Seed default admin on first run (Fase 3: unificado en db.facultad) ───
 async function ensureDefaultAdmin() {
-  const users = await loadUsers();
-  if (users === null) {
-    // No se pudo confirmar el estado real (lectura falló) — NO sembrar admin,
-    // para evitar sobrescribir cuentas existentes con un solo registro nuevo.
-    console.warn('ensureDefaultAdmin: no se pudo leer la lista de usuarios; se omite el seed por seguridad.');
-    return;
-  }
-  if (users.length > 0) return;
-  const hash = await sha256('Admin1234!');
-  await saveUsers([{
-    username: 'admin',
-    nombre:   'Administrador',
-    rol:      'admin',
-    pwdHash:  hash,
+  await _dbReadyPromise; // espera a que loadDB() haya traído db.facultad real
+  if (!db.facultad) db.facultad = [];
+  const yaHayAdmin = db.facultad.some(f => f.rol === 'admin');
+  if (yaHayAdmin) return;
+  const hash = await sha256('EGSPAdmin2026!');
+  db.facultad.push({
+    id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    nombre: 'Administrador', email: 'admin@egsp.local',
+    departamento: '', telefono: '', programas: '', coordinator: false, director: false,
+    rol: 'admin', pwdHash: hash, mustChangePwd: true,
     createdAt: new Date().toISOString(),
-    mustChangePwd: true
-  }]);
+  });
+  saveDB();
+  console.warn('Cuenta admin creada: admin@egsp.local / EGSPAdmin2026! (pedirá cambiarla al entrar)');
 }
 
 // ── Login ─────────────────────────────────────────────────
@@ -7119,18 +7037,18 @@ async function doLogin() {
 
   if (!username || !pwd) { errEl.textContent = 'Completa todos los campos.'; errEl.style.display='block'; return; }
 
-  const users = await loadUsers() || [];
-  const user  = users.find(u => u.username === username);
-  if (!user) { errEl.textContent = 'Usuario o contraseña incorrectos.'; errEl.style.display='block'; return; }
+  await _dbReadyPromise; // asegura que db.facultad ya tiene los datos reales de Firebase
+  const user = (db.facultad || []).find(u => (u.email || '').toLowerCase() === username);
+  if (!user || !user.pwdHash) { errEl.textContent = 'Usuario o contraseña incorrectos.'; errEl.style.display='block'; return; }
 
   const hash = await sha256(pwd);
   if (hash !== user.pwdHash) { errEl.textContent = 'Usuario o contraseña incorrectos.'; errEl.style.display='block'; return; }
 
-  // Success
-  // Base user
-  currentUser = { username: user.username, nombre: user.nombre, rol: user.rol,
-    email: user.email || '', mustChangePwd: user.mustChangePwd };
-  // Enrich with faculty record for dynamic permissions
+  // Success — username se mantiene igual al correo, para no tener que tocar
+  // el resto de la app (secciones, solicitudes, progreso de adiestramientos,
+  // etc.) que ya identifica a cada persona por currentUser.username.
+  currentUser = { username: user.email, nombre: user.nombre, rol: user.rol,
+    email: user.email, mustChangePwd: user.mustChangePwd };
   enrichCurrentUserPermissions();
   document.getElementById('auth-overlay').style.display = 'none';
   document.getElementById('login-pwd').value = '';
@@ -7294,7 +7212,6 @@ function applyRoleUI() {
   roleEl.className = 'role-pill ' + (currentUser.efectivo?.isDirector ? 'director' :
     currentUser.efectivo?.isCoordinator ? 'coordinator' : rol);
   document.getElementById('user-badge-wrap').style.display = 'block';
-  document.getElementById('hdr-manage-users').style.display = rol === 'admin' ? 'inline-flex' : 'none';
   const dummyBtn = document.getElementById('hdr-dummy-btn');
   if (dummyBtn) dummyBtn.style.display = rol === 'admin' ? 'inline-flex' : 'none';
   // Profile button always visible
@@ -7354,16 +7271,15 @@ async function cambiarPassword() {
   if (newPwd1.length < 8) return show('La nueva contraseña debe tener al menos 8 caracteres.');
   if (newPwd1 !== newPwd2) return show('Las contraseñas nuevas no coinciden.');
 
-  const users    = await loadUsers() || [];
-  const idx      = users.findIndex(u => u.username === currentUser.username);
+  const idx = (db.facultad || []).findIndex(u => (u.email || '').toLowerCase() === currentUser.username.toLowerCase());
   if (idx < 0) return show('Usuario no encontrado.');
 
   const oldHash = await sha256(oldPwd);
-  if (oldHash !== users[idx].pwdHash) return show('Contraseña actual incorrecta.');
+  if (oldHash !== db.facultad[idx].pwdHash) return show('Contraseña actual incorrecta.');
 
-  users[idx].pwdHash = await sha256(newPwd1);
-  users[idx].mustChangePwd = false;
-  await saveUsers(users);
+  db.facultad[idx].pwdHash = await sha256(newPwd1);
+  db.facultad[idx].mustChangePwd = false;
+  saveDB();
 
   currentUser.mustChangePwd = false;
   closeModal('modal-cambiar-pwd');
@@ -7371,81 +7287,6 @@ async function cambiarPassword() {
   document.getElementById('pwd-new1').value = '';
   document.getElementById('pwd-new2').value = '';
   notify('Contraseña actualizada ✓', '🔑');
-}
-
-// ── User management (Admin only) ──────────────────────────
-async function openUsuarios() {
-  if (currentUser?.rol !== 'admin') return;
-  await renderUsuariosList();
-  openModal('modal-usuarios');
-}
-
-async function renderUsuariosList() {
-  const users = await loadUsers() || [];
-  const el = document.getElementById('usuarios-list');
-  if (!users.length) { el.innerHTML = '<p style="color:var(--muted)">No hay usuarios.</p>'; return; }
-  el.innerHTML = users.map(u => `
-    <div class="user-card">
-      <div class="user-avatar" style="background:${u.rol==='admin'?'var(--egsp-coral)':u.rol==='profesor'?'var(--egsp-gray)':'#1a1a1a'}">${(u.nombre||u.username).charAt(0).toUpperCase()}</div>
-      <div style="flex:1">
-        <div style="font-weight:700;font-size:0.9rem">${u.nombre||u.username}</div>
-        <div style="font-size:0.78rem;color:var(--muted)">@${u.username} · creado ${u.createdAt?.split('T')[0]||'—'}</div>
-        ${u.mustChangePwd ? '<div style="font-size:0.72rem;color:var(--rust)">⚠ Debe cambiar contraseña</div>' : ''}
-      </div>
-      <span class="badge ${u.rol==='admin'?'badge-rust':u.rol==='profesor'?'badge-green':'badge-blue'}">${u.rol}</span>
-      <button class="btn btn-outline btn-sm" onclick="resetUserPwd('${u.username}')" title="Resetear contraseña">🔑</button>
-      ${u.username !== currentUser.username ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.username}')" title="Eliminar">🗑</button>` : ''}
-    </div>`).join('');
-}
-
-async function crearUsuario() {
-  const nombre = document.getElementById('nu-nombre').value.trim();
-  const user   = document.getElementById('nu-user').value.trim().toLowerCase();
-  const rol    = document.getElementById('nu-rol').value;
-  const pwd    = document.getElementById('nu-pwd').value;
-  const pwd2   = document.getElementById('nu-pwd2').value;
-  const errEl  = document.getElementById('nu-error');
-
-  const show = msg => { errEl.textContent = msg; };
-  errEl.textContent = '';
-
-  if (!nombre || !user || !pwd) return show('Completa todos los campos.');
-  if (pwd.length < 8) return show('Mínimo 8 caracteres.');
-  if (pwd !== pwd2) return show('Las contraseñas no coinciden.');
-  if (!/^[a-z0-9_.@+\-]+$/.test(user)) return show('Ingresa un correo válido o usuario sin espacios.');
-
-  const users = await loadUsers() || [];
-  if (users.find(u => u.username === user)) return show('Ese usuario ya existe.');
-
-  const email = document.getElementById('nu-email')?.value.trim().toLowerCase() || '';
-  users.push({ username:user, nombre, rol, email, pwdHash: await sha256(pwd), createdAt: new Date().toISOString(), mustChangePwd: true });
-  await saveUsers(users);
-
-  ['nu-nombre','nu-user','nu-pwd','nu-pwd2'].forEach(id => document.getElementById(id).value = '');
-  await renderUsuariosList();
-  notify(`Usuario @${user} creado ✓`);
-}
-
-async function deleteUser(username) {
-  if (!confirm(`¿Eliminar usuario @${username}?`)) return;
-  let users = await loadUsers() || [];
-  users = users.filter(u => u.username !== username);
-  await saveUsers(users);
-  await renderUsuariosList();
-  notify(`Usuario eliminado`, '🗑');
-}
-
-async function resetUserPwd(username) {
-  const newPwd = prompt(`Nueva contraseña para @${username} (mín. 8 chars):`);
-  if (!newPwd) return;
-  if (newPwd.length < 8) { notify('Mínimo 8 caracteres', '⚠️'); return; }
-  const users = await loadUsers() || [];
-  const idx   = users.findIndex(u => u.username === username);
-  if (idx < 0) return;
-  users[idx].pwdHash = await sha256(newPwd);
-  users[idx].mustChangePwd = true;
-  await saveUsers(users);
-  notify(`Contraseña de @${username} reseteada ✓`, '🔑');
 }
 
 // ── Boot: seed admin then show login ──────────────────────
@@ -8088,6 +7929,7 @@ function renderFacultadList() {
     el.innerHTML = '<div class="empty-state"><p>No hay profesores en la lista maestra. Añade uno o importa un CSV.</p></div>';
     return;
   }
+  const rolLabelMap = { admin:'Admin', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
   el.innerHTML = list.map(f => {
     const initials = (f.nombre||'?').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
     const progs = f.programas ? f.programas.split('|').map(p=>p.trim()) : [];
@@ -8097,12 +7939,14 @@ function renderFacultadList() {
         <div class="fac-name">${f.nombre}</div>
         <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
         <div class="fac-tags">
+          ${f.rol ? `<span class="badge badge-blue">🔑 ${rolLabelMap[f.rol]||f.rol}</span>` : '<span class="badge badge-gold">Sin acceso</span>'}
           ${f.director==='true'||f.director===true ? '<span class="fac-tag fac-tag-dir">🏛 Director/a</span>' : ''}
           ${f.coordinator==='true'||f.coordinator===true ? '<span class="fac-tag fac-tag-coord">📋 Coordinador/a</span>' : ''}
           ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${p}</span>`).join('')}
         </div>
       </div>
       <div style="display:flex;gap:6px">
+        ${f.rol ? `<button class="btn btn-outline btn-sm" onclick="resetearPasswordFacultad('${f.id}')" title="Resetear contraseña">🔑</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="editarFacultad('${f.id}')">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarFacultad('${f.id}')">🗑</button>
       </div>
@@ -8167,6 +8011,7 @@ function openNuevaFacultad() {
   ['fac-nombre','fac-email','fac-dept','fac-tel','fac-programas'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fac-coordinator').checked = false;
   document.getElementById('fac-director').checked = false;
+  document.getElementById('fac-rol').value = '';
   openModal('modal-nueva-facultad');
 }
 
@@ -8182,13 +8027,15 @@ function editarFacultad(id) {
   document.getElementById('fac-programas').value = f.programas||'';
   document.getElementById('fac-coordinator').checked = f.coordinator===true||f.coordinator==='true';
   document.getElementById('fac-director').checked = f.director===true||f.director==='true';
+  document.getElementById('fac-rol').value = f.rol || '';
   openModal('modal-nueva-facultad');
 }
 
-function guardarFacultad() {
+async function guardarFacultad() {
   const nombre = document.getElementById('fac-nombre').value.trim();
   const email  = document.getElementById('fac-email').value.trim().toLowerCase();
   if (!nombre||!email) { notify('Nombre y email son requeridos','⚠️'); return; }
+  const nuevoRol = document.getElementById('fac-rol').value || '';
   const editId = document.getElementById('fac-edit-id').value;
   const record = {
     nombre, email,
@@ -8198,26 +8045,82 @@ function guardarFacultad() {
     coordinator:  document.getElementById('fac-coordinator').checked,
     director:     document.getElementById('fac-director').checked,
   };
+
+  let tempPwdParaMostrar = null;
+
   if (editId) {
     const idx = db.facultad.findIndex(f=>f.id===editId);
-    if (idx>=0) db.facultad[idx] = { ...db.facultad[idx], ...record };
+    if (idx>=0) {
+      const actual = db.facultad[idx];
+      // Evita que el admin se quite su propio acceso por accidente y se bloquee
+      if (actual.email === currentUser?.username && actual.rol === 'admin' && nuevoRol !== 'admin') {
+        notify('No puedes quitarte tu propio rol de admin — pídele a otro admin que lo haga', '🔒');
+        return;
+      }
+      if (!actual.rol && nuevoRol) {
+        // Ganó acceso por primera vez: generar contraseña temporal
+        const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
+        record.rol = nuevoRol;
+        record.pwdHash = await sha256(tempPwd);
+        record.mustChangePwd = true;
+        tempPwdParaMostrar = tempPwd;
+      } else if (actual.rol && !nuevoRol) {
+        // Se le quitó el acceso: revoca la contraseña por completo
+        record.rol = '';
+        record.pwdHash = null;
+        record.mustChangePwd = false;
+      } else {
+        // Mismo estado (con o sin rol) o cambio de un rol a otro: no se toca la contraseña
+        record.rol = nuevoRol;
+      }
+      db.facultad[idx] = { ...actual, ...record };
+    }
   } else {
-    // Check duplicate email
     if (db.facultad.find(f=>f.email===email)) { notify('Ya existe un profesor con ese email','⚠️'); return; }
-    db.facultad.push({ id: 'fac_'+Date.now(), ...record, fechaCreacion: new Date().toISOString() });
+    if (nuevoRol) {
+      const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
+      record.rol = nuevoRol;
+      record.pwdHash = await sha256(tempPwd);
+      record.mustChangePwd = true;
+      tempPwdParaMostrar = tempPwd;
+    } else {
+      record.rol = '';
+    }
+    db.facultad.push({ id: 'fac_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), ...record, fechaCreacion: new Date().toISOString() });
   }
   saveDB();
   closeModal('modal-nueva-facultad');
   renderFacultadList();
   enrichCurrentUserPermissions();
+  if (tempPwdParaMostrar) {
+    alert(`Cuenta de acceso creada para ${nombre}.\n\nCorreo: ${email}\nContraseña temporal: ${tempPwdParaMostrar}\n\nCompártela de forma segura — se le pedirá cambiarla al entrar.`);
+  }
   notify('Profesor/a guardado/a ✓');
 }
 
 function eliminarFacultad(id) {
-  if (!confirm('¿Eliminar este profesor de la lista maestra?')) return;
+  const f = db.facultad.find(x=>x.id===id);
+  if (!f) return;
+  if (f.email === currentUser?.username) { notify('No puedes eliminarte a ti mismo', '🔒'); return; }
+  if (f.rol === 'admin' && db.facultad.filter(x=>x.rol==='admin').length <= 1) {
+    notify('No puedes eliminar el único administrador del sistema', '🔒'); return;
+  }
+  if (!confirm('¿Eliminar este profesor de la lista maestra? Si tiene acceso al sistema, también lo perderá.')) return;
   db.facultad = db.facultad.filter(f=>f.id!==id);
   saveDB(); renderFacultadList();
   notify('Eliminado ✓','🗑');
+}
+
+async function resetearPasswordFacultad(id) {
+  const f = db.facultad.find(x=>x.id===id);
+  if (!f || !f.rol) return;
+  if (!confirm(`¿Generar una contraseña temporal nueva para ${f.nombre}?`)) return;
+  const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
+  f.pwdHash = await sha256(tempPwd);
+  f.mustChangePwd = true;
+  saveDB();
+  alert(`Nueva contraseña temporal para ${f.nombre} (${f.email}):\n\n${tempPwd}\n\nCompártela de forma segura — se le pedirá cambiarla al entrar.`);
+  notify('Contraseña reseteada ✓', '🔑');
 }
 
 // ── CRUD CÓDIGOS ──────────────────────────────────────────────
@@ -9357,7 +9260,7 @@ async function adiesShowReport() {
   const data = await adiesLoadData();
   const prog = await adiesLoadProgress();
   const allBlocks = data.sections.flatMap(s=>s.blocks||[]);
-  const users = await loadUsers()||[];
+  const users = (db.facultad || []).filter(f => f.rol).map(f => ({ username: f.email, nombre: f.nombre, rol: f.rol }));
   const reportEl = document.getElementById('adies-report-body');
   if (!users.length || !allBlocks.length) {
     reportEl.innerHTML = '<p style="color:var(--muted)">No hay datos suficientes.</p>';
@@ -9647,17 +9550,21 @@ async function dummyLoadAll() {
 
   saveDB();
 
-  // ── Usuarios ──
+  // ── Cuentas de prueba (unificadas en db.facultad, correo = identificador) ──
   const pwdHash = await sha256('Test1234!');
-  const users = await loadUsers() || [];
-  const newUsers = [
-    { username:'prof.dummy',      nombre:'Prof. Ana Villanueva (Prueba)', rol:'profesor',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, [DUMMY_TAG]:true },
-    { username:'director.dummy',  nombre:'Dr. Marcos Soto (Prueba)',      rol:'director',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, [DUMMY_TAG]:true },
-    { username:'coord.dummy',     nombre:'Dra. Elena Reyes (Prueba)',     rol:'coordinator', pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, [DUMMY_TAG]:true },
-    { username:'viewer.dummy',    nombre:'Visitante (Prueba)',            rol:'viewer',      pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, [DUMMY_TAG]:true },
+  if (!db.facultad) db.facultad = [];
+  const newFacultad = [
+    { nombre:'Prof. Ana Villanueva (Prueba)', email:'avillanueva.dummy@rcm.upr.edu', rol:'profesor',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:false, [DUMMY_TAG]:true },
+    { nombre:'Dr. Marcos Soto (Prueba)',      email:'msoto.dummy@rcm.upr.edu',       rol:'director',    pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:true,  [DUMMY_TAG]:true },
+    { nombre:'Dra. Elena Reyes (Prueba)',     email:'ereyes.dummy@rcm.upr.edu',      rol:'coordinator', pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:true,  director:false, [DUMMY_TAG]:true },
+    { nombre:'Visitante (Prueba)',            email:'visitante.dummy@rcm.upr.edu',   rol:'viewer',      pwdHash, createdAt:new Date().toISOString(), mustChangePwd:false, departamento:'', telefono:'', programas:'', coordinator:false, director:false, [DUMMY_TAG]:true },
   ];
-  newUsers.forEach(u => { if (!users.find(x=>x.username===u.username)) users.push(u); });
-  await saveUsers(users);
+  newFacultad.forEach(nf => {
+    const idx = db.facultad.findIndex(f => (f.email||'').toLowerCase() === nf.email);
+    if (idx === -1) db.facultad.push({ id: 'fac_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), ...nf });
+    else if (!db.facultad[idx].rol) db.facultad[idx] = { ...db.facultad[idx], ...nf }; // ya existía como directorio, ahora gana acceso
+  });
+  saveDB();
 
   // ── Adiestramientos ──
   const adiesData = await adiesLoadData();
@@ -9731,10 +9638,6 @@ async function dummyDeleteAll() {
   if (db.codigosProg) db.codigosProg = db.codigosProg.filter(x => !x[DUMMY_TAG]);
   if (db.asesorias)   db.asesorias   = db.asesorias.filter(x => !x[DUMMY_TAG]);
   saveDB();
-
-  // Users
-  const users = await loadUsers() || [];
-  await saveUsers(users.filter(u => !u[DUMMY_TAG]));
 
   // Adiestramientos
   const adiesData = await adiesLoadData();
@@ -10063,6 +9966,20 @@ function dummyShowStatus(msg, type) {
       <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
         <input type="checkbox" id="fac-director" style="width:auto">
         <label style="margin:0">Director/a de Departamento</label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Rol de acceso al sistema</label>
+      <select id="fac-rol">
+        <option value="">— Sin acceso (solo directorio) —</option>
+        <option value="admin">Administrador</option>
+        <option value="director">Director</option>
+        <option value="coordinator">Coordinador</option>
+        <option value="profesor">Profesor</option>
+        <option value="viewer">Visitante (solo lectura)</option>
+      </select>
+      <div id="fac-rol-hint" style="font-size:0.72rem;color:var(--muted);margin-top:3px">
+        "Sin acceso" significa que la persona queda en el directorio pero no puede iniciar sesión. Si le das un rol a alguien nuevo, se le genera una contraseña temporal que verás al guardar.
       </div>
     </div>
     <div class="modal-footer">
