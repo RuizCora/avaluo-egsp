@@ -1188,7 +1188,7 @@
 
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Gestión</div>
-  <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">🏛️ Departamentos y Programas</button>
+  <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">Departamentos y Programas</button>
   <button class="tab-btn" data-tab="cursos" onclick="showTab('cursos', this)">Cursos</button>
   <button class="tab-btn" data-tab="secciones" onclick="showTab('secciones', this)">Secciones</button>
   <button class="tab-btn" data-tab="competencias" onclick="showTab('competencias', this)">Competencias</button>
@@ -1204,8 +1204,8 @@
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Administración</div>
   <button class="tab-btn" data-tab="facultad" onclick="showTab('facultad', this)" style="display:none">Facultad</button>
-  <button class="tab-btn" data-tab="solicitudes" onclick="showTab('solicitudes', this)">📋 Solicitudes<span id="sol-pending-badge" class="badge badge-rust" style="display:none;margin-left:6px"></span></button>
-  <button class="tab-btn" data-tab="configuracion" onclick="showTab('configuracion', this)" style="display:none">⚙️ Configuración</button>
+  <button class="tab-btn" data-tab="solicitudes" onclick="showTab('solicitudes', this)">Solicitudes<span id="sol-pending-badge" class="badge badge-rust" style="display:none;margin-left:6px"></span></button>
+  <button class="tab-btn" data-tab="configuracion" onclick="showTab('configuracion', this)" style="display:none">Configuración</button>
   <button class="tab-btn" data-tab="adiestramientos" onclick="showTab('adiestramientos', this)">Adiestramientos</button>
 </aside>
 
@@ -4737,9 +4737,14 @@ function _allEvals(avaluos) {
 function _filterAvaluosByRole(avaluos) {
   const effRole = getEffectiveRole();
   const e = currentUser?.efectivo;
-  if (!currentUser || currentUser.rol === 'admin') return avaluos;
+  if (!currentUser || currentUser.rol === 'admin' || currentUser.rol === 'decano') return avaluos;
   if (e?.isDirector || e?.isCoordinator) {
-    if (!e.programas?.length) return avaluos;
+    // Director sin programas asignados = supervisa todo su departamento (ve todo).
+    // Coordinador sin programas asignados = no tiene programa a cargo todavía,
+    // así que NO ve datos de estudiantes hasta que se le asigne uno (Fase 5:
+    // el acceso a información específica de estudiantes queda limitado a su
+    // propio programa, a diferencia del Panel/Dashboard que sí es general).
+    if (!e.programas?.length) return e.isDirector ? avaluos : [];
     return avaluos.filter(av => {
       const curso = db.cursos.find(c=>c.id===av.cursoId);
       return e.programas.includes(curso?.programa);
@@ -5588,7 +5593,11 @@ function renderDashboard() {
   // ── FILTER AVALUOS ────────────────────────────────────────────
   let avaluos = db.avaluos || [];
 
-  // Role scoping
+  // Role scoping — Fase 5: el Panel/Dashboard muestra información GENERAL
+  // (agregada) de todos los programas para coordinador/director/decano —
+  // el acceso restringido por programa aplica solo a datos ESPECÍFICOS de
+  // estudiantes (Secciones, Avalúo, Base de Datos, Reportes — ver
+  // canSeeSeccion() y _filterAvaluosByRole()), no a estas cifras generales.
   const effRole = getEffectiveRole();
   const e = currentUser?.efectivo;
   if (effRole === 'profesor' && !(e?.isCoordinator || e?.isDirector)) {
@@ -5597,13 +5606,6 @@ function renderDashboard() {
       .filter(s => canSeeSeccion(s))
       .map(s => s.id);
     avaluos = avaluos.filter(a => mySecIds.includes(a.seccionId) || !a.seccionId);
-  } else if ((effRole === 'coordinator' || e?.isCoordinator || e?.isDirector) && e?.programas?.length) {
-    // Coordinator/director: filter by their programs
-    const myProgs = e.programas;
-    avaluos = avaluos.filter(a => {
-      const curso = db.cursos.find(cc => cc.id === a.cursoId);
-      return !curso || myProgs.includes(curso.programa);
-    });
   }
 
   // Program filter
@@ -7119,7 +7121,7 @@ function getEffectiveRoleLabel() {
 // ── Check if current user can see data for a given program ─────────────────
 function canSeeProgram(progName) {
   if (!currentUser) return false;
-  if (currentUser.rol === 'admin') return true;
+  if (currentUser.rol === 'admin' || currentUser.rol === 'decano') return true;
   const e = currentUser.efectivo;
   if (e.isDirector && e.programas.length === 0) return true; // director of all
   if (e.isDirector || e.isCoordinator) return e.programas.includes(progName);
@@ -7129,7 +7131,7 @@ function canSeeProgram(progName) {
 // ── Check if current user can see a section ────────────────────────────────
 function canSeeSeccion(sec) {
   if (!currentUser) return false;
-  if (currentUser.rol === 'admin') return true;
+  if (currentUser.rol === 'admin' || currentUser.rol === 'decano') return true;
   const e = currentUser.efectivo;
   // Director/coordinator: check if course program matches
   if (e.isDirector || e.isCoordinator) {
