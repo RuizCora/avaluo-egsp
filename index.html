@@ -2390,16 +2390,7 @@
       <div class="form-group">
         <label>Programa</label>
         <select id="c-programa">
-          <option value="MPH/MPHE">MPH/MPHE</option>
-          <option value="MPHE">MPHE</option>
-          <option value="MPH Gerontology">MPH Gerontology</option>
-          <option value="MPH General">MPH General</option>
-          <option value="MPH Epidemiology">MPH Epidemiology</option>
-          <option value="MPH Biostatistics">MPH Biostatistics</option>
-          <option value="MPH Environmental Health">MPH Environmental Health</option>
-          <option value="DrPH Core">DrPH Core</option>
-          <option value="DrPH Environmental Health">DrPH Environmental Health</option>
-          <option value="DrPH HSAM">DrPH HSAM</option>
+          <option value="">— Seleccionar —</option>
         </select>
       </div>
       <div class="form-group">
@@ -2661,6 +2652,7 @@ function showTab(tabId, btn) {
 
 function openModal(id) {
   populateCursoSelects();
+  if (id === 'modal-curso') _populateCursoProgramaSelect();
   // Para profesores (no-admin), auto-completa y bloquea el campo "Profesor" con
   // su propio nombre de cuenta, para que la sección quede correctamente
   // identificada como suya (canSeeSeccion la reconoce por nombre/email) y no
@@ -2688,6 +2680,12 @@ function guardarCurso() {
   const codigo = document.getElementById('c-codigo').value.trim();
   const nombre = document.getElementById('c-nombre').value.trim();
   if (!codigo || !nombre) { notify('Complete los campos requeridos', '⚠️'); return; }
+  const programaId = document.getElementById('c-programa').value || null;
+  const programaObj = programaId ? db.programas.find(p => p.id === programaId) : null;
+  // 'programa' se mantiene como texto (nombre del programa) por compatibilidad
+  // con los badges/filtros/reportes existentes que ya lo leen como string;
+  // 'programaId' es la referencia real al catálogo (Departamentos y Programas)
+  // que usan los permisos por programa.
   const editId = document.getElementById('c-edit-id')?.value || '';
   if (editId) {
     // Edit mode
@@ -2698,7 +2696,8 @@ function guardarCurso() {
         departamento: document.getElementById('c-dept').value.trim(),
         creditos: document.getElementById('c-creditos').value,
         descripcion: document.getElementById('c-desc').value.trim(),
-        programa: document.getElementById('c-programa').value,
+        programaId,
+        programa: programaObj ? programaObj.nombre : '',
       };
     }
     notify('Curso actualizado correctamente ✏️');
@@ -2710,7 +2709,8 @@ function guardarCurso() {
       departamento: document.getElementById('c-dept').value.trim(),
       creditos: document.getElementById('c-creditos').value,
       descripcion: document.getElementById('c-desc').value.trim(),
-      programa: document.getElementById('c-programa').value || 'MPH/MPHE',
+      programaId,
+      programa: programaObj ? programaObj.nombre : '',
       fechaCreacion: new Date().toISOString()
     };
     db.cursos.push(curso);
@@ -2733,11 +2733,43 @@ function abrirEditarCurso(id) {
   document.getElementById('c-dept').value = cur.departamento || '';
   document.getElementById('c-creditos').value = cur.creditos || '';
   document.getElementById('c-desc').value = cur.descripcion || '';
+  _populateCursoProgramaSelect();
   const prog = document.getElementById('c-programa');
-  if (prog) prog.value = cur.programa || 'MPH/MPHE';
+  if (prog) prog.value = cur.programaId || '';
   const t = document.getElementById('modal-curso-title');
   if (t) t.textContent = '✏️ Editar Curso';
   openModal('modal-curso');
+}
+
+// Puebla el desplegable de Programa desde el catálogo (Departamentos y
+// Programas), conservando la selección actual si ya había una.
+function _populateCursoProgramaSelect() {
+  _ensureProgramCatalogSeeded();
+  const sel = document.getElementById('c-programa');
+  if (!sel) return;
+  const prev = sel.value;
+  const ordenados = [...db.programas].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+    ordenados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  sel.value = prev;
+}
+
+// Migración (Fase 2): cursos creados antes de que "programa" fuera una
+// referencia al catálogo solo tenían el nombre como texto. Aquí se
+// emparejan automáticamente por nombre exacto; los que no logran
+// emparejarse (texto ambiguo, con errata, o vacío) quedan "sin programa
+// asignado" y aparecen en el aviso de renderCursos() para revisión manual.
+function _ensureCursosMigratedToProgramCatalog() {
+  _ensureProgramCatalogSeeded();
+  let changed = false;
+  db.cursos.forEach(c => {
+    if (c.programaId === undefined) { c.programaId = null; changed = true; }
+    if (!c.programaId && c.programa) {
+      const match = db.programas.find(p => p.nombre.toLowerCase() === c.programa.toLowerCase());
+      if (match) { c.programaId = match.id; changed = true; }
+    }
+  });
+  if (changed) saveDB();
 }
 
 function renderCursos() {
@@ -2746,6 +2778,7 @@ function renderCursos() {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">📚</div><p>Aún no hay cursos registrados</p></div>';
     return;
   }
+  _ensureCursosMigratedToProgramCatalog();
 
   // Poblar los selects de Programa/Departamento con los valores que realmente existen
   // (se reconstruyen cada vez, conservando la selección actual, por si se agregan
@@ -2790,11 +2823,16 @@ function renderCursos() {
   }
 
   const sinCompetencias = db.cursos.filter(c => !db.competencias.some(x => x.cursoId === c.id));
-  const banner = sinCompetencias.length ? `
-    <div style="margin-bottom:14px;padding:12px 16px;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;font-size:0.85rem">
+  const sinPrograma = db.cursos.filter(c => !c.programaId);
+  const banner = (sinCompetencias.length ? `
+    <div style="margin-bottom:10px;padding:12px 16px;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;font-size:0.85rem">
       ⚠️ <strong>${sinCompetencias.length} curso(s) sin competencias asignadas:</strong>
       ${sinCompetencias.map(c => `<span class="badge badge-gold" style="margin:2px">${c.codigo}</span>`).join(' ')}
-    </div>` : '';
+    </div>` : '') + (sinPrograma.length ? `
+    <div style="margin-bottom:14px;padding:12px 16px;background:#fee2e2;border:1.5px solid #fecaca;border-radius:10px;font-size:0.85rem">
+      ⚠️ <strong>${sinPrograma.length} curso(s) sin programa asignado</strong> (esto afecta los permisos de coordinador por programa):
+      ${sinPrograma.map(c => `<span class="badge badge-red" style="margin:2px">${c.codigo}</span>`).join(' ')}
+    </div>` : '');
   el.innerHTML = banner + `<div class="table-wrap"><table>
     <thead><tr><th>Código</th><th>Nombre</th><th>Programa</th><th>Departamento</th><th>Competencias</th><th>Acciones</th></tr></thead>
     <tbody>${cursosFiltrados.map(c => {
@@ -3338,7 +3376,7 @@ function confirmarImportarSesion() {
         id: 'curso_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         codigo: c.curso.replace(/^([A-Za-z]+)(\d+)$/, '$1 $2'), // ej. ADSS6568 -> ADSS 6568
         nombre: '(Pendiente de completar)',
-        programa: '',
+        programa: '', programaId: null,
         departamento: '',
       };
       db.cursos.push(nuevoCurso);
