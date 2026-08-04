@@ -9399,16 +9399,28 @@ async function dummyLoadAll() {
 
   const ts = Date.now();
 
-  // ── Programas ──
+  // ── Departamentos (nuevo catálogo — antes esto no existía) ──
+  const deptList = [
+    { id: dummyId('depto'), nombre: 'Salud Pública',   [DUMMY_TAG]: true },
+    { id: dummyId('depto'), nombre: 'Epidemiología',    [DUMMY_TAG]: true },
+    { id: dummyId('depto'), nombre: 'Bioestadística',   [DUMMY_TAG]: true },
+    { id: dummyId('depto'), nombre: 'Educación Salud',  [DUMMY_TAG]: true },
+  ];
+  if (!db.departamentos) db.departamentos = [];
+  db.departamentos.push(...deptList);
+  const deptoIdPor = nombre => deptList.find(d => d.nombre === nombre)?.id || null;
+
+  // ── Programas (ligados al departamento correspondiente por ID) ──
   const progList = [
-    { nombre:'MPH Salud Pública General',  tipo:'Maestría', descripcion:'Programa de maestría en salud pública con concentración general.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { nombre:'MPH Epidemiología',           tipo:'Maestría', descripcion:'Maestría en salud pública con concentración en epidemiología.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { nombre:'MPH Bioestadística',          tipo:'Maestría', descripcion:'Maestría en salud pública con concentración en bioestadística.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { nombre:'DrPH Salud Pública',          tipo:'Doctorado', descripcion:'Doctorado en práctica de salud pública.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { nombre:'MPHE Educación en Salud',     tipo:'Maestría', descripcion:'Maestría en educación para la salud.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('prog'), nombre:'MPH Salud Pública General',  departamentoId: deptoIdPor('Salud Pública'),   tipo:'Maestría',  descripcion:'Programa de maestría en salud pública con concentración general.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('prog'), nombre:'MPH Epidemiología',           departamentoId: deptoIdPor('Epidemiología'),   tipo:'Maestría',  descripcion:'Maestría en salud pública con concentración en epidemiología.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('prog'), nombre:'MPH Bioestadística',          departamentoId: deptoIdPor('Bioestadística'),  tipo:'Maestría',  descripcion:'Maestría en salud pública con concentración en bioestadística.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('prog'), nombre:'DrPH Salud Pública',          departamentoId: deptoIdPor('Salud Pública'),   tipo:'Doctorado', descripcion:'Doctorado en práctica de salud pública.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('prog'), nombre:'MPHE Educación en Salud',     departamentoId: deptoIdPor('Educación Salud'), tipo:'Maestría',  descripcion:'Maestría en educación para la salud.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
   ];
   if (!db.programas) db.programas = [];
   db.programas.push(...progList);
+  const progIdPor = nombre => progList.find(p => p.nombre === nombre)?.id || null;
 
   // ── Cursos ──
   const cursos = [
@@ -9594,8 +9606,8 @@ async function dummyLoadAll() {
 
   // ── Facultad ──
   const facultadDummy = [
-    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',      email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',   telefono:'787-555-0101', programas:'MPH Salud Pública General, MPH Epidemiología', coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',        email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',   telefono:'787-555-0102', programas:'MPH Salud Pública General, DrPH Salud Pública', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',      email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',   telefono:'787-555-0101', programas:'MPH Salud Pública General|MPH Epidemiología', coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',        email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',   telefono:'787-555-0102', programas:'MPH Salud Pública General|DrPH Salud Pública', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
     { id:dummyId('fac'), nombre:'Prof. Ana Villanueva',   email:'avillanueva.dummy@rcm.upr.edu', departamento:'Bioestadística',  telefono:'787-555-0103', programas:'MPH Bioestadística',                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
     { id:dummyId('fac'), nombre:'Dr. Luis Fontánez',      email:'lfontanez.dummy@rcm.upr.edu',   departamento:'Educación Salud', telefono:'787-555-0104', programas:'MPHE Educación en Salud',                      coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
   ];
@@ -9719,6 +9731,7 @@ async function dummyDeleteAll() {
   db.avaluos      = db.avaluos.filter(x => !x[DUMMY_TAG]);
   db.facultad     = db.facultad.filter(x => !x[DUMMY_TAG]);
   if (db.programas)   db.programas   = db.programas.filter(x => !x[DUMMY_TAG]);
+  if (db.departamentos) db.departamentos = db.departamentos.filter(x => !x[DUMMY_TAG]);
   if (db.codigosProg) db.codigosProg = db.codigosProg.filter(x => !x[DUMMY_TAG]);
   if (db.asesorias)   db.asesorias   = db.asesorias.filter(x => !x[DUMMY_TAG]);
   saveDB();
