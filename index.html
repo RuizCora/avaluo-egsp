@@ -2467,7 +2467,8 @@ let db = {
   codigosProg: [],     // student program code -> program name map
   asesorias: [],       // student_id -> profesor_email advising assignments
   solicitudes: [],      // edit requests for locked/readonly records, admin-reviewed
-  departamentos: []     // catálogo de departamentos (cada programa pertenece a uno)
+  departamentos: [],    // catálogo de departamentos (cada programa pertenece a uno)
+  bancoCompetencias: [] // banco/framework de competencias por programa (antes hardcodeado en ALL_COMPETENCIAS)
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2491,7 +2492,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2521,6 +2522,7 @@ function loadDB() {
   if (!db.asesorias)    db.asesorias = [];
   if (!db.solicitudes)  db.solicitudes = [];
   if (!db.departamentos) db.departamentos = [];
+  if (!db.bancoCompetencias) db.bancoCompetencias = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -3655,6 +3657,32 @@ function _ensureProgramCatalogSeeded() {
   });
   if (changed) saveDB();
 }
+
+// Migra el banco de competencias (antes hardcodeado en ALL_COMPETENCIAS) a una
+// colección real de la base de datos, para que Matriz de Pareo, Alineación, y
+// el Asistente de nuevo programa lean todos en vivo, y cualquier programa que
+// se agregue (por código o desde la app) aparezca en las tres pantallas sin
+// tener que editar el archivo. ALL_COMPETENCIAS sigue existiendo solo como la
+// "semilla" inicial — igual que PRELOADED_CURSOS para los cursos.
+function _ensureBancoCompetenciasSeeded() {
+  if (!db.bancoCompetencias) db.bancoCompetencias = [];
+  let changed = false;
+  const existentes = new Set(db.bancoCompetencias.map(c => c.programa + "::" + c.num));
+  ALL_COMPETENCIAS.forEach(c => {
+    const key = c.programa + "::" + c.num;
+    if (!existentes.has(key)) {
+      db.bancoCompetencias.push({
+        id: "banco_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        num: c.num, texto: c.texto, programa: c.programa,
+        fechaCreacion: new Date().toISOString(),
+      });
+      existentes.add(key);
+      changed = true;
+    }
+  });
+  if (changed) saveDB();
+}
+
 
 function renderDepartamentosProgramas() {
   _ensureProgramCatalogSeeded();
@@ -6650,18 +6678,33 @@ const COURSE_DATA = {
   'c_ADSS8206': { comps:['DH1','DH4'],              laos:['LAO 1: Written Report (Scientific Monograph)'] },
   'c_ADSS8305': { comps:['DH4'],                    laos:['LAO 1: Written Health Services Research Proposal'] },
   'c_ADSS8307': { comps:['DH2','DH5'],              laos:['LAO 1: Request for Proposal or Terms of Reference'] },
+  // ── MHSA – Master in Health Services Administration ─────────────────────
+  // Nota: no hay nombres reales de instrumentos de evaluación (LAO) en el
+  // archivo fuente (solo traía "Name of LAO: ___" en blanco, a llenar por
+  // cada profesor al evaluar) — se dejó un placeholder que hay que reemplazar.
+  'c_ADSS6525': { comps:['1.1','2.1','3.1','3.2','4.4'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6591': { comps:['1.2','5.5'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6592': { comps:['1.2','5.5'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6583': { comps:['3.1','4.1','4.2','4.3','4.4','5.8'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6579': { comps:['3.1','3.2','5.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6585': { comps:['1.1','5.7','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6584': { comps:['4.1','4.3'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6586': { comps:['1.1','4.1','4.3','4.4','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6607': { comps:['4.2','5.1','5.5','5.6'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6625': { comps:['1.1','1.2','3.1','5.2','5.7'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6598': { comps:['3.1','4.2','4.4','5.9'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6490': { comps:['1.1','1.2','2.1','5.3','5.4','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6609': { comps:['4.2','5.1','5.5','5.6'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6535': { comps:['5.1','5.4','5.8','5.9','6.1'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6548': { comps:['4.1','4.2','4.3','5.2','5.4','6.1','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6610': { comps:['4.2','4.3','5.4','5.8','6.1'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6606': { comps:['1.1','1.2','2.1','2.2','3.1','3.2','4.1','4.2','4.3','4.4','5.1','5.2','5.4','5.5','5.6','5.7','5.8','5.9','6.1','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_ADSS6597': { comps:['1.1','1.2','2.1','2.2','3.1','3.2','4.1','4.2','4.3','4.4','5.1','5.2','5.4','5.5','5.6','5.7','5.8','5.9','6.1','6.2'], laos:['LAO 1: (pendiente de definir)'] },
 };
 
-
-// Build PRELOADED_PAREO for matriz: compNum -> cursoId -> laos[]
-const PRELOADED_PAREO = {};
-ALL_COMPETENCIAS.forEach(c => { PRELOADED_PAREO[c.num] = {}; });
-Object.entries(COURSE_DATA).forEach(([cursoId, data]) => {
-  data.comps.forEach(compNum => {
-    if (!PRELOADED_PAREO[compNum]) PRELOADED_PAREO[compNum] = {};
-    PRELOADED_PAREO[compNum][cursoId] = data.laos;
-  });
-});
+// Nota: PRELOADED_PAREO (matriz hardcodeada compNum -> cursoId -> laos[]) se
+// eliminó — Matriz de Pareo ahora deriva esto en vivo de db.competencias
+// (función laosPara() dentro de renderMatriz()).
 
 // Alias for matriz rendering
 const PRELOADED_COMPETENCIAS = ALL_COMPETENCIAS;
@@ -6697,15 +6740,27 @@ function seleccionarNivel(compId, valor) {
 
 // ======================== RENDER MATRIZ ========================
 function renderMatriz() {
+  _ensureBancoCompetenciasSeeded();
   const el = document.getElementById('matriz-container');
-  const allCursos = PRELOADED_CURSOS;
-  const allComps = ALL_COMPETENCIAS;
-  const pareo = PRELOADED_PAREO;
+  const allCursos = db.cursos;
+  const allComps = db.bancoCompetencias;
+
+  // Deriva el "pareo" (¿está esta competencia ligada a este curso, y con qué
+  // LAOs?) de db.competencias EN VIVO — antes venía de PRELOADED_PAREO,
+  // hardcodeado y desconectado de lo que se crea/edita desde la app.
+  function laosPara(compNum, cursoId) {
+    const dc = db.competencias.find(x =>
+      x.cursoId === cursoId && (x.codigo === 'C'+compNum || x.codigo === compNum)
+    );
+    if (!dc || !dc.criterios) return [];
+    return dc.criterios.split(' | ').map(l => l.trim()).filter(Boolean);
+  }
 
   let totalLinks = 0;
-  allComps.forEach(c => { allCursos.forEach(cu => { if ((pareo[c.num]||{})[cu.id]) totalLinks++; }); });
+  allComps.forEach(c => { allCursos.forEach(cu => { if (laosPara(c.num, cu.id).length) totalLinks++; }); });
 
-  // Build dynamic program list from ALL_COMPETENCIAS
+  // Metadata de presentación (ícono/color) por programa — es solo estética;
+  // cualquier programa que no esté aquí usa un estilo genérico automáticamente.
   const PROG_META = {
     'MPH/MPHE':               { label:'MPH & MPHE — Foundational Competencies',            badge:'badge-blue',   icon:'🎓' },
     'MPH Gerontology':        { label:'MPH Gerontology — Specialty Competencies',           badge:'badge-green',  icon:'🧓' },
@@ -6717,14 +6772,18 @@ function renderMatriz() {
     'DrPH Core':              { label:'DrPH Core — Foundational Competencies',              badge:'badge-rust',   icon:'🏛' },
     'DrPH Environmental Health':{ label:'DrPH Environmental Health — Specialty Competencies', badge:'badge-green', icon:'♻️' },
     'DrPH HSAM':              { label:'DrPH HSAM — Specialty Competencies',                 badge:'badge-blue',   icon:'🏥' },
+    'MHSA':                   { label:'MHSA — Health Services Administration Competencies', badge:'badge-purple', icon:'💼' },
   };
-  // Populate filter dropdown
+  // Poblar el filtro con los programas que EXISTEN en vivo en el banco de
+  // competencias (antes solo mostraba los que estaban en PROG_META)
   const filterSel = document.getElementById('matriz-prog-filter');
   if (filterSel) {
     const existingKeys = Array.from(filterSel.options).map(o=>o.value);
-    Object.entries(PROG_META).forEach(([k,v])=>{
+    const progsEnVivo = [...new Set(allComps.map(c=>c.programa))];
+    progsEnVivo.forEach(k => {
       if (!existingKeys.includes(k)) {
-        const o = document.createElement('option'); o.value=k; o.textContent=v.icon+' '+k; filterSel.appendChild(o);
+        const meta = PROG_META[k] || { icon:'📋' };
+        const o = document.createElement('option'); o.value=k; o.textContent=meta.icon+' '+k; filterSel.appendChild(o);
       }
     });
   }
@@ -6756,8 +6815,8 @@ function renderMatriz() {
                   <div class="comp-text">${comp.texto}</div>
                 </td>
                 ${cursos.map(curso => {
-                  const laos = (pareo[comp.num]||{})[curso.id];
-                  if (!laos?.length) return `<td><div class="cell-no">—</div></td>`;
+                  const laos = laosPara(comp.num, curso.id);
+                  if (!laos.length) return `<td><div class="cell-no">—</div></td>`;
                   return `<td><div class="cell-wrapper">${laos.map(a =>
                     `<div class="assessment-pill" onclick="showAssessmentDetail('${comp.num}','${curso.id}','${a.replace(/'/g,"\\'").replace(/"/g,"&quot;")}')">
                       <div class="pill-name">✓ ${a}</div>
@@ -6772,7 +6831,7 @@ function renderMatriz() {
         <div class="card">
           <div class="card-header"><div class="card-title">📊 Cobertura por Curso</div></div>
           ${cursos.map(curso => {
-            const covered = comps.filter(c => (pareo[c.num]||{})[curso.id]).length;
+            const covered = comps.filter(c => laosPara(c.num, curso.id).length).length;
             const pct = Math.round(covered/comps.length*100);
             return `<div style="margin-bottom:12px">
               <div style="display:flex;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:4px">
@@ -6787,7 +6846,7 @@ function renderMatriz() {
         <div class="card">
           <div class="card-header"><div class="card-title">🎯 Cobertura por Competencia</div></div>
           ${comps.map(comp => {
-            const covered = cursos.filter(c => (pareo[comp.num]||{})[c.id]).length;
+            const covered = cursos.filter(c => laosPara(comp.num, c.id).length).length;
             const pct = Math.round(covered/cursos.length*100);
             return `<div style="margin-bottom:10px">
               <div style="display:flex;justify-content:space-between;margin-bottom:4px;gap:4px;flex-wrap:wrap">
@@ -6826,10 +6885,13 @@ function renderMatriz() {
 }
 
 function showAssessmentDetail(compNum, cursoId, assessmentName) {
-  const comp = ALL_COMPETENCIAS.find(c => c.num === compNum);
-  const curso = PRELOADED_CURSOS.find(c => c.id === cursoId);
+  const comp = db.bancoCompetencias.find(c => c.num === compNum);
+  const curso = db.cursos.find(c => c.id === cursoId);
   if (!comp || !curso) return;
-  const allLaos = (PRELOADED_PAREO[compNum]||{})[cursoId] || [];
+  const dc = db.competencias.find(x =>
+    x.cursoId === cursoId && (x.codigo === 'C'+compNum || x.codigo === compNum)
+  );
+  const allLaos = dc?.criterios ? dc.criterios.split(' | ').map(l=>l.trim()).filter(Boolean) : [];
   document.getElementById('modal-avaluo-content').innerHTML = `
     <div style="background:var(--cream);border-radius:10px;padding:14px;margin-bottom:14px">
       <div style="font-size:0.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Competencia Fundacional C${comp.num}</div>
@@ -6947,121 +7009,6 @@ function waitForFb(timeoutMs = 8000) {
   setDefaultDate();
 })();
 
-// Competencias específicas del programa MHSA (Administración de Servicios
-// de Salud) — código decimal propio (1.1, 5.5, etc.), independiente del
-// banco de competencias compartido (ALL_COMPETENCIAS) de los demás programas.
-const MHSA_COMPETENCIAS_DATA = [
-  { cursoId:'c_ADSS6525', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6525', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
-  { cursoId:'c_ADSS6525', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
-  { cursoId:'c_ADSS6525', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
-  { cursoId:'c_ADSS6525', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles, and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6591', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
-  { cursoId:'c_ADSS6591', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6592', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
-  { cursoId:'c_ADSS6592', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6583', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
-  { cursoId:'c_ADSS6583', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6583', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management' },
-  { cursoId:'c_ADSS6583', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6583', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6583', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
-  { cursoId:'c_ADSS6579', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
-  { cursoId:'c_ADSS6579', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
-  { cursoId:'c_ADSS6579', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
-  { cursoId:'c_ADSS6585', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6585', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
-  { cursoId:'c_ADSS6585', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-  { cursoId:'c_ADSS6584', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6584', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems' },
-  { cursoId:'c_ADSS6586', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6586', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6586', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6586', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6586', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-  { cursoId:'c_ADSS6607', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6607', codigo:'5.1', descripcion:'Apply cost and financial management theories, principles and system thinking preservative in healthcare.' },
-  { cursoId:'c_ADSS6607', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6607', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
-  { cursoId:'c_ADSS6625', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6625', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
-  { cursoId:'c_ADSS6625', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
-  { cursoId:'c_ADSS6625', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization\'s ability to achieve its vision and goals.' },
-  { cursoId:'c_ADSS6625', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
-  { cursoId:'c_ADSS6598', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
-  { cursoId:'c_ADSS6598', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6598', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles, and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6598', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations' },
-  { cursoId:'c_ADSS6490', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6490', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
-  { cursoId:'c_ADSS6490', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
-  { cursoId:'c_ADSS6490', codigo:'5.3', descripcion:'Develop organizational strategic plans based on environmental scanning that identify the competitive/market forces that shape the organization.' },
-  { cursoId:'c_ADSS6490', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
-  { cursoId:'c_ADSS6490', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-  { cursoId:'c_ADSS6609', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6609', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
-  { cursoId:'c_ADSS6609', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6609', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health services sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
-  { cursoId:'c_ADSS6535', codigo:'5.1', descripcion:'Apply cost and financial management theories, principles and system thinking preservative in healthcare.' },
-  { cursoId:'c_ADSS6535', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making' },
-  { cursoId:'c_ADSS6535', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services' },
-  { cursoId:'c_ADSS6535', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
-  { cursoId:'c_ADSS6535', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
-  { cursoId:'c_ADSS6548', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6548', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6548', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6548', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
-  { cursoId:'c_ADSS6548', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
-  { cursoId:'c_ADSS6548', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
-  { cursoId:'c_ADSS6548', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-  { cursoId:'c_ADSS6610', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6610', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6610', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
-  { cursoId:'c_ADSS6610', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
-  { cursoId:'c_ADSS6610', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
-  { cursoId:'c_ADSS6606', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations' },
-  { cursoId:'c_ADSS6606', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
-  { cursoId:'c_ADSS6606', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
-  { cursoId:'c_ADSS6606', codigo:'2.2', descripcion:'Appraise collaborative, negotiation and mediation skills to address organizational challenges' },
-  { cursoId:'c_ADSS6606', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
-  { cursoId:'c_ADSS6606', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
-  { cursoId:'c_ADSS6606', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6606', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6606', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6606', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6606', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
-  { cursoId:'c_ADSS6606', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
-  { cursoId:'c_ADSS6606', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
-  { cursoId:'c_ADSS6606', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6606', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
-  { cursoId:'c_ADSS6606', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
-  { cursoId:'c_ADSS6606', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
-  { cursoId:'c_ADSS6606', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
-  { cursoId:'c_ADSS6606', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes' },
-  { cursoId:'c_ADSS6606', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-  { cursoId:'c_ADSS6597', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
-  { cursoId:'c_ADSS6597', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
-  { cursoId:'c_ADSS6597', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
-  { cursoId:'c_ADSS6597', codigo:'2.2', descripcion:'Appraise collaborative, negotiation and mediation skills to address organizational challenges.' },
-  { cursoId:'c_ADSS6597', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
-  { cursoId:'c_ADSS6597', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
-  { cursoId:'c_ADSS6597', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
-  { cursoId:'c_ADSS6597', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
-  { cursoId:'c_ADSS6597', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
-  { cursoId:'c_ADSS6597', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
-  { cursoId:'c_ADSS6597', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
-  { cursoId:'c_ADSS6597', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
-  { cursoId:'c_ADSS6597', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
-  { cursoId:'c_ADSS6597', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
-  { cursoId:'c_ADSS6597', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
-  { cursoId:'c_ADSS6597', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
-  { cursoId:'c_ADSS6597', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
-  { cursoId:'c_ADSS6597', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
-  { cursoId:'c_ADSS6597', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
-  { cursoId:'c_ADSS6597', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
-];
-
-
 function preloadExcelData() {
   // Add cursos
   PRELOADED_CURSOS.forEach(c => {
@@ -7091,23 +7038,8 @@ function preloadExcelData() {
       }
     });
   });
-  // Competencias del programa MHSA (código decimal propio, no forma parte
-  // del banco compartido ALL_COMPETENCIAS)
-  MHSA_COMPETENCIAS_DATA.forEach(mc => {
-    const cursoInDb = db.cursos.find(x => x.id === mc.cursoId);
-    if (!cursoInDb) return;
-    const exists = db.competencias.find(x => x.cursoId === mc.cursoId && x.codigo === mc.codigo);
-    if (!exists) {
-      db.competencias.push({
-        id: `${mc.cursoId}_${mc.codigo}`,
-        cursoId: mc.cursoId,
-        codigo: mc.codigo,
-        descripcion: mc.descripcion,
-        criterios: '', tipo: '', peso: '',
-        fechaCreacion: new Date().toISOString()
-      });
-    }
-  });
+  // Competencias del programa MHSA se insertan vía COURSE_DATA (mismo
+  // mecanismo que el resto de los programas) — ver constante COURSE_DATA.
   saveDB();
 }
 
@@ -7502,6 +7434,7 @@ function setAlView(view) {
 }
 
 function renderAlineacion() {
+  _ensureBancoCompetenciasSeeded();
   const isAdmin = currentUser?.rol === 'admin';
   const hint = document.getElementById('al-admin-hint');
   if (hint) hint.style.display = isAdmin ? '' : 'none';
@@ -7514,7 +7447,7 @@ function renderAlineacion() {
     // Always repopulate to catch newly added custom programs
     const existingVals = [...filterSel.options].map(o=>o.value);
     const allProgs = [...new Set([
-      ...ALL_COMPETENCIAS.map(c => c.programa),
+      ...db.bancoCompetencias.map(c => c.programa),
       ...(db.programas||[]).map(p=>p.nombre)
     ])];
     allProgs.forEach(p => {
@@ -7541,12 +7474,13 @@ function renderAlBank(filterProg, isAdmin) {
 
   let html = '';
   progs.forEach(prog => {
-    const comps = ALL_COMPETENCIAS.filter(c => c.programa === prog);
+    const comps = db.bancoCompetencias.filter(c => c.programa === prog);
     if (!comps.length) return;
     html += `<div style="margin-bottom:28px">
       <div class="al-prog-header">
         <span>${prog}</span>
         <span style="font-size:0.78rem;font-weight:400;color:var(--muted)">${comps.length} competencias</span>
+        ${isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="abrirNuevaCompetenciaBank('${prog}')">＋ Nueva Competencia</button>` : ''}
       </div>`;
     comps.forEach(comp => {
       // Find which db courses have this competency linked
@@ -7584,7 +7518,7 @@ function renderAlBank(filterProg, isAdmin) {
           </div>
           ${isAdmin ? `<div style="display:flex;gap:6px;flex-shrink:0">
             <button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${comp.num}','${prog}')" title="Vincular curso">＋ Curso</button>
-            <button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${comp.num}')" title="Editar competencia">✏️</button>
+            <button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${comp.num}','${prog}')" title="Editar competencia">✏️</button>
           </div>` : ''}
         </div>
       </div>`;
@@ -7606,7 +7540,7 @@ function renderAlMatrix(filterProg, isAdmin) {
 
   let html = '';
   progs.forEach(prog => {
-    const comps  = ALL_COMPETENCIAS.filter(c => c.programa === prog);
+    const comps  = db.bancoCompetencias.filter(c => c.programa === prog);
     const cursos = db.cursos.filter(c => c.programa === prog);
     if (!comps.length || !cursos.length) return;
 
@@ -7671,7 +7605,7 @@ function toggleAlignment(compNum, cursoId, prog) {
     notify('Competencia desvinculada', '🔓');
   } else {
     // Vincular — create the link
-    const comp = ALL_COMPETENCIAS.find(c => c.num === compNum);
+    const comp = db.bancoCompetencias.find(c => c.num === compNum);
     if (!comp) return;
     db.competencias.push({
       id: `${cursoId}_C${compNum}_${Date.now()}`,
@@ -7713,7 +7647,7 @@ function guardarVinculacion() {
   const laosRaw = document.getElementById('vc-laos').value.trim();
   const laos    = laosRaw.split('\n').map(l=>l.trim()).filter(Boolean).join(' | ');
   if (!cursoId) { notify('Selecciona un curso', '⚠️'); return; }
-  const comp = ALL_COMPETENCIAS.find(c => c.num === compNum);
+  const comp = db.bancoCompetencias.find(c => c.num === compNum);
   if (!comp) return;
   const exists = db.competencias.find(dc =>
     (dc.codigo === 'C'+compNum || dc.codigo === compNum) && dc.cursoId === cursoId
@@ -7753,7 +7687,7 @@ function editarLAOs(compNum, cursoId) {
   );
   if (!dc) return;
   const curso = db.cursos.find(c => c.id === cursoId);
-  const comp  = ALL_COMPETENCIAS.find(c => c.num === compNum);
+  const comp  = db.bancoCompetencias.find(c => c.num === compNum);
   document.getElementById('el-comp-id').value = dc.id;
   document.getElementById('el-title').textContent = `LAOs — C${compNum} en ${curso?.codigo || ''}`;
   document.getElementById('el-hint').textContent = comp?.texto?.substring(0,80)+'…' || '';
@@ -7773,14 +7707,66 @@ function guardarLAOs() {
   notify('LAOs actualizados ✓');
 }
 
-function abrirEditarCompetenciaBank(compNum) {
-  // Find first db competencia with this code to edit its text/global properties
-  const dc = db.competencias.find(x => x.codigo === 'C'+compNum || x.codigo === compNum);
-  if (dc) {
-    abrirEditarCompetencia(dc.id);
+function abrirNuevaCompetenciaBank(prog) {
+  document.getElementById('bank-comp-title').textContent = '🎯 Nueva Competencia — ' + prog;
+  document.getElementById('bank-comp-id').value = '';
+  document.getElementById('bank-comp-programa').value = prog;
+  document.getElementById('bank-comp-programa-display').value = prog;
+  document.getElementById('bank-comp-num').value = '';
+  document.getElementById('bank-comp-texto').value = '';
+  openModal('modal-competencia-bank');
+}
+
+function abrirEditarCompetenciaBank(compNum, prog) {
+  const bc = db.bancoCompetencias.find(c => c.num === compNum && c.programa === prog);
+  if (!bc) { notify('No se encontró esa competencia en el banco', '⚠️'); return; }
+  document.getElementById('bank-comp-title').textContent = '✏️ Editar Competencia — ' + prog;
+  document.getElementById('bank-comp-id').value = bc.id;
+  document.getElementById('bank-comp-programa').value = bc.programa;
+  document.getElementById('bank-comp-programa-display').value = bc.programa;
+  document.getElementById('bank-comp-num').value = bc.num;
+  document.getElementById('bank-comp-texto').value = bc.texto;
+  openModal('modal-competencia-bank');
+}
+
+function guardarCompetenciaBank() {
+  const editId = document.getElementById('bank-comp-id').value;
+  const programa = document.getElementById('bank-comp-programa').value;
+  const num = document.getElementById('bank-comp-num').value.trim();
+  const texto = document.getElementById('bank-comp-texto').value.trim();
+  if (!num || !texto) { notify('Completa el código y la descripción', '⚠️'); return; }
+
+  if (!db.bancoCompetencias) db.bancoCompetencias = [];
+
+  if (editId) {
+    const bc = db.bancoCompetencias.find(c => c.id === editId);
+    if (!bc) return;
+    const numAnterior = bc.num;
+    bc.num = num;
+    bc.texto = texto;
+    // Si cambió el código, actualiza también las instancias de curso ya
+    // vinculadas para que no se pierda el enlace (db.competencias.codigo)
+    if (numAnterior !== num) {
+      db.competencias.forEach(dc => {
+        if (dc.codigo === 'C'+numAnterior || dc.codigo === numAnterior) {
+          dc.codigo = ('C'+numAnterior === dc.codigo) ? 'C'+num : num;
+        }
+      });
+    }
+    notify('Competencia actualizada ✓');
   } else {
-    notify('No hay instancias de esta competencia en la base de datos todavía', 'ℹ️');
+    const dup = db.bancoCompetencias.find(c => c.num === num && c.programa === programa);
+    if (dup) { notify('Ya existe una competencia con ese código en este programa', '⚠️'); return; }
+    db.bancoCompetencias.push({
+      id: 'banco_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      num, texto, programa,
+      fechaCreacion: new Date().toISOString(),
+    });
+    notify('Competencia añadida al banco ✓');
   }
+  saveDB();
+  closeModal('modal-competencia-bank');
+  renderAlineacion();
 }
 
 
@@ -8027,8 +8013,15 @@ function wizGuardar() {
 
   // 3. Create competencies & alignments from matrix
   comps.forEach((comp, pi) => {
-    // Add to ALL_COMPETENCIAS runtime array so it shows in bank/matrix views
-    ALL_COMPETENCIAS.push({ num: comp.codigo, texto: comp.texto, programa: progNombre });
+    // Se guarda en la colección en vivo (antes solo se agregaba a un arreglo
+    // en memoria que se perdía al recargar la página, y nunca aparecía en
+    // Matriz de Pareo)
+    if (!db.bancoCompetencias) db.bancoCompetencias = [];
+    db.bancoCompetencias.push({
+      id: 'banco_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      num: comp.codigo, texto: comp.texto, programa: progNombre,
+      fechaCreacion: new Date().toISOString(),
+    });
 
     cursoIds.forEach((cu, ci) => {
       const btn = document.getElementById(`wiz-tog-${pi}-${ci}`);
@@ -10107,6 +10100,34 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-editar-laos')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarLAOs()">💾 Guardar LAOs</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Competencia del Banco (crear/editar en db.bancoCompetencias) -->
+<div id="modal-competencia-bank" class="modal-overlay">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <div class="modal-title" id="bank-comp-title">🎯 Nueva Competencia</div>
+      <button class="modal-close" onclick="closeModal('modal-competencia-bank')">✕</button>
+    </div>
+    <input type="hidden" id="bank-comp-id">
+    <input type="hidden" id="bank-comp-programa">
+    <div class="form-group">
+      <label>Programa</label>
+      <input type="text" id="bank-comp-programa-display" disabled>
+    </div>
+    <div class="form-group">
+      <label>Código (ej. 5.5, HE1, DH3) *</label>
+      <input type="text" id="bank-comp-num" placeholder="ej. 5.5">
+    </div>
+    <div class="form-group">
+      <label>Descripción *</label>
+      <textarea id="bank-comp-texto" rows="4" placeholder="Texto completo de la competencia..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-competencia-bank')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarCompetenciaBank()">💾 Guardar</button>
     </div>
   </div>
 </div>
