@@ -3658,6 +3658,36 @@ function _ensureProgramCatalogSeeded() {
   if (changed) saveDB();
 }
 
+// Limpieza (por el historial de cambios de formato de código en MHSA): si
+// el mismo curso terminó con dos registros de competencia para el mismo
+// código pero en formatos distintos (ej. "1.1" y "C1.1", de cuando ese
+// formato cambió mientras se armaba MHSA), se fusionan en uno solo —
+// prefiriendo el que sí tenga criterios/LAOs, y si hay empate el más reciente.
+function _ensureCompetenciasSinDuplicados() {
+  if (!db.competencias || !db.competencias.length) return;
+  const grupos = {};
+  db.competencias.forEach(dc => {
+    const normalizado = (dc.codigo || '').replace(/^C(?=\d)/, '');
+    const key = dc.cursoId + '::' + normalizado;
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(dc);
+  });
+  const aEliminar = new Set();
+  Object.values(grupos).forEach(group => {
+    if (group.length <= 1) return;
+    const conCriterios = group.filter(x => x.criterios);
+    const candidatos = conCriterios.length ? conCriterios : group;
+    const ganador = candidatos.slice().sort((a,b) =>
+      new Date(b.fechaCreacion||0) - new Date(a.fechaCreacion||0))[0];
+    group.forEach(x => { if (x.id !== ganador.id) aEliminar.add(x.id); });
+  });
+  if (aEliminar.size) {
+    db.competencias = db.competencias.filter(x => !aEliminar.has(x.id));
+    saveDB();
+    console.log(`Se fusionaron ${aEliminar.size} competencia(s) duplicada(s)`);
+  }
+}
+
 // Migra el banco de competencias (antes hardcodeado en ALL_COMPETENCIAS) a una
 // colección real de la base de datos, para que Matriz de Pareo, Alineación, y
 // el Asistente de nuevo programa lean todos en vivo, y cualquier programa que
@@ -6741,6 +6771,7 @@ function seleccionarNivel(compId, valor) {
 // ======================== RENDER MATRIZ ========================
 function renderMatriz() {
   _ensureBancoCompetenciasSeeded();
+  _ensureCompetenciasSinDuplicados();
   const el = document.getElementById('matriz-container');
   const allCursos = db.cursos;
   const allComps = db.bancoCompetencias;
@@ -6749,10 +6780,16 @@ function renderMatriz() {
   // LAOs?) de db.competencias EN VIVO — antes venía de PRELOADED_PAREO,
   // hardcodeado y desconectado de lo que se crea/edita desde la app.
   function laosPara(compNum, cursoId) {
-    const dc = db.competencias.find(x =>
+    // Si por algún motivo hay más de un registro para el mismo curso+código
+    // (ej. residuo de una migración anterior con formato de código distinto),
+    // se prefiere el que sí tenga criterios/LAOs en vez de tomar el primero
+    // que aparezca en el arreglo.
+    const matches = db.competencias.filter(x =>
       x.cursoId === cursoId && (x.codigo === 'C'+compNum || x.codigo === compNum)
     );
-    if (!dc || !dc.criterios) return [];
+    if (!matches.length) return [];
+    const dc = matches.find(x => x.criterios) || matches[0];
+    if (!dc.criterios) return [];
     return dc.criterios.split(' | ').map(l => l.trim()).filter(Boolean);
   }
 
