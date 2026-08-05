@@ -689,6 +689,59 @@
   .av-grid-table th { background: #1a1a1a !important; color: #ffffff !important; }
 
 
+  /* ── DEPARTAMENTOS Y PROGRAMAS: árbol + detalle ────────────── */
+  .prog-mgr-layout {
+    display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start;
+  }
+  .prog-tree-dept {
+    border: 1.5px solid var(--border); border-radius: 10px; margin-bottom: 10px;
+    overflow: hidden; background: var(--white);
+  }
+  .prog-tree-dept-hdr {
+    display: flex; align-items: center; gap: 6px; padding: 10px 12px;
+    cursor: pointer; background: var(--cream); transition: background 0.15s;
+  }
+  .prog-tree-dept-hdr:hover, .prog-tree-dept-hdr.active { background: #fde8d8; }
+  .prog-tree-dept-name { font-weight: 700; font-size: 0.85rem; }
+  .prog-tree-progs { padding: 4px 0; }
+  .prog-tree-prog {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px 8px 24px;
+    cursor: pointer; transition: background 0.15s; border-top: 1px solid var(--border);
+  }
+  .prog-tree-prog:hover, .prog-tree-prog.active { background: var(--cream); }
+  .prog-card-name { font-weight: 600; }
+  .prog-card-type { font-size: 0.7rem; color: var(--muted); }
+  .prog-mgr-detail {
+    border: 1.5px solid var(--border); border-radius: 12px; padding: 20px;
+    background: var(--white); min-height: 320px;
+  }
+  .prog-detail-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; min-height: 260px; text-align: center;
+  }
+  .prog-detail-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 14px;
+    border-bottom: 2px solid var(--egsp-coral);
+  }
+  .prog-detail-name { font-family: 'Montserrat', sans-serif; font-size: 1.15rem; font-weight: 700; }
+  .prog-detail-sub { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
+  .prog-section-title {
+    font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin: 16px 0 8px;
+  }
+  .prog-course-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .prog-course-row:last-child { border-bottom: none; }
+  .prog-course-code {
+    font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 0.78rem;
+    color: var(--rust); white-space: nowrap;
+  }
+  .prog-course-name { font-size: 0.84rem; }
+  .prog-course-dept { font-size: 0.72rem; color: var(--muted); }
+
   /* ── ALINEACIÓN TAB ─────────────────────────────────────── */
   .al-comp-card {
     border: 1.5px solid var(--border); border-radius: 10px;
@@ -1946,25 +1999,28 @@
 
 <!-- ==================== DEPARTAMENTOS Y PROGRAMAS ==================== -->
 <div id="panel-departamentos" class="panel">
-  <div style="margin-bottom:18px">
-    <div class="section-title">🏛️ Departamentos y Programas</div>
-    <div class="section-sub">Catálogo maestro — cada programa pertenece a un departamento</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+    <div>
+      <div class="section-title">🏛️ Departamentos y Programas</div>
+      <div class="section-sub">Catálogo maestro — cada programa pertenece a un departamento, cada curso a un programa</div>
+    </div>
+    <div style="display:flex;gap:8px" id="dp-admin-actions">
+      <button class="btn btn-primary btn-sm" onclick="abrirNuevoDepartamento()">＋ Departamento</button>
+      <button class="btn btn-primary btn-sm" onclick="abrirNuevoPrograma()">＋ Programa</button>
+    </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;align-items:start">
+  <div class="prog-mgr-layout">
     <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <strong style="font-size:0.92rem">Departamentos</strong>
-        <button class="btn btn-primary btn-sm" onclick="abrirNuevoDepartamento()">+ Nuevo</button>
-      </div>
-      <div id="departamentos-list"></div>
+      <input type="text" id="prog-search" placeholder="🔍 Buscar departamento o programa..." oninput="renderDepartamentosProgramas()"
+        style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Montserrat',sans-serif;font-size:0.84rem;background:var(--white);margin-bottom:10px">
+      <div id="prog-tree"></div>
     </div>
-    <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <strong style="font-size:0.92rem">Programas</strong>
-        <button class="btn btn-primary btn-sm" onclick="abrirNuevoPrograma()">+ Nuevo</button>
+    <div class="prog-mgr-detail" id="prog-detail">
+      <div class="prog-detail-empty">
+        <div style="font-size:2.5rem;opacity:0.2">🏛</div>
+        <div style="font-size:0.88rem;color:var(--muted)">Selecciona un departamento o programa</div>
       </div>
-      <div id="programas-list"></div>
     </div>
   </div>
 </div>
@@ -1999,6 +2055,7 @@
     <div class="form-group">
       <label>Nombre *</label>
       <input type="text" id="prog-cat-nombre" placeholder="ej. MPH Epidemiology">
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Renombrar actualiza automáticamente todos los cursos, competencias y facultad ligados a este programa.</div>
     </div>
     <div class="form-group">
       <label>Departamento</label>
@@ -3714,41 +3771,193 @@ function _ensureBancoCompetenciasSeeded() {
 }
 
 
+let _progTreeSelected = null; // { type:'dept'|'prog', id }
+
 function renderDepartamentosProgramas() {
   _ensureProgramCatalogSeeded();
+  const isAdmin = currentUser?.rol === 'admin';
+  const actionsEl = document.getElementById('dp-admin-actions');
+  if (actionsEl) actionsEl.style.display = isAdmin ? 'flex' : 'none';
 
-  const deptEl = document.getElementById('departamentos-list');
-  if (!db.departamentos.length) {
-    deptEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🏛️</div><p>Aún no hay departamentos</p></div>';
-  } else {
-    deptEl.innerHTML = db.departamentos.map(d => {
-      const numProgs = db.programas.filter(p => p.departamentoId === d.id).length;
-      return `<div class="card" style="margin-bottom:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
-        <div><strong>${d.nombre}</strong><div style="font-size:0.76rem;color:var(--muted)">${numProgs} programa(s)</div></div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${d.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="eliminarDepartamento('${d.id}')">🗑</button>
-        </div>
-      </div>`;
-    }).join('');
+  const treeEl = document.getElementById('prog-tree');
+  if (!treeEl) return;
+  const search = (document.getElementById('prog-search')?.value || '').toLowerCase().trim();
+
+  const byDept = {};
+  db.departamentos.forEach(d => { byDept[d.id] = []; });
+  byDept['__none__'] = [];
+  db.programas.forEach(p => {
+    const key = (p.departamentoId && byDept[p.departamentoId]) ? p.departamentoId : '__none__';
+    byDept[key].push(p);
+  });
+
+  function progRow(p) {
+    if (search && !p.nombre.toLowerCase().includes(search)) return '';
+    const nc = db.cursos.filter(c => c.programaId === p.id).length;
+    return `<div class="prog-tree-prog" data-prog-id="${p.id}" onclick="selectPrograma('${p.id}')">
+      <div style="flex:1;min-width:0"><div class="prog-card-name" style="font-size:0.84rem">${p.nombre}</div></div>
+      <span style="font-size:0.72rem;color:var(--muted);white-space:nowrap">${nc} curso${nc!==1?'s':''}</span>
+      ${isAdmin ? `<button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.7rem;margin-left:4px"
+        onclick="event.stopPropagation();abrirEditarPrograma('${p.id}')">✏️</button>` : ''}
+    </div>`;
   }
 
-  const progEl = document.getElementById('programas-list');
-  if (!db.programas.length) {
-    progEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🎓</div><p>Aún no hay programas</p></div>';
-  } else {
-    progEl.innerHTML = db.programas.map(p => {
-      const depto = db.departamentos.find(d => d.id === p.departamentoId);
-      return `<div class="card" style="margin-bottom:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
-        <div><strong>${p.nombre}</strong><div style="font-size:0.76rem;color:var(--muted)">${depto ? depto.nombre : '⚠️ Sin departamento asignado'}</div></div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${p.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="eliminarPrograma('${p.id}')">🗑</button>
-        </div>
-      </div>`;
-    }).join('');
+  let html = '';
+  db.departamentos.forEach(d => {
+    const progs = byDept[d.id] || [];
+    const rows = progs.map(progRow).filter(Boolean).join('');
+    if (search && !d.nombre.toLowerCase().includes(search) && !rows) return;
+    html += `<div class="prog-tree-dept">
+      <div class="prog-tree-dept-hdr" data-dept-id="${d.id}" onclick="selectDept('${d.id}')">
+        <div style="flex:1"><span class="prog-tree-dept-name">${d.nombre}</span></div>
+        <span style="font-size:0.72rem;color:var(--muted)">${progs.length} prog.</span>
+        ${isAdmin ? `<button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.7rem;margin-left:6px"
+          onclick="event.stopPropagation();abrirEditarDepartamento('${d.id}')">✏️</button>` : ''}
+      </div>
+      <div class="prog-tree-progs">${rows || '<div style="padding:6px 16px 10px;font-size:0.75rem;color:var(--muted)">Sin programas</div>'}</div>
+    </div>`;
+  });
+
+  const noneRows = (byDept['__none__'] || []).map(progRow).filter(Boolean).join('');
+  if (noneRows) {
+    html += `<div class="prog-tree-dept">
+      <div class="prog-tree-dept-hdr" style="cursor:default;background:var(--cream)">
+        <span class="prog-tree-dept-name" style="color:var(--muted)">Sin Departamento</span>
+      </div>
+      <div class="prog-tree-progs">${noneRows}</div>
+    </div>`;
+  }
+
+  if (!html) html = '<div class="empty-state" style="padding:30px 10px"><div class="empty-icon">🏛</div><p>No se encontraron resultados</p></div>';
+  treeEl.innerHTML = html;
+
+  // Restaurar selección/detalle si había algo seleccionado antes de re-renderizar
+  if (_progTreeSelected) {
+    if (_progTreeSelected.type === 'dept') selectDept(_progTreeSelected.id);
+    else selectPrograma(_progTreeSelected.id);
   }
 }
+
+function _clearTreeActive() {
+  document.querySelectorAll('.prog-tree-prog, .prog-tree-dept-hdr').forEach(el => el.classList.remove('active'));
+}
+
+function selectDept(deptId) {
+  _progTreeSelected = { type: 'dept', id: deptId };
+  _clearTreeActive();
+  const hdr = document.querySelector(`.prog-tree-dept-hdr[data-dept-id="${deptId}"]`);
+  if (hdr) hdr.classList.add('active');
+
+  const detail = document.getElementById('prog-detail');
+  if (!detail) return;
+  const isAdmin = currentUser?.rol === 'admin';
+  const dept = db.departamentos.find(d => d.id === deptId);
+  if (!dept) { detail.innerHTML = '<div class="prog-detail-empty"><p>No encontrado</p></div>'; return; }
+  const progs = db.programas.filter(p => p.departamentoId === deptId);
+  const cursos = db.cursos.filter(c => progs.some(p => p.id === c.programaId));
+  const numFacultad = new Set((db.facultad || []).filter(f => f.departamentoId === deptId).map(f => f.id)).size;
+
+  detail.innerHTML = `
+    <div class="prog-detail-header">
+      <div><div class="prog-detail-name">🏛 ${dept.nombre}</div></div>
+      ${isAdmin ? `<div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${deptId}')">✏️ Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarDepartamento('${deptId}')">🗑</button>
+      </div>` : ''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:10px">
+      <div class="dash-kpi" style="padding:12px 14px">
+        <div class="dash-kpi-icon">🎓</div><div class="dash-kpi-num" style="font-size:1.4rem">${progs.length}</div>
+        <div class="dash-kpi-label">Programas</div>
+      </div>
+      <div class="dash-kpi" style="padding:12px 14px">
+        <div class="dash-kpi-icon">📚</div><div class="dash-kpi-num" style="font-size:1.4rem">${cursos.length}</div>
+        <div class="dash-kpi-label">Cursos</div>
+      </div>
+      <div class="dash-kpi" style="padding:12px 14px">
+        <div class="dash-kpi-icon">👩‍🏫</div><div class="dash-kpi-num" style="font-size:1.4rem">${numFacultad}</div>
+        <div class="dash-kpi-label">Facultad</div>
+      </div>
+    </div>
+    <div class="prog-section-title">🎓 Programas (${progs.length})</div>
+    ${progs.length ? progs.map(p => {
+      const nc = db.cursos.filter(c => c.programaId === p.id).length;
+      return `<div class="prog-course-row" style="cursor:pointer" onclick="selectPrograma('${p.id}')">
+        <div style="flex:1;min-width:0"><div style="font-size:0.84rem;font-weight:700">${p.nombre}</div></div>
+        <span style="font-size:0.72rem;color:var(--muted)">${nc} curso${nc !== 1 ? 's' : ''}</span>
+      </div>`;
+    }).join('') : '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">Sin programas en este departamento.</div>'}
+  `;
+}
+
+function selectPrograma(programaId) {
+  _progTreeSelected = { type: 'prog', id: programaId };
+  _clearTreeActive();
+  const row = document.querySelector(`.prog-tree-prog[data-prog-id="${programaId}"]`);
+  if (row) row.classList.add('active');
+
+  const detail = document.getElementById('prog-detail');
+  if (!detail) return;
+  const isAdmin = currentUser?.rol === 'admin';
+  const prog = db.programas.find(p => p.id === programaId);
+  if (!prog) { detail.innerHTML = '<div class="prog-detail-empty"><p>No encontrado</p></div>'; return; }
+
+  const cursos = db.cursos.filter(c => c.programaId === programaId);
+  const comps = db.bancoCompetencias.filter(c => c.programa === prog.nombre);
+  const deptNombre = prog.departamentoId ? (db.departamentos.find(d => d.id === prog.departamentoId)?.nombre || '') : '';
+  const otrosProgramas = db.programas.filter(p => p.id !== programaId);
+  const progOpts = otrosProgramas.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+
+  const cursosHtml = cursos.length ? cursos.map(c => `
+    <div class="prog-course-row">
+      <span class="prog-course-code">${c.codigo}</span>
+      <div style="flex:1;min-width:0">
+        <div class="prog-course-name" title="${c.nombre}">${c.nombre}</div>
+        <div class="prog-course-dept">${c.departamento || '—'} · ${c.creditos || '—'} cr.</div>
+      </div>
+      ${isAdmin ? `<select style="font-size:0.72rem;border:1.5px solid var(--border);border-radius:6px;padding:3px 8px;font-family:'Montserrat',sans-serif;background:var(--paper);cursor:pointer"
+        onchange="reassignCurso('${c.id}',this.value,this)" title="Mover a otro programa">
+        <option value="">Mover a…</option>${progOpts}
+      </select>` : ''}
+    </div>`).join('')
+    : '<div style="color:var(--muted);font-size:0.82rem;padding:10px 0">Sin cursos en este programa.</div>';
+
+  const compsHtml = comps.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${comps.map(c => `<span class="badge badge-blue" style="font-size:0.72rem">C${c.num}</span>`).join('')}</div>`
+    : '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">Sin competencias registradas en el banco.</div>';
+
+  detail.innerHTML = `
+    <div class="prog-detail-header">
+      <div>
+        <div class="prog-detail-name">${prog.nombre}</div>
+        <div class="prog-detail-sub">${deptNombre ? '🏛 ' + deptNombre : 'Sin departamento asignado'}</div>
+      </div>
+      ${isAdmin ? `<div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${programaId}')">✏️ Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarPrograma('${programaId}')">🗑</button>
+      </div>` : ''}
+    </div>
+    <div class="prog-section-title">📚 Cursos (${cursos.length})</div>
+    <div style="max-height:320px;overflow-y:auto">${cursosHtml}</div>
+    <div class="prog-section-title">🎯 Competencias (${comps.length})</div>
+    ${compsHtml}
+  `;
+}
+
+function reassignCurso(cursoId, newProgramaId, selEl) {
+  if (!newProgramaId) return;
+  const nuevoPrograma = db.programas.find(p => p.id === newProgramaId);
+  if (!nuevoPrograma) return;
+  if (!confirm(`¿Mover este curso al programa "${nuevoPrograma.nombre}"?`)) { selEl.value = ''; return; }
+  const curso = db.cursos.find(c => c.id === cursoId);
+  if (!curso) return;
+  curso.programaId = newProgramaId;
+  curso.programa = nuevoPrograma.nombre; // mantiene el string sincronizado para badges/filtros existentes
+  saveDB();
+  notify('Curso movido a "' + nuevoPrograma.nombre + '" ✓');
+  renderDepartamentosProgramas();
+}
+
 
 function abrirNuevoDepartamento() {
   document.getElementById('depto-modal-title').textContent = '🏛️ Nuevo Departamento';
@@ -3787,6 +3996,7 @@ function eliminarDepartamento(id) {
   if (enUso > 0 && !confirm(`${enUso} programa(s) están asignados a este departamento y quedarán "sin asignar". ¿Continuar?`)) return;
   db.departamentos = db.departamentos.filter(d => d.id !== id);
   db.programas.forEach(p => { if (p.departamentoId === id) p.departamentoId = null; });
+  if (_progTreeSelected?.id === id) _progTreeSelected = null;
   saveDB();
   renderDepartamentosProgramas();
   notify('Departamento eliminado', '🗑');
@@ -3822,7 +4032,23 @@ function guardarProgramaCatalogo() {
   const editId = document.getElementById('prog-cat-edit-id').value;
   if (editId) {
     const p = db.programas.find(x => x.id === editId);
-    if (p) { p.nombre = nombre; p.departamentoId = departamentoId; }
+    if (p) {
+      const nombreAnterior = p.nombre;
+      p.nombre = nombre;
+      p.departamentoId = departamentoId;
+      // Renombrar en cascada: mantiene sincronizados los strings denormalizados
+      // que usan cursos, el banco de competencias, y facultad — para que nada
+      // quede "huérfano" apuntando al nombre viejo.
+      if (nombreAnterior !== nombre) {
+        db.cursos.forEach(c => { if (c.programaId === editId) c.programa = nombre; });
+        db.bancoCompetencias.forEach(bc => { if (bc.programa === nombreAnterior) bc.programa = nombre; });
+        (db.facultad || []).forEach(f => {
+          if (f.programaIds && f.programaIds.includes(editId) && f.programas) {
+            f.programas = f.programas.split('|').map(s => s.trim() === nombreAnterior ? nombre : s.trim()).join('|');
+          }
+        });
+      }
+    }
   } else {
     if (db.programas.some(p => p.nombre.toLowerCase() === nombre.toLowerCase())) {
       notify('Ya existe un programa con ese nombre', '⚠️'); return;
@@ -3838,8 +4064,14 @@ function guardarProgramaCatalogo() {
   notify('Programa guardado ✓');
 }
 function eliminarPrograma(id) {
-  if (!confirm('¿Eliminar este programa del catálogo? Los cursos que ya lo usan no se modifican (todavía es texto libre).')) return;
+  const prog = db.programas.find(p => p.id === id);
+  if (!prog) return;
+  const cursosEnUso = db.cursos.filter(c => c.programaId === id).length;
+  if (cursosEnUso > 0 && !confirm(`${cursosEnUso} curso(s) usan este programa y quedarán "sin programa asignado". ¿Continuar?`)) return;
+  else if (!cursosEnUso && !confirm('¿Eliminar este programa del catálogo?')) return;
+  db.cursos.forEach(c => { if (c.programaId === id) { c.programaId = null; } });
   db.programas = db.programas.filter(p => p.id !== id);
+  _progTreeSelected = null;
   saveDB();
   renderDepartamentosProgramas();
   notify('Programa eliminado', '🗑');
