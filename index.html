@@ -3631,7 +3631,7 @@ async function confirmarImportarProfesores() {
 // hardcodeados en PROG_ORDER (usado en Matriz/Alineación) para que también
 // aparezcan aquí como registros reales y editables.
 const PROG_ORDER_DEFAULT = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
-  'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM','MHSA'];
+  'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM','MHSA','DrPH Social Determinants of Health'];
 
 function _ensureProgramCatalogSeeded() {
   if (!db.programas) db.programas = [];
@@ -6505,6 +6505,15 @@ const PRELOADED_CURSOS = [
   { id:'c_ADSS6610', codigo:'ADSS 6610', nombre:'Health Insurance',                                   departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
   { id:'c_ADSS6606', codigo:'ADSS 6606', nombre:'Capstone in Health Services Administration',         departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
   { id:'c_ADSS6597', codigo:'ADSS 6597', nombre:'Residency in Health Services Administration',        departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  // ── DrPH Social Determinants of Health (DESS) ────────────────────────────
+  { id:'c_DESS8011', codigo:'DESS 8011', nombre:'Social Determinants of Health Graduate Seminar I', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8012', codigo:'DESS 8012', nombre:'Social Determinants of Health Graduate Seminar II', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8105', codigo:'DESS 8105', nombre:'Social Theory and Public Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8201', codigo:'DESS 8201', nombre:'Qualitative Methods in Social Determinants of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8202', codigo:'DESS 8202', nombre:'Statistical Measurement and Argumentation in Social Determinants of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8206', codigo:'DESS 8206', nombre:'Community Building and Action on the Social Determinants of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8208', codigo:'DESS 8208', nombre:'Political Economy of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8305', codigo:'DESS 8305', nombre:'Health and Social Policy Analysis', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
 ];
 
 const ALL_COMPETENCIAS = [
@@ -6623,6 +6632,12 @@ const ALL_COMPETENCIAS = [
   { num:'5.9', texto:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.', programa:'MHSA' },
   { num:'6.1', texto:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.', programa:'MHSA' },
   { num:'6.2', texto:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.', programa:'MHSA' },
+  // ── DrPH Social Determinants of Health (DESS) — 5 ────────────────────────
+  { num:'DESS1', texto:'Evaluate emergent public health problems through the critical examination of public health discourses and historical practices to advance health equity.', programa:'DrPH Social Determinants of Health' },
+  { num:'DESS2', texto:'Apply social theories, political economy and intersectoral analysis to address public health issues in diverse scenarios.', programa:'DrPH Social Determinants of Health' },
+  { num:'DESS3', texto:'Apply community building and organization models and strategies for social determinants of health issues.', programa:'DrPH Social Determinants of Health' },
+  { num:'DESS4', texto:'Use research from diverse methodological approaches to disclose and address the impact of social determinants of health on the policy making process.', programa:'DrPH Social Determinants of Health' },
+  { num:'DESS5', texto:'Formulate healthy public policies to promote the health and wellbeing of the population from an equity and social justice perspective.', programa:'DrPH Social Determinants of Health' },
 ];
 
 const COURSE_DATA = {
@@ -6730,6 +6745,15 @@ const COURSE_DATA = {
   'c_ADSS6610': { comps:['4.2','4.3','5.4','5.8','6.1'], laos:['LAO 1: (pendiente de definir)'] },
   'c_ADSS6606': { comps:['1.1','1.2','2.1','2.2','3.1','3.2','4.1','4.2','4.3','4.4','5.1','5.2','5.4','5.5','5.6','5.7','5.8','5.9','6.1','6.2'], laos:['LAO 1: (pendiente de definir)'] },
   'c_ADSS6597': { comps:['1.1','1.2','2.1','2.2','3.1','3.2','4.1','4.2','4.3','4.4','5.1','5.2','5.4','5.5','5.6','5.7','5.8','5.9','6.1','6.2'], laos:['LAO 1: (pendiente de definir)'] },
+  // ── DrPH Social Determinants of Health (DESS) ────────────────────────────
+  'c_DESS8011': { comps:['DESS1','DESS4'], laos:['LAO 1: Research Topic Concept Paper'] },
+  'c_DESS8012': { comps:['DESS1','DESS4'], laos:['LAO 1: Final Annotated Bibliography'] },
+  'c_DESS8105': { comps:['DESS1','DESS2'], laos:['LAO 1: Final Paper on Theoretical Approach to Public Health Issue'] },
+  'c_DESS8201': { comps:['DESS1','DESS4'], laos:['LAO 1: Qualitative Research Proposal'] },
+  'c_DESS8202': { comps:['DESS1','DESS2','DESS4'], laos:['LAO 1: Final Essay'] },
+  'c_DESS8305': { comps:['DESS1','DESS2','DESS5'], laos:['LAO 1: Policy Paper'] },
+  'c_DESS8208': { comps:['DESS1','DESS2'], laos:['LAO 1: Final Essay'] },
+  'c_DESS8206': { comps:['DESS3'], laos:['LAO 1: Final Reflection Paper'] },
 };
 
 // Nota: PRELOADED_PAREO (matriz hardcodeada compNum -> cursoId -> laos[]) se
@@ -6810,6 +6834,7 @@ function renderMatriz() {
     'DrPH Environmental Health':{ label:'DrPH Environmental Health — Specialty Competencies', badge:'badge-green', icon:'♻️' },
     'DrPH HSAM':              { label:'DrPH HSAM — Specialty Competencies',                 badge:'badge-blue',   icon:'🏥' },
     'MHSA':                   { label:'MHSA — Health Services Administration Competencies', badge:'badge-purple', icon:'💼' },
+    'DrPH Social Determinants of Health': { label:'DrPH Social Determinants of Health — Specialty Competencies', badge:'badge-rust', icon:'🌍' },
   };
   // Poblar el filtro con los programas que EXISTEN en vivo en el banco de
   // competencias (antes solo mostraba los que estaban en PROG_META)
