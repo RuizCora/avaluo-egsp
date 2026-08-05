@@ -3629,7 +3629,7 @@ async function confirmarImportarProfesores() {
 // hardcodeados en PROG_ORDER (usado en Matriz/Alineación) para que también
 // aparezcan aquí como registros reales y editables.
 const PROG_ORDER_DEFAULT = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
-  'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM'];
+  'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM','MHSA'];
 
 function _ensureProgramCatalogSeeded() {
   if (!db.programas) db.programas = [];
@@ -6425,6 +6425,28 @@ const PRELOADED_CURSOS = [
   { id:'c_ADSS8206', codigo:'ADSS 8206', nombre:'Economic Analysis for Health System',                                departamento:'Health Services Admin', creditos:'3',       programa:'DrPH HSAM' },
   { id:'c_ADSS8305', codigo:'ADSS 8305', nombre:'Health Services Research',                                           departamento:'Health Services Admin', creditos:'3',              programa:'DrPH HSAM' },
   { id:'c_ADSS8307', codigo:'ADSS 8307', nombre:'Health Services Evaluation',                                         departamento:'Health Services Admin', creditos:'3',       programa:'DrPH HSAM' },
+  // ── MHSA – Master in Health Services Administration ─────────────────────
+  // Nota: los nombres de curso son la mejor aproximación a partir del código
+  // y las competencias alineadas (el archivo fuente solo traía el código y
+  // una abreviatura) — revisar/corregir contra el catálogo oficial si hace falta.
+  { id:'c_ADSS6525', codigo:'ADSS 6525', nombre:'Introduction to Health Services Administration',    departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6591', codigo:'ADSS 6591', nombre:'Quantitative Methods I',                             departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6592', codigo:'ADSS 6592', nombre:'Quantitative Methods II',                            departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6583', codigo:'ADSS 6583', nombre:'Legal Aspects of Health Services Management',        departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6579', codigo:'ADSS 6579', nombre:'Organizational Behavior in Health Services',         departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6585', codigo:'ADSS 6585', nombre:'Health Economics',                                   departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6584', codigo:'ADSS 6584', nombre:'Health Policy',                                      departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6586', codigo:'ADSS 6586', nombre:'Health Services Delivery',                           departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6607', codigo:'ADSS 6607', nombre:'Healthcare Accounting',                               departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6625', codigo:'ADSS 6625', nombre:'Human Resources Management in Health Services',      departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6598', codigo:'ADSS 6598', nombre:'Health Information Systems',                         departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6490', codigo:'ADSS 6490', nombre:'Health Services Planning',                           departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6609', codigo:'ADSS 6609', nombre:'Health Services Finance',                            departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6535', codigo:'ADSS 6535', nombre:'Quality Management in Health Services',              departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6548', codigo:'ADSS 6548', nombre:'Hospital Administration',                            departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6610', codigo:'ADSS 6610', nombre:'Health Insurance',                                   departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6606', codigo:'ADSS 6606', nombre:'Capstone in Health Services Administration',         departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
+  { id:'c_ADSS6597', codigo:'ADSS 6597', nombre:'Residency in Health Services Administration',        departamento:'Health Services Admin', creditos:'3', programa:'MHSA' },
 ];
 
 const ALL_COMPETENCIAS = [
@@ -6903,6 +6925,121 @@ function waitForFb(timeoutMs = 8000) {
   setDefaultDate();
 })();
 
+// Competencias específicas del programa MHSA (Administración de Servicios
+// de Salud) — código decimal propio (1.1, 5.5, etc.), independiente del
+// banco de competencias compartido (ALL_COMPETENCIAS) de los demás programas.
+const MHSA_COMPETENCIAS_DATA = [
+  { cursoId:'c_ADSS6525', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6525', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
+  { cursoId:'c_ADSS6525', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
+  { cursoId:'c_ADSS6525', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
+  { cursoId:'c_ADSS6525', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles, and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6591', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
+  { cursoId:'c_ADSS6591', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6592', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
+  { cursoId:'c_ADSS6592', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6583', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
+  { cursoId:'c_ADSS6583', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6583', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management' },
+  { cursoId:'c_ADSS6583', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6583', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6583', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
+  { cursoId:'c_ADSS6579', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
+  { cursoId:'c_ADSS6579', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
+  { cursoId:'c_ADSS6579', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
+  { cursoId:'c_ADSS6585', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6585', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
+  { cursoId:'c_ADSS6585', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+  { cursoId:'c_ADSS6584', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6584', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems' },
+  { cursoId:'c_ADSS6586', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6586', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6586', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6586', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6586', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+  { cursoId:'c_ADSS6607', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6607', codigo:'5.1', descripcion:'Apply cost and financial management theories, principles and system thinking preservative in healthcare.' },
+  { cursoId:'c_ADSS6607', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6607', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
+  { cursoId:'c_ADSS6625', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6625', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals' },
+  { cursoId:'c_ADSS6625', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
+  { cursoId:'c_ADSS6625', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization\'s ability to achieve its vision and goals.' },
+  { cursoId:'c_ADSS6625', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
+  { cursoId:'c_ADSS6598', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health services management.' },
+  { cursoId:'c_ADSS6598', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6598', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles, and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6598', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations' },
+  { cursoId:'c_ADSS6490', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6490', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
+  { cursoId:'c_ADSS6490', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
+  { cursoId:'c_ADSS6490', codigo:'5.3', descripcion:'Develop organizational strategic plans based on environmental scanning that identify the competitive/market forces that shape the organization.' },
+  { cursoId:'c_ADSS6490', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
+  { cursoId:'c_ADSS6490', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+  { cursoId:'c_ADSS6609', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6609', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
+  { cursoId:'c_ADSS6609', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6609', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health services sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
+  { cursoId:'c_ADSS6535', codigo:'5.1', descripcion:'Apply cost and financial management theories, principles and system thinking preservative in healthcare.' },
+  { cursoId:'c_ADSS6535', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making' },
+  { cursoId:'c_ADSS6535', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services' },
+  { cursoId:'c_ADSS6535', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
+  { cursoId:'c_ADSS6535', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
+  { cursoId:'c_ADSS6548', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6548', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6548', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6548', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
+  { cursoId:'c_ADSS6548', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
+  { cursoId:'c_ADSS6548', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
+  { cursoId:'c_ADSS6548', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+  { cursoId:'c_ADSS6610', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6610', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6610', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
+  { cursoId:'c_ADSS6610', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
+  { cursoId:'c_ADSS6610', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
+  { cursoId:'c_ADSS6606', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations' },
+  { cursoId:'c_ADSS6606', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
+  { cursoId:'c_ADSS6606', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
+  { cursoId:'c_ADSS6606', codigo:'2.2', descripcion:'Appraise collaborative, negotiation and mediation skills to address organizational challenges' },
+  { cursoId:'c_ADSS6606', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
+  { cursoId:'c_ADSS6606', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
+  { cursoId:'c_ADSS6606', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6606', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6606', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6606', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6606', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
+  { cursoId:'c_ADSS6606', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
+  { cursoId:'c_ADSS6606', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
+  { cursoId:'c_ADSS6606', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6606', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
+  { cursoId:'c_ADSS6606', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
+  { cursoId:'c_ADSS6606', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
+  { cursoId:'c_ADSS6606', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
+  { cursoId:'c_ADSS6606', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes' },
+  { cursoId:'c_ADSS6606', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+  { cursoId:'c_ADSS6597', codigo:'1.1', descripcion:'Communicate diverse audiences and sectors appropriate health services management content, both in writing and through oral presentations.' },
+  { cursoId:'c_ADSS6597', codigo:'1.2', descripcion:'Appraise teamwork and effective group process behaviors for achieving organizational and community health goals.' },
+  { cursoId:'c_ADSS6597', codigo:'2.1', descripcion:'Apply principles of leadership, which include creating a vision, managing change, and guiding decision-making for achieving organizational goals.' },
+  { cursoId:'c_ADSS6597', codigo:'2.2', descripcion:'Appraise collaborative, negotiation and mediation skills to address organizational challenges.' },
+  { cursoId:'c_ADSS6597', codigo:'3.1', descripcion:'Integrate ethical professional principles for decision-making process in health care management.' },
+  { cursoId:'c_ADSS6597', codigo:'3.2', descripcion:'Value commitment to lifelong learning and professional service including active participation in professional organizations.' },
+  { cursoId:'c_ADSS6597', codigo:'4.1', descripcion:'Analyze health policies and regulations, decision making process and impact in the delivery of healthcare services for improving health population.' },
+  { cursoId:'c_ADSS6597', codigo:'4.2', descripcion:'Critically analyze health-related legal principles, including standards, regulations, and risk management.' },
+  { cursoId:'c_ADSS6597', codigo:'4.3', descripcion:'Evaluate relevant healthcare issues and trends, which require changes in health services delivery systems.' },
+  { cursoId:'c_ADSS6597', codigo:'4.4', descripcion:'Apply core management concepts, theories, principles and system thinking perspective in healthcare organizations.' },
+  { cursoId:'c_ADSS6597', codigo:'5.1', descripcion:'Apply cost and financial management theories to maintain viable health services organizations.' },
+  { cursoId:'c_ADSS6597', codigo:'5.2', descripcion:'Analyze the effectiveness of organizational culture in furthering an organization’s ability to achieve its vision and goals.' },
+  { cursoId:'c_ADSS6597', codigo:'5.4', descripcion:'Discuss marketing principles in healthcare management decision making.' },
+  { cursoId:'c_ADSS6597', codigo:'5.5', descripcion:'Apply statistical and quantitative methods in measuring, analyzing, and improving the performance and efficiency of healthcare organizations.' },
+  { cursoId:'c_ADSS6597', codigo:'5.6', descripcion:'Apply economic concepts to the understanding trends of health care sectors and improvement of productivity, access, efficiency, and equity of healthcare systems.' },
+  { cursoId:'c_ADSS6597', codigo:'5.7', descripcion:'Articulate concepts principles and legal aspects of human resources management to enhance organizational culture and performance in healthcare setting.' },
+  { cursoId:'c_ADSS6597', codigo:'5.8', descripcion:'Evaluate compliance with best practices and industry standards for patient safety and quality of healthcare services.' },
+  { cursoId:'c_ADSS6597', codigo:'5.9', descripcion:'Evaluate the uses of administrative and clinical health information technology to facilitate decision-making processes in healthcare organizations.' },
+  { cursoId:'c_ADSS6597', codigo:'6.1', descripcion:'Use epidemiological data and quality indicators as a tool in analysis for decision-making processes.' },
+  { cursoId:'c_ADSS6597', codigo:'6.2', descripcion:'Demonstrate an understanding of the social determinants of health in the analysis of the healthcare environment in which organizations function.' },
+];
+
+
 function preloadExcelData() {
   // Add cursos
   PRELOADED_CURSOS.forEach(c => {
@@ -6931,6 +7068,23 @@ function preloadExcelData() {
         });
       }
     });
+  });
+  // Competencias del programa MHSA (código decimal propio, no forma parte
+  // del banco compartido ALL_COMPETENCIAS)
+  MHSA_COMPETENCIAS_DATA.forEach(mc => {
+    const cursoInDb = db.cursos.find(x => x.id === mc.cursoId);
+    if (!cursoInDb) return;
+    const exists = db.competencias.find(x => x.cursoId === mc.cursoId && x.codigo === mc.codigo);
+    if (!exists) {
+      db.competencias.push({
+        id: `${mc.cursoId}_${mc.codigo}`,
+        cursoId: mc.cursoId,
+        codigo: mc.codigo,
+        descripcion: mc.descripcion,
+        criterios: '', tipo: '', peso: '',
+        fechaCreacion: new Date().toISOString()
+      });
+    }
   });
   saveDB();
 }
