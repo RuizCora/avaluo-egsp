@@ -1562,9 +1562,9 @@
     </div>
     <input type="hidden" id="lao-edit-id">
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group" style="min-width:0">
         <label>Curso *</label>
-        <select id="lao-curso" onchange="laoOnCursoChange()"><option value="">— Seleccionar —</option></select>
+        <select id="lao-curso" onchange="laoOnCursoChange()" style="width:100%;max-width:100%"><option value="">— Seleccionar —</option></select>
       </div>
       <div class="form-group">
         <label>Título del LAO *</label>
@@ -4121,7 +4121,7 @@ function laoOnCursoChange(preseleccion) {
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.82rem">
       <input type="checkbox" class="lao-comp-check" value="${c.id}" ${preMap[c.id] !== undefined ? 'checked' : ''} onchange="this.nextElementSibling.nextElementSibling.style.display=this.checked?'inline-block':'none'">
       <span style="flex:1">${c.codigo} — ${(c.descripcion || '').slice(0, 60)}</span>
-      <input type="number" class="lao-comp-peso" data-comp="${c.id}" value="${preMap[c.id] ?? 100}" min="1" max="100" style="width:60px;display:${preMap[c.id] !== undefined ? 'inline-block' : 'none'}" title="% que aporta este LAO a esta competencia">
+      <input type="number" class="lao-comp-peso" data-comp="${c.id}" value="${preMap[c.id] ?? 100}" min="1" max="100" style="width:64px;padding:2px 4px;display:${preMap[c.id] !== undefined ? 'inline-block' : 'none'}" title="% que aporta este LAO a esta competencia">
     </label>`).join('');
 }
 
@@ -7088,6 +7088,7 @@ function populateCursoSelects() {
         (db.secciones||[]).some(s => s.cursoId === c.id && canSeeSeccion(s))
       );
     }
+    cursosParaSelect = [...cursosParaSelect].sort((a, b) => a.codigo.localeCompare(b.codigo));
     cursosParaSelect.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c.id; opt.textContent = `${c.codigo} · ${c.nombre}`;
