@@ -4007,15 +4007,7 @@ function renderLaos() {
   const btnNuevo = document.getElementById('btn-nuevo-lao');
   if (btnNuevo) btnNuevo.style.display = isAdmin ? '' : 'none';
 
-  // Poblar filtro de curso
   const filtroSel = document.getElementById('filtro-curso-lao');
-  if (filtroSel && !filtroSel.dataset.loaded) {
-    db.cursos.forEach(c => {
-      const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.codigo} · ${c.nombre}`;
-      filtroSel.appendChild(o);
-    });
-    filtroSel.dataset.loaded = '1';
-  }
   const filtroCurso = filtroSel?.value || '';
   const search = (document.getElementById('filtro-lao-search')?.value || '').toLowerCase().trim();
 
@@ -7082,7 +7074,7 @@ function populateCursoSelects() {
       }
     });
   }
-  const ids = ['filtro-curso-comp','av-curso','comp-curso','filtro-bd-curso','sec-curso','filtro-curso-sec','roster-curso-sel'];
+  const ids = ['filtro-curso-comp','av-curso','comp-curso','filtro-bd-curso','sec-curso','filtro-curso-sec','roster-curso-sel','lao-curso','filtro-curso-lao'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
