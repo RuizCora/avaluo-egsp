@@ -545,6 +545,24 @@
   /* MATRIZ DE PAREO */
   .matriz-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
   .matriz-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; min-width: 700px; }
+
+  /* ── Constructor de Rúbrica (grid criterios × niveles) ─────── */
+  .rb-grid-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; min-width: 900px; }
+  .rb-grid-table th, .rb-grid-table td {
+    border: 1px solid var(--border); padding: 6px; vertical-align: top;
+  }
+  .rb-grid-table thead th { background: #1a1a1a; color: #fff; position: sticky; top: 0; z-index: 2; }
+  .rb-grid-table .rb-col-criterio { min-width: 220px; background: var(--cream); position: sticky; left: 0; z-index: 1; }
+  .rb-grid-table .rb-nivel-header input { width: 100%; margin-bottom: 3px; font-weight: 700; text-align: center; }
+  .rb-grid-table .rb-nivel-header input.rb-puntos { text-align: center; }
+  .rb-grid-table textarea.rb-celda {
+    width: 100%; min-width: 180px; min-height: 70px; resize: vertical;
+    font-family: 'Montserrat', sans-serif; font-size: 0.76rem; border: 1px solid var(--border); border-radius: 6px; padding: 6px;
+  }
+  .rb-grid-table .rb-criterio-nombre { width: 100%; font-weight: 600; margin-bottom: 4px; }
+  .rb-grid-table .rb-criterio-meta { display: flex; gap: 4px; align-items: center; }
+  .rb-grid-table .rb-criterio-peso { width: 55px; }
+
   .matriz-table thead tr:first-child { background: var(--ink); color: var(--paper); }
   .matriz-table thead tr:first-child th { padding: 14px 16px; font-weight: 500; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.1); text-align: center; }
   .matriz-table thead tr:first-child th:first-child { text-align: left; min-width: 300px; }
@@ -1244,6 +1262,7 @@
   <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">Departamentos y Programas</button>
   <button class="tab-btn" data-tab="cursos" onclick="showTab('cursos', this)">Cursos</button>
   <button class="tab-btn" data-tab="secciones" onclick="showTab('secciones', this)">Secciones</button>
+  <button class="tab-btn" data-tab="laos" onclick="showTab('laos', this)">LAOs</button>
   <button class="tab-btn" data-tab="competencias" onclick="showTab('competencias', this)">Competencias</button>
   <button class="tab-btn" data-tab="avaluo" onclick="showTab('avaluo', this)">Avalúo</button>
 
@@ -1511,6 +1530,116 @@
 
   <div id="lista-secciones">
     <div class="empty-state"><div class="empty-icon">🏫</div><p>Aún no hay secciones registradas</p></div>
+  </div>
+</div>
+
+<!-- ==================== LAOs ==================== -->
+<div id="panel-laos" class="panel">
+  <div id="readonly-notice-laos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — solo un administrador puede crear/editar LAOs oficiales. Si necesitas uno distinto al de tu curso, usa "📝 Solicitudes" para pedir uno alterno.</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title">LAOs — Oportunidades de Avalúo</div>
+      <div class="section-sub">Cada curso necesita al menos un LAO para poder evaluarse. Un LAO mide una o más competencias, con o sin rúbrica.</div>
+    </div>
+    <button class="btn btn-primary" id="btn-nuevo-lao" onclick="abrirNuevoLao()">+ Nuevo LAO</button>
+  </div>
+  <div class="select-curso-bar" style="margin-top:10px">
+    <label>🔍 Filtrar por curso:</label>
+    <select id="filtro-curso-lao" onchange="renderLaos()"><option value="">— Todos los cursos —</option></select>
+    <input type="text" id="filtro-lao-search" placeholder="Buscar por nombre..." oninput="renderLaos()" style="flex:1;min-width:160px">
+  </div>
+  <div id="lista-laos" style="margin-top:14px">
+    <div class="empty-state"><div class="empty-icon">📋</div><p>Aún no hay LAOs registrados</p></div>
+  </div>
+</div>
+
+<!-- Modal LAO -->
+<div id="modal-lao" class="modal-overlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-lao-title">📋 Nuevo LAO</div>
+      <button class="modal-close" onclick="closeModal('modal-lao')">✕</button>
+    </div>
+    <input type="hidden" id="lao-edit-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Curso *</label>
+        <select id="lao-curso" onchange="laoOnCursoChange()"><option value="">— Seleccionar —</option></select>
+      </div>
+      <div class="form-group">
+        <label>Título del LAO *</label>
+        <input type="text" id="lao-titulo" placeholder="ej. Estudio de Caso">
+      </div>
+    </div>
+    <div id="lao-nombre-preview" style="font-size:0.78rem;color:var(--muted);margin:-8px 0 14px"></div>
+    <div class="form-group">
+      <label>Descripción</label>
+      <textarea id="lao-desc" placeholder="Describe brevemente este LAO, su propósito y contexto..."></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Competencias Medidas</div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px">Marca las competencias que mide este LAO. Si más de un LAO mide la misma competencia en este curso, define qué % aporta cada uno.</div>
+      <div id="lao-comps-wrap" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px">
+        <div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>
+      </div>
+    </div>
+    <div style="margin-bottom:4px">
+      <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Calificación y Conversión a Nivel</div>
+      <div class="form-row" style="align-items:flex-start">
+        <div class="form-group" style="flex:0 0 130px">
+          <label>Escala Máxima</label>
+          <input type="number" id="lao-escala-max" value="100" min="1" style="width:100%">
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>Umbrales (puntaje mínimo, en % de la escala, para cada nivel)</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <div><div style="font-size:0.73rem;font-weight:600;color:#2e7d32">N3 Logrado ≥</div><input type="number" id="lao-umbral-3" value="85" min="0" max="100" style="width:100%"></div>
+            <div><div style="font-size:0.73rem;font-weight:600;color:#f59e0b">N2 En Progreso ≥</div><input type="number" id="lao-umbral-2" value="70" min="0" max="100" style="width:100%"></div>
+            <div><div style="font-size:0.73rem;font-weight:600;color:#ef4444">N1 Novato ≥</div><input type="number" id="lao-umbral-1" value="60" min="0" max="100" style="width:100%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="form-row" style="align-items:center;background:var(--cream);padding:10px 14px;border-radius:8px;margin-top:6px">
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;margin:0">
+        <input type="checkbox" id="lao-oficial" style="width:auto" checked>
+        <label style="margin:0">Oficial del curso (visible para cualquier profesor que lo enseñe)</label>
+      </div>
+    </div>
+    <div id="lao-rubrica-row" style="margin-top:14px;display:none">
+      <button class="btn btn-outline btn-sm" onclick="abrirRubricaBuilder()">📊 <span id="lao-rubrica-btn-label">Configurar Rúbrica</span></button>
+      <span style="font-size:0.78rem;color:var(--muted);margin-left:8px">Opcional — sin rúbrica, este LAO se evalúa con nota directa.</span>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-lao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarLao()">💾 Guardar LAO</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Rúbrica — grid horizontal estilo Blackboard Ultra -->
+<div id="modal-rubrica-builder" class="modal-overlay">
+  <div class="modal" style="max-width:min(1400px,96vw);width:96vw">
+    <div class="modal-header">
+      <div class="modal-title">📊 Constructor de Rúbrica</div>
+      <button class="modal-close" onclick="closeModal('modal-rubrica-builder')">✕</button>
+    </div>
+    <input type="hidden" id="rb-lao-id">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:0.82rem;color:var(--muted)">Filas = criterios de evaluación · Columnas = niveles de la escala · Cada celda describe la ejecución esperada en ese nivel para ese criterio.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="rbAgregarNivel()">+ Nivel (columna)</button>
+        <button class="btn btn-outline btn-sm" onclick="rbAgregarCriterio()">+ Criterio (fila)</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px">
+      <table id="rb-grid-table" class="rb-grid-table"></table>
+    </div>
+    <div id="rb-peso-total" style="font-size:0.82rem;margin-top:8px;text-align:right"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-rubrica-builder')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarRubricaBuilder()">💾 Guardar Rúbrica</button>
+    </div>
   </div>
 </div>
 
@@ -2525,7 +2654,9 @@ let db = {
   asesorias: [],       // student_id -> profesor_email advising assignments
   solicitudes: [],      // edit requests for locked/readonly records, admin-reviewed
   departamentos: [],    // catálogo de departamentos (cada programa pertenece a uno)
-  bancoCompetencias: [] // banco/framework de competencias por programa (antes hardcodeado en ALL_COMPETENCIAS)
+  bancoCompetencias: [], // banco/framework de competencias por programa (antes hardcodeado en ALL_COMPETENCIAS)
+  laos: [],              // Learning Assessment Opportunities — entidades propias, ligadas a curso + competencias
+  rubricas: []            // rúbricas (grid criterios × niveles), ligadas 1:1 a un LAO
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2549,7 +2680,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2580,6 +2711,8 @@ function loadDB() {
   if (!db.solicitudes)  db.solicitudes = [];
   if (!db.departamentos) db.departamentos = [];
   if (!db.bancoCompetencias) db.bancoCompetencias = [];
+  if (!db.laos)         db.laos = [];
+  if (!db.rubricas)     db.rubricas = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -2656,6 +2789,7 @@ function showTab(tabId, btn) {
   if (tabId === 'dashboard2') renderDashboard2();
   if (tabId === 'cursos') renderCursos();
   if (tabId === 'secciones') { populateCursoSelects(); renderSecciones(); }
+  if (tabId === 'laos') { populateCursoSelects(); renderLaos(); }
   if (tabId === 'competencias') { populateCursoSelects(); renderCompetencias(); }
   if (tabId === 'avaluo') { populateCursoSelects(); setDefaultDate(); }
   if (tabId === 'base-datos') { populateCursoSelects(); renderBaseDatos(); }
@@ -3769,6 +3903,412 @@ function _ensureBancoCompetenciasSeeded() {
   });
   if (changed) saveDB();
 }
+
+// ======================== LAOs — núcleo ========================
+// Umbrales por defecto (0-100%) para un LAO nuevo — se pueden ajustar por LAO.
+const LAO_UMBRALES_DEFAULT = [
+  { nivelComp: 3, minPuntos: 85 },
+  { nivelComp: 2, minPuntos: 70 },
+  { nivelComp: 1, minPuntos: 60 },
+];
+// Umbral GLOBAL usado únicamente al combinar el puntaje ya normalizado (%) de
+// VARIOS LAOs que miden la misma competencia (Opción 1 acordada: se combina a
+// nivel de puntaje crudo normalizado, no a nivel de Nivel ya calculado). Si
+// solo hay un LAO cubriendo esa competencia, se usan los umbrales propios de
+// ESE LAO en vez de este umbral global, para no introducir diferencias
+// innecesarias en el caso más común (un solo LAO).
+const NIVEL_UMBRAL_GLOBAL = LAO_UMBRALES_DEFAULT;
+
+function _nivelDesdePuntos(porcentaje, umbrales) {
+  if (porcentaje === null || porcentaje === undefined || isNaN(porcentaje)) return null;
+  const sorted = [...(umbrales || LAO_UMBRALES_DEFAULT)].sort((a, b) => b.nivelComp - a.nivelComp);
+  for (const u of sorted) { if (porcentaje >= u.minPuntos) return u.nivelComp; }
+  return 0;
+}
+
+// Nombre del LAO: "{código del curso} {título}" — con espacio, igual que el
+// código de curso ya se guarda (ej. "SALP 6061 Estudio de Caso").
+function nombreLao(cursoId, titulo) {
+  const curso = db.cursos.find(c => c.id === cursoId);
+  const codigo = curso ? curso.codigo : '';
+  return `${codigo} ${titulo}`.trim();
+}
+
+// Red de seguridad: todo curso necesita al menos un LAO para poder evaluarse.
+// Si un curso no tiene ninguno (típicamente porque su programa aún no tiene
+// las tablas de LAOs oficiales cargadas), se crea uno genérico automático —
+// sin rúbrica, funcionalmente equivalente al juicio directo de antes, pero
+// ya queda etiquetado como LAO para que el resto del sistema sea consistente.
+// Se marca isGenerico:true para poder avisar en Cursos "pendiente definir LAO real".
+function _ensureLaoGenericoPorCurso(cursoId) {
+  if (!db.laos) db.laos = [];
+  const yaTiene = db.laos.some(l => l.cursoId === cursoId);
+  if (yaTiene) return db.laos.filter(l => l.cursoId === cursoId);
+  const curso = db.cursos.find(c => c.id === cursoId);
+  if (!curso) return [];
+  const comps = db.competencias.filter(c => c.cursoId === cursoId);
+  const lao = {
+    id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    cursoId,
+    nombre: nombreLao(cursoId, 'Evaluación General'),
+    descripcion: 'LAO genérico creado automáticamente — pendiente que el curso defina su(s) LAO(s) oficial(es).',
+    competencias: comps.map(c => ({ competenciaId: c.id, peso: 100 })),
+    escalaMax: 3,
+    umbrales: [{ nivelComp: 3, minPuntos: 2.5 }, { nivelComp: 2, minPuntos: 1.5 }, { nivelComp: 1, minPuntos: 0.5 }],
+    esOficial: true, compartido: true, profesorEmail: null, creadoPor: 'sistema',
+    isGenerico: true, fechaCreacion: new Date().toISOString(),
+  };
+  db.laos.push(lao);
+  saveDB();
+  return [lao];
+}
+
+// LAOs visibles para el usuario actual en un curso: los oficiales, los
+// propios (si es alterno suyo), y los alternos marcados "compartido".
+function laosDisponiblesPara(cursoId, userEmail, esAdmin) {
+  const todos = (db.laos || []).filter(l => l.cursoId === cursoId);
+  if (esAdmin) return todos;
+  return todos.filter(l => l.esOficial || l.compartido || l.profesorEmail === userEmail);
+}
+
+// Calcula el nivel final (0-3) de una competencia para un estudiante en un
+// curso, combinando TODOS los LAOs aplicables que la midan. Con un solo LAO
+// contribuyendo, usa los umbrales propios de ese LAO (comportamiento idéntico
+// al caso simple de un solo LAO). Con varios, normaliza cada uno a % de su
+// propia escala, promedia ponderado por el peso configurado en cada LAO para
+// esa competencia, y convierte el resultado con el umbral global.
+function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, avaluosCurso) {
+  const laosDelCurso = (db.laos || []).filter(l => l.cursoId === cursoId &&
+    l.competencias?.some(cc => cc.competenciaId === competenciaId));
+  const contribuciones = [];
+  laosDelCurso.forEach(lao => {
+    const compCfg = lao.competencias.find(cc => cc.competenciaId === competenciaId);
+    const av = (avaluosCurso || db.avaluos).find(a =>
+      a.estudianteId === estudianteId && a.laoId === lao.id);
+    if (!av || av.puntajeLao === undefined || av.puntajeLao === null) return;
+    const pct = (av.puntajeLao / (lao.escalaMax || 100)) * 100;
+    contribuciones.push({ pct, peso: compCfg?.peso ?? 100, umbrales: lao.umbrales });
+  });
+  if (!contribuciones.length) return null;
+  if (contribuciones.length === 1) {
+    return _nivelDesdePuntos(contribuciones[0].pct, contribuciones[0].umbrales);
+  }
+  const totalPeso = contribuciones.reduce((s, c) => s + c.peso, 0) || 1;
+  const pctFinal = contribuciones.reduce((s, c) => s + (c.pct * c.peso), 0) / totalPeso;
+  return _nivelDesdePuntos(pctFinal, NIVEL_UMBRAL_GLOBAL);
+}
+
+// ======================== LAOs — pestaña ========================
+function renderLaos() {
+  const el = document.getElementById('lista-laos');
+  const isAdmin = currentUser?.rol === 'admin';
+  const notice = document.getElementById('readonly-notice-laos');
+  if (notice) notice.style.display = isAdmin ? 'none' : '';
+  const btnNuevo = document.getElementById('btn-nuevo-lao');
+  if (btnNuevo) btnNuevo.style.display = isAdmin ? '' : 'none';
+
+  // Poblar filtro de curso
+  const filtroSel = document.getElementById('filtro-curso-lao');
+  if (filtroSel && !filtroSel.dataset.loaded) {
+    db.cursos.forEach(c => {
+      const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.codigo} · ${c.nombre}`;
+      filtroSel.appendChild(o);
+    });
+    filtroSel.dataset.loaded = '1';
+  }
+  const filtroCurso = filtroSel?.value || '';
+  const search = (document.getElementById('filtro-lao-search')?.value || '').toLowerCase().trim();
+
+  let laos = db.laos.filter(l => laosDisponiblesPara(l.cursoId, currentUser?.username, isAdmin).some(x => x.id === l.id));
+  if (filtroCurso) laos = laos.filter(l => l.cursoId === filtroCurso);
+  if (search) laos = laos.filter(l => l.nombre.toLowerCase().includes(search));
+
+  if (!laos.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>Aún no hay LAOs registrados</p></div>';
+    return;
+  }
+
+  el.innerHTML = laos.map(l => {
+    const curso = db.cursos.find(c => c.id === l.cursoId);
+    const rubrica = db.rubricas.find(r => r.laoId === l.id);
+    const comps = (l.competencias || []).map(cc => {
+      const comp = db.competencias.find(c => c.id === cc.competenciaId);
+      return comp ? `<span class="badge badge-blue" style="margin:2px" title="${comp.descripcion || ''}">${comp.codigo} · ${cc.peso}%</span>` : '';
+    }).join('');
+    return `<div class="card" style="margin-bottom:12px;padding:14px 16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800;font-size:0.95rem">${l.nombre}</div>
+          <div style="font-size:0.76rem;color:var(--muted);margin-top:2px">${curso ? curso.codigo + ' · ' + curso.nombre : '—'}</div>
+          ${l.descripcion ? `<div style="font-size:0.8rem;margin-top:6px">${l.descripcion}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${l.isGenerico ? '<span class="badge badge-gold">⚠️ Genérico — falta definir</span>' : ''}
+          ${l.esOficial ? '<span class="badge badge-green">Oficial</span>' : `<span class="badge badge-purple">Alterno${l.compartido ? ' · compartido' : ''}</span>`}
+          ${rubrica ? '<span class="badge badge-blue">Con Rúbrica</span>' : '<span class="badge" style="background:#e0f2fe;color:#0369a1">Calificación Directa</span>'}
+        </div>
+      </div>
+      <div style="margin-top:8px">${comps || '<span style="font-size:0.78rem;color:var(--muted)">Sin competencias asignadas</span>'}</div>
+      ${isAdmin ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="abrirEditarLao('${l.id}')">✏️ Editar</button>
+        ${!l.esOficial && !l.compartido ? `<button class="btn btn-outline btn-sm" onclick="compartirLao('${l.id}')">🔗 Compartir con todos</button>` : ''}
+        ${!l.isGenerico ? `<button class="btn btn-danger btn-sm" onclick="eliminarLao('${l.id}')">🗑</button>` : ''}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function compartirLao(id) {
+  const l = db.laos.find(x => x.id === id);
+  if (!l) return;
+  if (!confirm(`¿Compartir "${l.nombre}" con todos los profesores que dan este curso?`)) return;
+  l.compartido = true;
+  saveDB(); renderLaos();
+  notify('LAO compartido con todos los profesores del curso ✓');
+}
+
+function eliminarLao(id) {
+  if (!confirm('¿Eliminar este LAO? También se eliminará su rúbrica asociada, si tiene.')) return;
+  db.laos = db.laos.filter(l => l.id !== id);
+  db.rubricas = db.rubricas.filter(r => r.laoId !== id);
+  saveDB(); renderLaos();
+  notify('LAO eliminado', '🗑');
+}
+
+function abrirNuevoLao() {
+  document.getElementById('modal-lao-title').textContent = '📋 Nuevo LAO';
+  document.getElementById('lao-edit-id').value = '';
+  document.getElementById('lao-curso').value = '';
+  document.getElementById('lao-titulo').value = '';
+  document.getElementById('lao-desc').value = '';
+  document.getElementById('lao-escala-max').value = 100;
+  document.getElementById('lao-umbral-3').value = 85;
+  document.getElementById('lao-umbral-2').value = 70;
+  document.getElementById('lao-umbral-1').value = 60;
+  document.getElementById('lao-oficial').checked = true;
+  document.getElementById('lao-comps-wrap').innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>';
+  document.getElementById('lao-nombre-preview').textContent = '';
+  document.getElementById('lao-rubrica-row').style.display = 'none';
+  openModal('modal-lao');
+}
+
+function abrirEditarLao(id) {
+  const l = db.laos.find(x => x.id === id);
+  if (!l) return;
+  document.getElementById('modal-lao-title').textContent = '✏️ Editar LAO';
+  document.getElementById('lao-edit-id').value = id;
+  document.getElementById('lao-curso').value = l.cursoId;
+  const curso = db.cursos.find(c => c.id === l.cursoId);
+  const prefijo = curso ? curso.codigo + ' ' : '';
+  document.getElementById('lao-titulo').value = l.nombre.startsWith(prefijo) ? l.nombre.slice(prefijo.length) : l.nombre;
+  document.getElementById('lao-desc').value = l.descripcion || '';
+  document.getElementById('lao-escala-max').value = l.escalaMax || 100;
+  const u = l.umbrales || LAO_UMBRALES_DEFAULT;
+  document.getElementById('lao-umbral-3').value = u.find(x => x.nivelComp === 3)?.minPuntos ?? 85;
+  document.getElementById('lao-umbral-2').value = u.find(x => x.nivelComp === 2)?.minPuntos ?? 70;
+  document.getElementById('lao-umbral-1').value = u.find(x => x.nivelComp === 1)?.minPuntos ?? 60;
+  document.getElementById('lao-oficial').checked = !!l.esOficial;
+  laoOnCursoChange(l.competencias || []);
+  _actualizarLaoPreview();
+  document.getElementById('lao-rubrica-row').style.display = '';
+  const rubrica = db.rubricas.find(r => r.laoId === id);
+  document.getElementById('lao-rubrica-btn-label').textContent = rubrica ? 'Editar Rúbrica' : 'Configurar Rúbrica';
+  openModal('modal-lao');
+}
+
+function laoOnCursoChange(preseleccion) {
+  const cursoId = document.getElementById('lao-curso').value;
+  const wrap = document.getElementById('lao-comps-wrap');
+  _actualizarLaoPreview();
+  if (!cursoId) { wrap.innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>'; return; }
+  const comps = db.competencias.filter(c => c.cursoId === cursoId);
+  if (!comps.length) { wrap.innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Este curso no tiene competencias registradas todavía</div>'; return; }
+  const preMap = {};
+  (preseleccion || []).forEach(cc => { preMap[cc.competenciaId] = cc.peso; });
+  wrap.innerHTML = comps.map(c => `
+    <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.82rem">
+      <input type="checkbox" class="lao-comp-check" value="${c.id}" ${preMap[c.id] !== undefined ? 'checked' : ''} onchange="this.nextElementSibling.nextElementSibling.style.display=this.checked?'inline-block':'none'">
+      <span style="flex:1">${c.codigo} — ${(c.descripcion || '').slice(0, 60)}</span>
+      <input type="number" class="lao-comp-peso" data-comp="${c.id}" value="${preMap[c.id] ?? 100}" min="1" max="100" style="width:60px;display:${preMap[c.id] !== undefined ? 'inline-block' : 'none'}" title="% que aporta este LAO a esta competencia">
+    </label>`).join('');
+}
+
+function _actualizarLaoPreview() {
+  const cursoId = document.getElementById('lao-curso').value;
+  const titulo = document.getElementById('lao-titulo').value.trim();
+  const preview = document.getElementById('lao-nombre-preview');
+  if (!cursoId || !titulo) { preview.textContent = ''; return; }
+  preview.textContent = 'Se guardará como: ' + nombreLao(cursoId, titulo);
+}
+document.addEventListener('input', e => { if (e.target?.id === 'lao-titulo') _actualizarLaoPreview(); });
+
+function guardarLao() {
+  const cursoId = document.getElementById('lao-curso').value;
+  const titulo = document.getElementById('lao-titulo').value.trim();
+  if (!cursoId || !titulo) { notify('Curso y título son requeridos', '⚠️'); return; }
+  const checks = [...document.querySelectorAll('.lao-comp-check:checked')];
+  if (!checks.length) { notify('Selecciona al menos una competencia', '⚠️'); return; }
+  const competencias = checks.map(chk => {
+    const pesoInput = document.querySelector(`.lao-comp-peso[data-comp="${chk.value}"]`);
+    return { competenciaId: chk.value, peso: parseFloat(pesoInput.value) || 100 };
+  });
+  const umbrales = [
+    { nivelComp: 3, minPuntos: parseFloat(document.getElementById('lao-umbral-3').value) || 85 },
+    { nivelComp: 2, minPuntos: parseFloat(document.getElementById('lao-umbral-2').value) || 70 },
+    { nivelComp: 1, minPuntos: parseFloat(document.getElementById('lao-umbral-1').value) || 60 },
+  ];
+  const editId = document.getElementById('lao-edit-id').value;
+  const record = {
+    cursoId, nombre: nombreLao(cursoId, titulo), descripcion: document.getElementById('lao-desc').value.trim(),
+    competencias, escalaMax: parseFloat(document.getElementById('lao-escala-max').value) || 100, umbrales,
+    esOficial: document.getElementById('lao-oficial').checked,
+  };
+  if (editId) {
+    const l = db.laos.find(x => x.id === editId);
+    if (l) Object.assign(l, record);
+  } else {
+    db.laos.push({
+      id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      ...record, compartido: false, profesorEmail: null, creadoPor: currentUser?.username || 'admin',
+      isGenerico: false, origenSolicitudId: null, fechaCreacion: new Date().toISOString(),
+    });
+  }
+  saveDB();
+  closeModal('modal-lao');
+  renderLaos();
+  notify('LAO guardado ✓');
+}
+
+// ── Constructor de Rúbrica (grid criterios × niveles) ──────────
+let _rbNiveles = [];
+let _rbCriterios = [];
+
+function abrirRubricaBuilder() {
+  const laoId = document.getElementById('lao-edit-id').value;
+  if (!laoId) { notify('Guarda el LAO primero antes de configurar su rúbrica', '⚠️'); return; }
+  const lao = db.laos.find(l => l.id === laoId);
+  const rubrica = db.rubricas.find(r => r.laoId === laoId);
+  document.getElementById('rb-lao-id').value = laoId;
+  if (rubrica) {
+    _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
+    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios));
+  } else {
+    _rbNiveles = [
+      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Excelente', puntos: 100 },
+      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Satisfactorio', puntos: 85 },
+      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Insatisfactorio', puntos: 60 },
+      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Deficiente', puntos: 25 },
+    ];
+    _rbCriterios = (lao?.competencias || []).map(cc => ({
+      id: 'crit_' + Math.random().toString(36).slice(2, 6),
+      nombre: '', peso: Math.round(100 / (lao.competencias.length || 1)),
+      competenciaId: cc.competenciaId, celdas: {},
+    }));
+    if (!_rbCriterios.length) {
+      _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 100, competenciaId: lao?.competencias?.[0]?.competenciaId || '', celdas: {} }];
+    }
+  }
+  _renderRubricaGrid();
+  openModal('modal-rubrica-builder');
+}
+
+function rbAgregarNivel() {
+  _rbNiveles.push({ id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Nuevo nivel', puntos: 0 });
+  _renderRubricaGrid();
+}
+function rbEliminarNivel(nivelId) {
+  if (_rbNiveles.length <= 1) { notify('Debe haber al menos un nivel', '⚠️'); return; }
+  _rbNiveles = _rbNiveles.filter(n => n.id !== nivelId);
+  _rbCriterios.forEach(c => { delete c.celdas[nivelId]; });
+  _renderRubricaGrid();
+}
+function rbAgregarCriterio() {
+  const laoId = document.getElementById('rb-lao-id').value;
+  const lao = db.laos.find(l => l.id === laoId);
+  _rbCriterios.push({ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 0, competenciaId: lao?.competencias?.[0]?.competenciaId || '', celdas: {} });
+  _renderRubricaGrid();
+}
+function rbEliminarCriterio(critId) {
+  if (_rbCriterios.length <= 1) { notify('Debe haber al menos un criterio', '⚠️'); return; }
+  _rbCriterios = _rbCriterios.filter(c => c.id !== critId);
+  _renderRubricaGrid();
+}
+function rbUpdateNivel(nivelId, campo, valor) {
+  const n = _rbNiveles.find(x => x.id === nivelId);
+  if (n) n[campo] = campo === 'puntos' ? (parseFloat(valor) || 0) : valor;
+}
+function rbUpdateCriterio(critId, campo, valor) {
+  const c = _rbCriterios.find(x => x.id === critId);
+  if (c) c[campo] = campo === 'peso' ? (parseFloat(valor) || 0) : valor;
+  if (campo === 'peso') _rbActualizarPesoTotal();
+}
+function rbUpdateCelda(critId, nivelId, texto) {
+  const c = _rbCriterios.find(x => x.id === critId);
+  if (c) c.celdas[nivelId] = texto;
+}
+function _rbActualizarPesoTotal() {
+  const total = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
+  const el = document.getElementById('rb-peso-total');
+  if (el) el.innerHTML = `Peso total de criterios: <strong style="color:${total === 100 ? '#2e7d32' : '#dc2626'}">${total}%</strong>${total !== 100 ? ' — debe sumar 100%' : ' ✓'}`;
+}
+
+function _renderRubricaGrid() {
+  const laoId = document.getElementById('rb-lao-id').value;
+  const lao = db.laos.find(l => l.id === laoId);
+  const compOpts = (lao?.competencias || []).map(cc => {
+    const comp = db.competencias.find(c => c.id === cc.competenciaId);
+    return comp ? { id: comp.id, label: comp.codigo } : null;
+  }).filter(Boolean);
+
+  const table = document.getElementById('rb-grid-table');
+  const theadNiveles = _rbNiveles.map(n => `
+    <th class="rb-nivel-header" style="min-width:200px">
+      <input type="text" value="${n.label}" onchange="rbUpdateNivel('${n.id}','label',this.value)" placeholder="Etiqueta">
+      <input type="number" class="rb-puntos" value="${n.puntos}" onchange="rbUpdateNivel('${n.id}','puntos',this.value)" placeholder="Puntos" style="width:70px">
+      <button class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.65rem;margin-top:3px" onclick="rbEliminarNivel('${n.id}')">✕ quitar</button>
+    </th>`).join('');
+
+  table.innerHTML = `
+    <thead><tr><th class="rb-col-criterio">Criterio</th>${theadNiveles}</tr></thead>
+    <tbody>
+      ${_rbCriterios.map(c => `
+        <tr>
+          <td class="rb-col-criterio">
+            <input type="text" class="rb-criterio-nombre" value="${c.nombre}" placeholder="Nombre del criterio" onchange="rbUpdateCriterio('${c.id}','nombre',this.value)">
+            <div class="rb-criterio-meta">
+              <input type="number" class="rb-criterio-peso" value="${c.peso}" onchange="rbUpdateCriterio('${c.id}','peso',this.value)" title="Peso %">%
+              <select onchange="rbUpdateCriterio('${c.id}','competenciaId',this.value)" style="flex:1;font-size:0.72rem">
+                ${compOpts.map(o => `<option value="${o.id}" ${o.id === c.competenciaId ? 'selected' : ''}>${o.label}</option>`).join('')}
+              </select>
+              <button class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.65rem" onclick="rbEliminarCriterio('${c.id}')">✕</button>
+            </div>
+          </td>
+          ${_rbNiveles.map(n => `<td><textarea class="rb-celda" onchange="rbUpdateCelda('${c.id}','${n.id}',this.value)" placeholder="Descripción de ejecución...">${c.celdas[n.id] || ''}</textarea></td>`).join('')}
+        </tr>`).join('')}
+    </tbody>`;
+  _rbActualizarPesoTotal();
+}
+
+function guardarRubricaBuilder() {
+  const laoId = document.getElementById('rb-lao-id').value;
+  if (!laoId) return;
+  const totalPeso = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
+  if (Math.abs(totalPeso - 100) > 0.5) {
+    if (!confirm(`Los pesos de los criterios suman ${totalPeso}%, no 100%. ¿Guardar de todas formas?`)) return;
+  }
+  const existente = db.rubricas.find(r => r.laoId === laoId);
+  const record = { laoId, niveles: _rbNiveles, criterios: _rbCriterios };
+  if (existente) {
+    Object.assign(existente, record);
+  } else {
+    db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...record, fechaCreacion: new Date().toISOString() });
+  }
+  saveDB();
+  closeModal('modal-rubrica-builder');
+  document.getElementById('lao-rubrica-btn-label').textContent = 'Editar Rúbrica';
+  notify('Rúbrica guardada ✓');
+}
+
 
 
 let _progTreeSelected = null; // { type:'dept'|'prog', id }
@@ -7354,12 +7894,12 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true },
-  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true },
+  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false },
 };
 
 function setViewAs(role) {
