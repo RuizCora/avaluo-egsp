@@ -561,7 +561,7 @@
   }
   .rb-grid-table .rb-criterio-nombre { width: 100%; font-weight: 600; margin-bottom: 4px; }
   .rb-grid-table .rb-criterio-meta { display: flex; gap: 4px; align-items: center; }
-  .rb-grid-table .rb-criterio-peso { width: 55px; }
+  .rb-grid-table .rb-criterio-peso { width: 62px; padding: 2px 4px; flex-shrink: 0; }
 
   .matriz-table thead tr:first-child { background: var(--ink); color: var(--paper); }
   .matriz-table thead tr:first-child th { padding: 14px 16px; font-weight: 500; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.1); text-align: center; }
@@ -4194,10 +4194,10 @@ function abrirRubricaBuilder() {
     _rbCriterios = (lao?.competencias || []).map(cc => ({
       id: 'crit_' + Math.random().toString(36).slice(2, 6),
       nombre: '', peso: Math.round(100 / (lao.competencias.length || 1)),
-      competenciaId: cc.competenciaId, celdas: {},
+      competenciaIds: [cc.competenciaId], celdas: {},
     }));
     if (!_rbCriterios.length) {
-      _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 100, competenciaId: lao?.competencias?.[0]?.competenciaId || '', celdas: {} }];
+      _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 100, competenciaIds: lao?.competencias?.[0] ? [lao.competencias[0].competenciaId] : [], celdas: {} }];
     }
   }
   _renderRubricaGrid();
@@ -4217,7 +4217,7 @@ function rbEliminarNivel(nivelId) {
 function rbAgregarCriterio() {
   const laoId = document.getElementById('rb-lao-id').value;
   const lao = db.laos.find(l => l.id === laoId);
-  _rbCriterios.push({ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 0, competenciaId: lao?.competencias?.[0]?.competenciaId || '', celdas: {} });
+  _rbCriterios.push({ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 0, competenciaIds: lao?.competencias?.[0] ? [lao.competencias[0].competenciaId] : [], celdas: {} });
   _renderRubricaGrid();
 }
 function rbEliminarCriterio(critId) {
@@ -4234,14 +4234,47 @@ function rbUpdateCriterio(critId, campo, valor) {
   if (c) c[campo] = campo === 'peso' ? (parseFloat(valor) || 0) : valor;
   if (campo === 'peso') _rbActualizarPesoTotal();
 }
+function rbToggleCriterioComp(critId, compId, checked) {
+  const c = _rbCriterios.find(x => x.id === critId);
+  if (!c) return;
+  if (!c.competenciaIds) c.competenciaIds = [];
+  if (checked && !c.competenciaIds.includes(compId)) c.competenciaIds.push(compId);
+  if (!checked) c.competenciaIds = c.competenciaIds.filter(id => id !== compId);
+  _rbActualizarPesoTotal();
+}
 function rbUpdateCelda(critId, nivelId, texto) {
   const c = _rbCriterios.find(x => x.id === critId);
   if (c) c.celdas[nivelId] = texto;
 }
+// El peso de un criterio se valida POR COMPETENCIA, no de forma global: como
+// un mismo criterio puede alimentar más de una competencia (con su peso
+// completo aplicando a cada una, no dividido entre ellas), lo que debe sumar
+// 100% es el conjunto de criterios que alimentan CADA competencia por separado.
+function _rbGruposPorCompetencia() {
+  const grupos = {};
+  _rbCriterios.forEach(c => {
+    (c.competenciaIds || []).forEach(compId => {
+      if (!grupos[compId]) grupos[compId] = [];
+      grupos[compId].push(c);
+    });
+  });
+  return grupos;
+}
 function _rbActualizarPesoTotal() {
-  const total = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
+  const laoId = document.getElementById('rb-lao-id').value;
+  const lao = db.laos.find(l => l.id === laoId);
+  const grupos = _rbGruposPorCompetencia();
   const el = document.getElementById('rb-peso-total');
-  if (el) el.innerHTML = `Peso total de criterios: <strong style="color:${total === 100 ? '#2e7d32' : '#dc2626'}">${total}%</strong>${total !== 100 ? ' — debe sumar 100%' : ' ✓'}`;
+  if (!el) return;
+  const sinCompetencia = _rbCriterios.filter(c => !c.competenciaIds || !c.competenciaIds.length).length;
+  const lineas = Object.keys(grupos).map(compId => {
+    const comp = db.competencias.find(c => c.id === compId);
+    const total = grupos[compId].reduce((s, c) => s + (c.peso || 0), 0);
+    const ok = Math.abs(total - 100) < 0.5;
+    return `<div>${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${total}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
+  });
+  if (sinCompetencia) lineas.push(`<div style="color:#dc2626">⚠️ ${sinCompetencia} criterio(s) sin ninguna competencia marcada</div>`);
+  el.innerHTML = lineas.join('') || '<span style="color:var(--muted)">Marca al menos una competencia en algún criterio</span>';
 }
 
 function _renderRubricaGrid() {
@@ -4255,9 +4288,11 @@ function _renderRubricaGrid() {
   const table = document.getElementById('rb-grid-table');
   const theadNiveles = _rbNiveles.map(n => `
     <th class="rb-nivel-header" style="min-width:200px">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
+        <button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="rbEliminarNivel('${n.id}')" title="Eliminar este nivel">🗑 Eliminar nivel</button>
+      </div>
       <input type="text" value="${n.label}" onchange="rbUpdateNivel('${n.id}','label',this.value)" placeholder="Etiqueta">
       <input type="number" class="rb-puntos" value="${n.puntos}" onchange="rbUpdateNivel('${n.id}','puntos',this.value)" placeholder="Puntos" style="width:70px">
-      <button class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.65rem;margin-top:3px" onclick="rbEliminarNivel('${n.id}')">✕ quitar</button>
     </th>`).join('');
 
   table.innerHTML = `
@@ -4266,13 +4301,19 @@ function _renderRubricaGrid() {
       ${_rbCriterios.map(c => `
         <tr>
           <td class="rb-col-criterio">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
+              <button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="rbEliminarCriterio('${c.id}')" title="Eliminar este criterio">🗑 Eliminar fila</button>
+            </div>
             <input type="text" class="rb-criterio-nombre" value="${c.nombre}" placeholder="Nombre del criterio" onchange="rbUpdateCriterio('${c.id}','nombre',this.value)">
             <div class="rb-criterio-meta">
               <input type="number" class="rb-criterio-peso" value="${c.peso}" onchange="rbUpdateCriterio('${c.id}','peso',this.value)" title="Peso %">%
-              <select onchange="rbUpdateCriterio('${c.id}','competenciaId',this.value)" style="flex:1;font-size:0.72rem">
-                ${compOpts.map(o => `<option value="${o.id}" ${o.id === c.competenciaId ? 'selected' : ''}>${o.label}</option>`).join('')}
-              </select>
-              <button class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.65rem" onclick="rbEliminarCriterio('${c.id}')">✕</button>
+            </div>
+            <div style="margin-top:6px;font-size:0.72rem">
+              <div style="color:var(--muted);margin-bottom:2px">Alimenta:</div>
+              ${compOpts.map(o => `<label style="display:flex;align-items:center;gap:5px;padding:1px 0">
+                <input type="checkbox" ${((c.competenciaIds)||[]).includes(o.id) ? 'checked' : ''}
+                  onchange="rbToggleCriterioComp('${c.id}','${o.id}',this.checked)">${o.label}
+              </label>`).join('')}
             </div>
           </td>
           ${_rbNiveles.map(n => `<td><textarea class="rb-celda" onchange="rbUpdateCelda('${c.id}','${n.id}',this.value)" placeholder="Descripción de ejecución...">${c.celdas[n.id] || ''}</textarea></td>`).join('')}
@@ -4284,9 +4325,12 @@ function _renderRubricaGrid() {
 function guardarRubricaBuilder() {
   const laoId = document.getElementById('rb-lao-id').value;
   if (!laoId) return;
-  const totalPeso = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
-  if (Math.abs(totalPeso - 100) > 0.5) {
-    if (!confirm(`Los pesos de los criterios suman ${totalPeso}%, no 100%. ¿Guardar de todas formas?`)) return;
+  const grupos = _rbGruposPorCompetencia();
+  const desbalanceados = Object.entries(grupos).filter(([compId, crits]) =>
+    Math.abs(crits.reduce((s, c) => s + (c.peso || 0), 0) - 100) > 0.5);
+  if (desbalanceados.length) {
+    const nombres = desbalanceados.map(([compId]) => db.competencias.find(c => c.id === compId)?.codigo || compId).join(', ');
+    if (!confirm(`Los pesos no suman 100% para: ${nombres}. ¿Guardar de todas formas?`)) return;
   }
   const existente = db.rubricas.find(r => r.laoId === laoId);
   const record = { laoId, niveles: _rbNiveles, criterios: _rbCriterios };
