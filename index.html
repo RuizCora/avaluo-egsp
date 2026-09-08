@@ -4190,7 +4190,11 @@ function abrirRubricaBuilder() {
   const rubrica = db.rubricas.find(r => r.laoId === laoId);
   document.getElementById('rb-lao-id').value = laoId;  if (rubrica) {
     _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
-    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios));
+    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios)).map(c => ({
+      ...c,
+      celdas: c.celdas || {},
+      competenciaIds: c.competenciaIds || (c.competenciaId ? [c.competenciaId] : []),
+    }));
   } else {
     _rbNiveles = [
       { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Excelente', puntos: 100 },
@@ -4252,7 +4256,9 @@ function rbToggleCriterioComp(critId, compId, checked) {
 }
 function rbUpdateCelda(critId, nivelId, texto) {
   const c = _rbCriterios.find(x => x.id === critId);
-  if (c) c.celdas[nivelId] = texto;
+  if (!c) return;
+  if (!c.celdas) c.celdas = {};
+  c.celdas[nivelId] = texto;
 }
 // El peso de un criterio se valida POR COMPETENCIA, no de forma global: como
 // un mismo criterio puede alimentar más de una competencia (con su peso
@@ -4324,7 +4330,7 @@ function _renderRubricaGrid() {
               </label>`).join('')}
             </div>
           </td>
-          ${_rbNiveles.map(n => `<td><textarea class="rb-celda" onchange="rbUpdateCelda('${c.id}','${n.id}',this.value)" placeholder="Descripción de ejecución...">${c.celdas[n.id] || ''}</textarea></td>`).join('')}
+          ${_rbNiveles.map(n => `<td><textarea class="rb-celda" onchange="rbUpdateCelda('${c.id}','${n.id}',this.value)" placeholder="Descripción de ejecución...">${(c.celdas && c.celdas[n.id]) || ''}</textarea></td>`).join('')}
         </tr>`).join('')}
     </tbody>`;
   _rbActualizarPesoTotal();
