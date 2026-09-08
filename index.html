@@ -1622,7 +1622,7 @@
   <div class="modal" style="max-width:min(1400px,96vw);width:96vw">
     <div class="modal-header">
       <div class="modal-title">📊 Constructor de Rúbrica</div>
-      <button class="modal-close" onclick="closeModal('modal-rubrica-builder')">✕</button>
+      <button class="modal-close" onclick="closeModal('modal-rubrica-builder');openModal('modal-lao')">✕</button>
     </div>
     <input type="hidden" id="rb-lao-id">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -1637,7 +1637,7 @@
     </div>
     <div id="rb-peso-total" style="font-size:0.82rem;margin-top:8px;text-align:right"></div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('modal-rubrica-builder')">Cancelar</button>
+      <button class="btn btn-outline" onclick="closeModal('modal-rubrica-builder');openModal('modal-lao')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarRubricaBuilder()">💾 Guardar Rúbrica</button>
     </div>
   </div>
@@ -4188,8 +4188,7 @@ function abrirRubricaBuilder() {
   if (!laoId) { notify('Guarda el LAO primero antes de configurar su rúbrica', '⚠️'); return; }
   const lao = db.laos.find(l => l.id === laoId);
   const rubrica = db.rubricas.find(r => r.laoId === laoId);
-  document.getElementById('rb-lao-id').value = laoId;
-  if (rubrica) {
+  document.getElementById('rb-lao-id').value = laoId;  if (rubrica) {
     _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
     _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios));
   } else {
@@ -4209,6 +4208,7 @@ function abrirRubricaBuilder() {
     }
   }
   _renderRubricaGrid();
+  closeModal('modal-lao');
   openModal('modal-rubrica-builder');
 }
 
@@ -4349,6 +4349,7 @@ function guardarRubricaBuilder() {
   }
   saveDB();
   closeModal('modal-rubrica-builder');
+  openModal('modal-lao');
   document.getElementById('lao-rubrica-btn-label').textContent = 'Editar Rúbrica';
   notify('Rúbrica guardada ✓');
 }
