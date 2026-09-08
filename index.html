@@ -4188,13 +4188,22 @@ function abrirRubricaBuilder() {
   if (!laoId) { notify('Guarda el LAO primero antes de configurar su rúbrica', '⚠️'); return; }
   const lao = db.laos.find(l => l.id === laoId);
   const rubrica = db.rubricas.find(r => r.laoId === laoId);
-  document.getElementById('rb-lao-id').value = laoId;  if (rubrica) {
+  document.getElementById('rb-lao-id').value = laoId;
+  if (rubrica) {
     _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
-    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios)).map(c => ({
-      ...c,
-      celdas: c.celdas || {},
-      competenciaIds: c.competenciaIds || (c.competenciaId ? [c.competenciaId] : []),
-    }));
+    // Normaliza criterios de formatos anteriores: celdas puede faltar; la
+    // vinculación a competencias puede venir como competenciaId (un solo
+    // string, formato original), competenciaIds (arreglo de strings, sin
+    // peso propio), o ya en el formato actual: competencias:[{competenciaId,peso}].
+    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios)).map(c => {
+      let competencias = c.competencias;
+      if (!competencias) {
+        if (Array.isArray(c.competenciaIds)) competencias = c.competenciaIds.map(id => ({ competenciaId: id, peso: 100 }));
+        else if (c.competenciaId) competencias = [{ competenciaId: c.competenciaId, peso: 100 }];
+        else competencias = [];
+      }
+      return { ...c, celdas: c.celdas || {}, competencias };
+    });
   } else {
     _rbNiveles = [
       { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Excelente', puntos: 100 },
@@ -4205,10 +4214,11 @@ function abrirRubricaBuilder() {
     _rbCriterios = (lao?.competencias || []).map(cc => ({
       id: 'crit_' + Math.random().toString(36).slice(2, 6),
       nombre: '', peso: Math.round(100 / (lao.competencias.length || 1)),
-      competenciaIds: [cc.competenciaId], celdas: {},
+      competencias: [{ competenciaId: cc.competenciaId, peso: 100 }], celdas: {},
     }));
     if (!_rbCriterios.length) {
-      _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 100, competenciaIds: lao?.competencias?.[0] ? [lao.competencias[0].competenciaId] : [], celdas: {} }];
+      _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 100,
+        competencias: lao?.competencias?.[0] ? [{ competenciaId: lao.competencias[0].competenciaId, peso: 100 }] : [], celdas: {} }];
     }
   }
   _renderRubricaGrid();
@@ -4227,9 +4237,9 @@ function rbEliminarNivel(nivelId) {
   _renderRubricaGrid();
 }
 function rbAgregarCriterio() {
-  const laoId = document.getElementById('rb-lao-id').value;
-  const lao = db.laos.find(l => l.id === laoId);
-  _rbCriterios.push({ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 0, competenciaIds: lao?.competencias?.[0] ? [lao.competencias[0].competenciaId] : [], celdas: {} });
+  // Por defecto SIN competencia marcada (N/A) — solo cuenta para la nota del
+  // LAO hasta que el admin marque explícitamente qué competencia(s) mide.
+  _rbCriterios.push({ id: 'crit_' + Math.random().toString(36).slice(2, 6), nombre: '', peso: 0, competencias: [], celdas: {} });
   _renderRubricaGrid();
 }
 function rbEliminarCriterio(critId) {
@@ -4241,6 +4251,8 @@ function rbUpdateNivel(nivelId, campo, valor) {
   const n = _rbNiveles.find(x => x.id === nivelId);
   if (n) n[campo] = campo === 'puntos' ? (parseFloat(valor) || 0) : valor;
 }
+// c.peso = peso de este criterio hacia la NOTA GENERAL del LAO (calificación
+// del trabajo en sí) — independiente de si mide o no alguna competencia.
 function rbUpdateCriterio(critId, campo, valor) {
   const c = _rbCriterios.find(x => x.id === critId);
   if (c) c[campo] = campo === 'peso' ? (parseFloat(valor) || 0) : valor;
@@ -4249,9 +4261,21 @@ function rbUpdateCriterio(critId, campo, valor) {
 function rbToggleCriterioComp(critId, compId, checked) {
   const c = _rbCriterios.find(x => x.id === critId);
   if (!c) return;
-  if (!c.competenciaIds) c.competenciaIds = [];
-  if (checked && !c.competenciaIds.includes(compId)) c.competenciaIds.push(compId);
-  if (!checked) c.competenciaIds = c.competenciaIds.filter(id => id !== compId);
+  if (!c.competencias) c.competencias = [];
+  if (checked && !c.competencias.some(cc => cc.competenciaId === compId)) {
+    c.competencias.push({ competenciaId: compId, peso: 100 });
+  }
+  if (!checked) c.competencias = c.competencias.filter(cc => cc.competenciaId !== compId);
+  _renderRubricaGrid();
+}
+// Peso de contribución de este criterio a ESA competencia específica — es
+// INTERNO al LAO (se normaliza junto a los demás criterios que también
+// midan la misma competencia dentro de este mismo LAO), y es un número
+// totalmente aparte del peso hacia la nota general (c.peso).
+function rbUpdateCompPeso(critId, compId, valor) {
+  const c = _rbCriterios.find(x => x.id === critId);
+  const cc = c?.competencias?.find(x => x.competenciaId === compId);
+  if (cc) cc.peso = parseFloat(valor) || 0;
   _rbActualizarPesoTotal();
 }
 function rbUpdateCelda(critId, nivelId, texto) {
@@ -4260,35 +4284,38 @@ function rbUpdateCelda(critId, nivelId, texto) {
   if (!c.celdas) c.celdas = {};
   c.celdas[nivelId] = texto;
 }
-// El peso de un criterio se valida POR COMPETENCIA, no de forma global: como
-// un mismo criterio puede alimentar más de una competencia (con su peso
-// completo aplicando a cada una, no dividido entre ellas), lo que debe sumar
-// 100% es el conjunto de criterios que alimentan CADA competencia por separado.
+// Agrupa los criterios por competencia que miden (algunos pueden no medir
+// ninguna — N/A, solo cuentan para la nota) para validar que, DENTRO de
+// cada competencia, sus pesos de contribución sumen 100%.
 function _rbGruposPorCompetencia() {
   const grupos = {};
   _rbCriterios.forEach(c => {
-    (c.competenciaIds || []).forEach(compId => {
-      if (!grupos[compId]) grupos[compId] = [];
-      grupos[compId].push(c);
+    (c.competencias || []).forEach(cc => {
+      if (!grupos[cc.competenciaId]) grupos[cc.competenciaId] = [];
+      grupos[cc.competenciaId].push({ criterio: c, peso: cc.peso });
     });
   });
   return grupos;
 }
 function _rbActualizarPesoTotal() {
-  const laoId = document.getElementById('rb-lao-id').value;
-  const lao = db.laos.find(l => l.id === laoId);
   const grupos = _rbGruposPorCompetencia();
   const el = document.getElementById('rb-peso-total');
   if (!el) return;
-  const sinCompetencia = _rbCriterios.filter(c => !c.competenciaIds || !c.competenciaIds.length).length;
+  const sinCompetencia = _rbCriterios.filter(c => !c.competencias || !c.competencias.length).length;
+
+  const pesoNotaTotal = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
+  const okNota = Math.abs(pesoNotaTotal - 100) < 0.5;
+  let html = `<div style="margin-bottom:4px">📝 Peso hacia la <strong>nota del LAO</strong> (todos los criterios): <strong style="color:${okNota ? '#2e7d32' : '#dc2626'}">${pesoNotaTotal}%</strong>${okNota ? ' ✓' : ' — debe sumar 100%'}</div>`;
+
   const lineas = Object.keys(grupos).map(compId => {
     const comp = db.competencias.find(c => c.id === compId);
-    const total = grupos[compId].reduce((s, c) => s + (c.peso || 0), 0);
+    const total = grupos[compId].reduce((s, g) => s + (g.peso || 0), 0);
     const ok = Math.abs(total - 100) < 0.5;
-    return `<div>${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${total}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
+    return `<div>🎯 Contribución a ${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${total}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
   });
-  if (sinCompetencia) lineas.push(`<div style="color:#dc2626">⚠️ ${sinCompetencia} criterio(s) sin ninguna competencia marcada</div>`);
-  el.innerHTML = lineas.join('') || '<span style="color:var(--muted)">Marca al menos una competencia en algún criterio</span>';
+  html += lineas.join('');
+  if (sinCompetencia) html += `<div style="color:var(--muted)">ℹ️ ${sinCompetencia} criterio(s) marcado(s) N/A — solo cuentan para la nota, no miden ninguna competencia</div>`;
+  el.innerHTML = html;
 }
 
 function _renderRubricaGrid() {
@@ -4312,7 +4339,9 @@ function _renderRubricaGrid() {
   table.innerHTML = `
     <thead><tr><th class="rb-col-criterio">Criterio</th>${theadNiveles}</tr></thead>
     <tbody>
-      ${_rbCriterios.map(c => `
+      ${_rbCriterios.map(c => {
+        const sinComp = !c.competencias || !c.competencias.length;
+        return `
         <tr>
           <td class="rb-col-criterio">
             <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
@@ -4320,18 +4349,26 @@ function _renderRubricaGrid() {
             </div>
             <input type="text" class="rb-criterio-nombre" value="${c.nombre}" placeholder="Nombre del criterio" onchange="rbUpdateCriterio('${c.id}','nombre',this.value)">
             <div class="rb-criterio-meta">
-              <input type="number" class="rb-criterio-peso" value="${c.peso}" onchange="rbUpdateCriterio('${c.id}','peso',this.value)" title="Peso %">%
+              <span style="font-size:0.7rem;color:var(--muted)">Peso en nota:</span>
+              <input type="number" class="rb-criterio-peso" value="${c.peso}" onchange="rbUpdateCriterio('${c.id}','peso',this.value)" title="Peso hacia la nota general del LAO">%
             </div>
-            <div style="margin-top:6px;font-size:0.72rem">
-              <div style="color:var(--muted);margin-bottom:2px">Alimenta:</div>
-              ${compOpts.map(o => `<label style="display:flex;align-items:center;gap:5px;padding:1px 0">
-                <input type="checkbox" ${((c.competenciaIds)||[]).includes(o.id) ? 'checked' : ''}
-                  onchange="rbToggleCriterioComp('${c.id}','${o.id}',this.checked)">${o.label}
-              </label>`).join('')}
+            <div style="margin-top:8px;font-size:0.72rem;border-top:1px dashed var(--border);padding-top:6px">
+              <div style="color:var(--muted);margin-bottom:2px">Mide competencia(s) ${sinComp ? '<span class="badge badge-gold" style="font-size:0.62rem">N/A</span>' : ''}:</div>
+              ${compOpts.map(o => {
+                const cc = (c.competencias || []).find(x => x.competenciaId === o.id);
+                return `<div style="display:flex;align-items:center;gap:5px;padding:1px 0">
+                  <label style="display:flex;align-items:center;gap:5px;flex:1;cursor:pointer">
+                    <input type="checkbox" ${cc ? 'checked' : ''} onchange="rbToggleCriterioComp('${c.id}','${o.id}',this.checked)">${o.label}
+                  </label>
+                  ${cc ? `<input type="number" value="${cc.peso}" onchange="rbUpdateCompPeso('${c.id}','${o.id}',this.value)" title="% de contribución a ${o.label} (interno a este LAO)" style="width:52px;padding:2px">%` : ''}
+                </div>`;
+              }).join('')}
+              <div style="color:var(--muted);font-size:0.65rem;margin-top:2px">Sin marcar = N/A (no mide competencia, solo cuenta para la nota)</div>
             </div>
           </td>
           ${_rbNiveles.map(n => `<td><textarea class="rb-celda" onchange="rbUpdateCelda('${c.id}','${n.id}',this.value)" placeholder="Descripción de ejecución...">${(c.celdas && c.celdas[n.id]) || ''}</textarea></td>`).join('')}
-        </tr>`).join('')}
+        </tr>`;
+      }).join('')}
     </tbody>`;
   _rbActualizarPesoTotal();
 }
@@ -4339,13 +4376,18 @@ function _renderRubricaGrid() {
 function guardarRubricaBuilder() {
   const laoId = document.getElementById('rb-lao-id').value;
   if (!laoId) return;
+  const pesoNotaTotal = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
   const grupos = _rbGruposPorCompetencia();
-  const desbalanceados = Object.entries(grupos).filter(([compId, crits]) =>
-    Math.abs(crits.reduce((s, c) => s + (c.peso || 0), 0) - 100) > 0.5);
+  const desbalanceados = Object.entries(grupos).filter(([compId, gs]) =>
+    Math.abs(gs.reduce((s, g) => s + (g.peso || 0), 0) - 100) > 0.5);
+  const avisos = [];
+  if (Math.abs(pesoNotaTotal - 100) > 0.5) avisos.push(`el peso hacia la nota del LAO suma ${pesoNotaTotal}% (no 100%)`);
   if (desbalanceados.length) {
     const nombres = desbalanceados.map(([compId]) => db.competencias.find(c => c.id === compId)?.codigo || compId).join(', ');
-    if (!confirm(`Los pesos no suman 100% para: ${nombres}. ¿Guardar de todas formas?`)) return;
+    avisos.push(`la contribución a estas competencias no suma 100%: ${nombres}`);
   }
+  if (avisos.length && !confirm(`Atención: ${avisos.join('; ')}. ¿Guardar de todas formas?`)) return;
+
   const existente = db.rubricas.find(r => r.laoId === laoId);
   const record = { laoId, niveles: _rbNiveles, criterios: _rbCriterios };
   if (existente) {
@@ -5132,9 +5174,13 @@ function buildGrid(cursoId) {
 // cuadrícula que se está llenando ahora mismo — combina los criterios de la
 // rúbrica que alimentan esa competencia (o usa la nota directa), y convierte
 // con los umbrales propios de este LAO.
+function _rbPesoParaCompetencia(criterio, compId) {
+  return criterio.competencias?.find(cc => cc.competenciaId === compId)?.peso;
+}
+
 function _calcNivelCompGrid(estId, compId) {
   if (avRubricaActual) {
-    const critsComp = avRubricaActual.criterios.filter(c => (c.competenciaIds || []).includes(compId));
+    const critsComp = avRubricaActual.criterios.filter(c => _rbPesoParaCompetencia(c, compId) !== undefined);
     if (!critsComp.length) return null;
     const maxPuntos = Math.max(...avRubricaActual.niveles.map(n => n.puntos), 1);
     let sumPeso = 0, sumPct = 0;
@@ -5143,8 +5189,9 @@ function _calcNivelCompGrid(estId, compId) {
       if (!nivelId) return;
       const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
       if (!nivel) return;
-      sumPct += (nivel.puntos / maxPuntos) * 100 * (c.peso || 0);
-      sumPeso += (c.peso || 0);
+      const pesoComp = _rbPesoParaCompetencia(c, compId) || 0;
+      sumPct += (nivel.puntos / maxPuntos) * 100 * pesoComp;
+      sumPeso += pesoComp;
     });
     if (!sumPeso) return null;
     return _nivelDesdePuntos(sumPct / sumPeso, avLaoActual.umbrales);
@@ -5301,15 +5348,16 @@ function guardarTodaLaClase() {
     const evaluaciones = avCompsActuales.map(c => {
       let pct = null;
       if (avRubricaActual) {
-        const critsComp = avRubricaActual.criterios.filter(cr => (cr.competenciaIds || []).includes(c.id));
+        const critsComp = avRubricaActual.criterios.filter(cr => _rbPesoParaCompetencia(cr, c.id) !== undefined);
         let sumPeso = 0, sumPct = 0;
         critsComp.forEach(cr => {
           const nivelId = resp._criterios?.[cr.id];
           if (!nivelId) return;
           const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
           if (!nivel) return;
-          sumPct += (nivel.puntos / maxPuntosRubrica) * 100 * (cr.peso || 0);
-          sumPeso += (cr.peso || 0);
+          const pesoComp = _rbPesoParaCompetencia(cr, c.id) || 0;
+          sumPct += (nivel.puntos / maxPuntosRubrica) * 100 * pesoComp;
+          sumPeso += pesoComp;
         });
         if (sumPeso) pct = sumPct / sumPeso;
       } else {
