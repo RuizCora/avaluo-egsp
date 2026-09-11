@@ -1964,11 +1964,11 @@
           <option value="nota">Nota del curso</option>
           <option value="cualquiera">Cualquiera de los dos</option>
         </select></div>
-      <div class="dash-filter-group"><label class="dash-filter-label">Umbral global (0–3)</label>
-        <input id="r6-threshold-global" type="number" min="0" max="3" step="0.1"
-          class="dash-select" style="width:80px" value="1.5" onchange="saveR6Threshold()"></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Umbral global (según escala vigente)</label>
+        <input id="r6-threshold-global" type="number" min="0" max="10" step="0.1"
+          class="dash-select" style="width:80px" value="2" onchange="saveR6Threshold()"></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Override esta corrida</label>
-        <input id="r6-threshold" type="number" min="0" max="3" step="0.1"
+        <input id="r6-threshold" type="number" min="0" max="10" step="0.1"
           class="dash-select" style="width:80px" placeholder="—" oninput="renderR6()"></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Nota de curso &lt;</label>
         <input id="r6-nota-threshold" type="number" min="0" max="100" step="1"
@@ -6089,25 +6089,51 @@ function eliminarAvaluo(id) {
 
 // ── Shared helpers ────────────────────────────────────────────
 const NV = { '3':3,'2':2,'1':1,'0':0,'L':3,'P':2,'N':1 };
+// Convierte un valor de nivel a número de forma agnóstica a la escala (antes
+// NV era una tabla fija 0-3 y silenciosamente perdía cualquier nivel fuera
+// de ese rango, como el nuevo nivel 4 "Proficient"). Cualquier dígito se usa
+// tal cual; solo las letras legado (L/P/N) usan la tabla vieja.
+function nvValor(nivel) {
+  if (NV[nivel] !== undefined && isNaN(parseFloat(nivel))) return NV[nivel]; // legado L/P/N
+  const n = parseFloat(nivel);
+  return isNaN(n) ? undefined : n;
+}
 const NV_LABEL = { '3':'Logrado','2':'En Progreso','1':'No Logrado','0':'No Evaluado',
                    'L':'Logrado','P':'En Progreso','N':'No Logrado' };
 const NV_KEY   = { '3':'3','2':'2','1':'1','0':'0','L':'3','P':'2','N':'1' };
 
-function _nivelPill(raw) {
-  const k = NV_KEY[String(raw)] || '0';
-  const labels = {'3':'Logrado','2':'En Progreso','1':'No Logrado','0':'—'};
-  const cls    = {'3':'nivel-L','2':'nivel-P','1':'nivel-N','0':'nivel-0'};
-  return `<span class="nivel-pill ${cls[k]}">${labels[k]}</span>`;
+function _nivelPill(raw, escala) {
+  if (raw === '' || raw === undefined || raw === null || raw === 'undefined' || raw === 'null') {
+    return '<span class="nivel-pill nivel-0" style="background:#e5e7eb;color:#374151">N/A</span>';
+  }
+  const info = nivelInfo(raw, escala);
+  const valor = parseFloat(raw);
+  const max = Math.max(...(escala?.niveles?.map(n => n.valor) || [4]), 1);
+  const pct = isNaN(valor) ? 0 : valor / max;
+  const cls = pct >= 0.75 ? 'nivel-L' : pct >= 0.4 ? 'nivel-P' : 'nivel-N';
+  return `<span class="nivel-pill ${cls}" title="${info.descripcion || ''}">${info.titulo}</span>`;
 }
 
 function _avgNivel(evals) {
   if (!evals.length) return null;
-  return evals.reduce((s,e)=>s+(NV[String(e)]||0),0)/evals.length;
+  return evals.reduce((s,e)=>s+(nvValor(e)??0),0)/evals.length;
 }
 
-function _colorForAvg(avg) {
+function _colorForAvg(avg, maxValor) {
   if (avg === null) return 'var(--muted)';
-  return avg >= 2.5 ? '#059669' : avg >= 1.5 ? '#d97706' : '#dc2626';
+  const max = maxValor || Math.max(...(db.escalasNiveles?.find(e=>e.activa&&e.aplicaA==='todos')?.niveles.map(n=>n.valor) || [4]));
+  const pct = avg / (max || 4);
+  return pct >= 0.75 ? '#059669' : pct >= 0.5 ? '#d97706' : '#dc2626';
+}
+// Par de colores (fondo claro + texto) para una celda de promedio, ya
+// relativo al máximo de la escala global vigente (antes era fijo 0-3).
+function _bgColParaAvg(avg) {
+  const max = Math.max(...(db.escalasNiveles?.find(e=>e.activa&&e.aplicaA==='todos')?.niveles.map(n=>n.valor) || [4]));
+  const pct = avg / (max || 4);
+  if (pct >= 0.85) return { bg:'#d1fae5', col:'#065f46' };
+  if (pct >= 0.65) return { bg:'#fef3c7', col:'#92400e' };
+  if (pct >= 0.4)  return { bg:'#ffedd5', col:'#7c2d12' };
+  return { bg:'#fee2e2', col:'#7f1d1d' };
 }
 
 function _allEvals(avaluos) {
@@ -6119,7 +6145,7 @@ function _allEvals(avaluos) {
       av.evaluaciones.forEach(ev => {
         const nivel = ev.nivel;
         if (nivel === '' || nivel === undefined || nivel === null) return;
-        const val = NV[String(nivel)];
+        const val = nvValor(nivel);
         if (val === undefined) return;
         out.push({
           compId:   ev.competenciaId || ev.competenciaCodigo || '',
@@ -6143,7 +6169,7 @@ function _allEvals(avaluos) {
     const resp = av.respuestas || {};
     Object.entries(resp).forEach(([compId, r]) => {
       const nivel = r?.nivel ?? r;
-      const val   = NV[String(nivel)];
+      const val   = nvValor(nivel);
       if (val === undefined) return;
       const comp = db.competencias.find(x=>x.id===compId);
       out.push({
@@ -6241,6 +6267,41 @@ function _avgBadge(avg) {
   return `<span style="font-weight:800;color:${c}">${avg.toFixed(2)}</span>`;
 }
 
+// Construye las columnas de nivel a mostrar en un reporte para una escala
+// dada: una columna por cada agrupación configurada (combinando sus
+// niveles, ej. "Logrado" = 3+4), y una columna aparte por cada nivel que no
+// esté en ninguna agrupación — ordenadas de mayor a menor puntaje. Ya no
+// son columnas fijas "Logrado/En Progreso/No Logrado" — se adaptan a
+// cualquier escala (número de niveles, nombres, agrupaciones) por programa.
+function construirColumnasNivel(escala) {
+  const niveles = escala?.niveles?.length ? escala.niveles : ESCALA_NIVELES_DEFAULT.niveles;
+  const agrupaciones = escala?.agrupaciones || [];
+  const cubiertos = new Set();
+  const columnas = [];
+  agrupaciones.forEach(g => {
+    if (!g.valores?.length) return;
+    g.valores.forEach(v => cubiertos.add(v));
+    columnas.push({ label: g.nombre, valores: g.valores, max: Math.max(...g.valores), esGrupo: true });
+  });
+  niveles.forEach(n => {
+    if (!cubiertos.has(n.valor)) columnas.push({ label: n.titulo, valores: [n.valor], max: n.valor, esGrupo: false });
+  });
+  columnas.sort((a, b) => b.max - a.max);
+  return columnas;
+}
+// Cuenta cuántos valores de "vals" caen en cada columna construida arriba.
+function contarEnColumnas(vals, columnas) {
+  return columnas.map(col => vals.filter(v => col.valores.includes(Math.round(v))).length);
+}
+// Barra de distribución genérica (reemplaza el _miniBar fijo de 4 franjas).
+function _miniBarDinamico(counts, total) {
+  if (!total) return '';
+  const colores = ['#059669','#10b981','#d97706','#f97316','#dc2626','#991b1b'];
+  return `<div style="display:flex;height:14px;width:100px;border-radius:4px;overflow:hidden;background:#e5e7eb">
+    ${counts.map((n, i) => n ? `<div style="width:${n/total*100}%;background:${colores[Math.min(i,colores.length-1)]}" title="${n}"></div>` : '').join('')}
+  </div>`;
+}
+
 function _exportCSV(filename, rows) {
   const bom = '\uFEFF';
   const csv = rows.map(r => r.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -6328,39 +6389,41 @@ function renderR1() {
   const el = document.getElementById('r1-body');
   if (!evals.length) { el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos para los filtros seleccionados</p></div>'; _reportCSVData=[]; return; }
 
-  // Group by program → competency
+  // Group by program → competency (se guarda un cursoId de muestra por
+  // programa para poder resolver su escala de niveles)
   const byProg = {};
   evals.forEach(ev => {
     const curso = db.cursos.find(c=>c.id===ev.cursoId);
     const prog  = curso?.programa||'Sin Programa';
-    if (!byProg[prog]) byProg[prog] = {};
-    if (!byProg[prog][ev.compCode]) byProg[prog][ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[],n3:0,n2:0,n1:0,n0:0};
-    byProg[prog][ev.compCode].vals.push(ev.val);
-    byProg[prog][ev.compCode]['n'+NV_KEY[ev.nivel]]++;
+    if (!byProg[prog]) byProg[prog] = { comps:{}, cursoMuestra: curso?.id };
+    if (!byProg[prog].comps[ev.compCode]) byProg[prog].comps[ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[]};
+    byProg[prog].comps[ev.compCode].vals.push(ev.val);
   });
 
   let html = '';
-  const csvRows = [['Programa','Competencia','Descripción','Logrado','En Progreso','No Logrado','No Eval','Total','Avg Logro']];
-  Object.entries(byProg).sort(([a],[b])=>a.localeCompare(b)).forEach(([prog,comps])=>{
+  const csvRows = [];
+  let csvHeaderEscrito = false;
+  Object.entries(byProg).sort(([a],[b])=>a.localeCompare(b)).forEach(([prog,{comps,cursoMuestra}])=>{
+    const escala = resolverEscalaParaCurso(cursoMuestra);
+    const columnas = construirColumnasNivel(escala);
+    if (!csvHeaderEscrito) { csvRows.push(['Programa','Competencia','Descripción', ...columnas.map(c=>c.label), 'Total','Avg Logro']); csvHeaderEscrito = true; }
     const progAvg = _avgNivel(Object.values(comps).flatMap(c=>c.vals));
-    html += `<div class="rpt-section-head"><span>${prog}</span><span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(progAvg)}">Avg: ${progAvg?.toFixed(2)||'—'}</span></div>`;
+    html += `<div class="rpt-section-head"><span>${prog}</span><span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(progAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${progAvg?.toFixed(2)||'—'}</span></div>`;
     html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-      <th>Competencia</th><th>Descripción</th><th>Logrado</th><th>En Progreso</th><th>No Logrado</th><th>No Eval</th><th>Total</th><th>Avg</th><th>Distribución</th>
+      <th>Competencia</th><th>Descripción</th>${columnas.map(c=>`<th>${c.label}</th>`).join('')}<th>Total</th><th>Avg</th><th>Distribución</th>
     </tr></thead><tbody>`;
     Object.values(comps).sort((a,b)=>a.code.localeCompare(b.code)).forEach(c=>{
       const total=c.vals.length, avg=_avgNivel(c.vals);
+      const counts = contarEnColumnas(c.vals, columnas);
       html += `<tr>
         <td><strong>${c.code}</strong></td>
         <td style="font-size:0.75rem;max-width:260px">${c.desc}</td>
-        <td><span class="nivel-pill nivel-L">${c.n3}</span></td>
-        <td><span class="nivel-pill nivel-P">${c.n2}</span></td>
-        <td><span class="nivel-pill nivel-N">${c.n1}</span></td>
-        <td><span class="nivel-pill nivel-0">${c.n0}</span></td>
+        ${counts.map(n=>`<td>${n}</td>`).join('')}
         <td>${total}</td>
         <td>${_avgBadge(avg)}</td>
-        <td>${_miniBar(c.n3,c.n2,c.n1,c.n0,total)}</td>
+        <td>${_miniBarDinamico(counts,total)}</td>
       </tr>`;
-      csvRows.push([prog,c.code,c.desc,c.n3,c.n2,c.n1,c.n0,total,avg?.toFixed(2)||'']);
+      csvRows.push([prog,c.code,c.desc,...counts,total,avg?.toFixed(2)||'']);
     });
     html += '</tbody></table></div>';
   });
@@ -6393,38 +6456,39 @@ function renderR2() {
     const curso = db.cursos.find(c=>c.id===ev.cursoId);
     const key = ev.cursoId;
     if (!byCurso[key]) byCurso[key]={id:key,codigo:curso?.codigo||key,nombre:curso?.nombre||key,comps:{}};
-    if (!byCurso[key].comps[ev.compCode]) byCurso[key].comps[ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[],n3:0,n2:0,n1:0,n0:0};
+    if (!byCurso[key].comps[ev.compCode]) byCurso[key].comps[ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[]};
     byCurso[key].comps[ev.compCode].vals.push(ev.val);
-    byCurso[key].comps[ev.compCode]['n'+NV_KEY[ev.nivel]]++;
   });
 
   let html = '';
-  const csvRows=[['Curso','Código','Competencia','Descripción','Logrado','En Progreso','No Logrado','No Eval','Total','Avg']];
+  const csvRows=[];
+  let csvHeaderEscrito = false;
   Object.values(byCurso).sort((a,b)=>a.codigo.localeCompare(b.codigo)).forEach(curso=>{
+    const escala = resolverEscalaParaCurso(curso.id);
+    const columnas = construirColumnasNivel(escala);
+    if (!csvHeaderEscrito) { csvRows.push(['Curso','Código','Competencia','Descripción', ...columnas.map(c=>c.label), 'Total','Avg']); csvHeaderEscrito = true; }
     const nEst = new Set(avaluos.filter(a=>a.cursoId===curso.id).map(a=>a.estudianteId||a.estudiante)).size;
     const cursoAvg = _avgNivel(Object.values(curso.comps).flatMap(c=>c.vals));
     html += `<div class="rpt-section-head">
       <span>${curso.codigo} · ${curso.nombre}</span>
       <span class="badge badge-blue">${nEst} estudiantes</span>
-      <span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(cursoAvg)}">Avg: ${cursoAvg?.toFixed(2)||'—'}</span>
+      <span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(cursoAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${cursoAvg?.toFixed(2)||'—'}</span>
     </div>`;
     html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-      <th>Competencia</th><th>Descripción</th><th>Logrado</th><th>En Progreso</th><th>No Logrado</th><th>No Eval</th><th>Total</th><th>Avg</th><th>Distribución</th>
+      <th>Competencia</th><th>Descripción</th>${columnas.map(c=>`<th>${c.label}</th>`).join('')}<th>Total</th><th>Avg</th><th>Distribución</th>
     </tr></thead><tbody>`;
     Object.values(curso.comps).sort((a,b)=>a.code.localeCompare(b.code)).forEach(c=>{
       const total=c.vals.length, avg=_avgNivel(c.vals);
+      const counts = contarEnColumnas(c.vals, columnas);
       html += `<tr>
         <td><strong>${c.code}</strong></td>
         <td style="font-size:0.75rem;max-width:260px">${c.desc}</td>
-        <td><span class="nivel-pill nivel-L">${c.n3}</span></td>
-        <td><span class="nivel-pill nivel-P">${c.n2}</span></td>
-        <td><span class="nivel-pill nivel-N">${c.n1}</span></td>
-        <td><span class="nivel-pill nivel-0">${c.n0}</span></td>
+        ${counts.map(n=>`<td>${n}</td>`).join('')}
         <td>${total}</td>
         <td>${_avgBadge(avg)}</td>
-        <td>${_miniBar(c.n3,c.n2,c.n1,c.n0,total)}</td>
+        <td>${_miniBarDinamico(counts,total)}</td>
       </tr>`;
-      csvRows.push([curso.codigo,curso.nombre,c.code,c.desc,c.n3,c.n2,c.n1,c.n0,total,avg?.toFixed(2)||'']);
+      csvRows.push([curso.codigo,curso.nombre,c.code,c.desc,...counts,total,avg?.toFixed(2)||'']);
     });
     html += '</tbody></table></div>';
   });
@@ -6502,19 +6566,20 @@ function renderR3() {
 
     Object.values(byCurso).sort((a,b)=>a.semestre.localeCompare(b.semestre)).forEach(grupo=>{
       // Normalize nivel to string (guardarEdicionAvaluo saves it as parseInt)
-      grupo.evals.forEach(ev => { ev.nivel = String(ev.nivel); ev.val = NV[ev.nivel] ?? ev.val; });
+      grupo.evals.forEach(ev => { ev.nivel = String(ev.nivel); ev.val = nvValor(ev.nivel) ?? ev.val; });
       const visibleEvals = grupo.evals.filter(ev => ev.nivel !== '' && ev.nivel !== 'undefined' && ev.nivel !== 'null');
       if (!visibleEvals.length) return; // skip groups with no evaluated competencies
+      const escalaGrupo = resolverEscalaParaCurso(visibleEvals[0]?.cursoId);
       visibleEvals.sort((a,b)=>a.compCode.localeCompare(b.compCode)).forEach((ev,i)=>{
         html += `<tr>
           ${i===0?`<td rowspan="${visibleEvals.length}" style="font-weight:700;vertical-align:top">${grupo.codigo}<br><span style="font-size:0.7rem;font-weight:400">${grupo.nombre}</span></td>
           <td rowspan="${visibleEvals.length}" style="vertical-align:top;font-size:0.75rem">${grupo.semestre}</td>`:''}
           <td><strong>${ev.compCode}</strong></td>
           <td style="font-size:0.75rem;max-width:220px">${ev.compDesc}</td>
-          <td>${_nivelPill(ev.nivel)}</td>
+          <td>${_nivelPill(ev.nivel, escalaGrupo)}</td>
           <td>${ev.val}</td>
         </tr>`;
-        csvRows.push([nombre,estId,grupo.codigo,grupo.semestre,ev.compCode,ev.compDesc,NV_LABEL[ev.nivel]||ev.nivel,ev.val]);
+        csvRows.push([nombre,estId,grupo.codigo,grupo.semestre,ev.compCode,ev.compDesc,nivelInfo(ev.nivel, escalaGrupo).titulo,ev.val]);
       });
     });
     html += '</tbody></table></div>';
@@ -6561,13 +6626,18 @@ function renderR4() {
   const allSeriesKeys = [...new Set(terms.flatMap(t=>Object.keys(t.series)))].sort();
   const COLORS = ['#f27d67','#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
 
-  // Build SVG line chart
+  // Build SVG line chart — el eje Y usa el máximo de la escala global vigente
+  // (antes fijo en 3; distintos programas con escalas distintas comparten
+  // este eje como una referencia general, ya que es una sola gráfica).
+  const escalaGlobal = db.escalasNiveles?.find(e=>e.activa&&e.aplicaA==='todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivelChart = Math.max(...escalaGlobal.niveles.map(n=>n.valor), 1);
   const W=560, H=200, PAD={top:20,right:20,bottom:36,left:36};
   const iW=W-PAD.left-PAD.right, iH=H-PAD.top-PAD.bottom;
   const xScale = i => terms.length < 2 ? PAD.left+iW/2 : PAD.left+(i/(terms.length-1))*iW;
-  const yScale = v => PAD.top+iH-((v/3))*iH;
+  const yScale = v => PAD.top+iH-((v/maxNivelChart))*iH;
 
-  const grids = [0,1,2,3].map(v=>`
+  const gridVals = Array.from({length: maxNivelChart+1}, (_, i) => i);
+  const grids = gridVals.map(v=>`
     <line x1="${PAD.left}" y1="${yScale(v)}" x2="${PAD.left+iW}" y2="${yScale(v)}" stroke="#efefef" stroke-width="1"/>
     <text x="${PAD.left-4}" y="${yScale(v)+4}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${v}</text>`).join('');
 
@@ -6644,9 +6714,8 @@ function renderR5() {
     }
     const laos = laoStr ? laoStr.split('|').map(l=>l.trim()).filter(Boolean) : ['Sin LAO asignado'];
     laos.forEach(lao => {
-      if (!laoMap[lao]) laoMap[lao]={lao,vals:[],n3:0,n2:0,n1:0,n0:0,comps:new Set(),cursos:new Set()};
+      if (!laoMap[lao]) laoMap[lao]={lao,vals:[],comps:new Set(),cursos:new Set()};
       laoMap[lao].vals.push(ev.val);
-      laoMap[lao]['n'+NV_KEY[ev.nivel]]++;
       laoMap[lao].comps.add(ev.compCode);
       laoMap[lao].cursos.add(ev.cursoId);
     });
@@ -6656,24 +6725,30 @@ function renderR5() {
     .map(l=>({...l,avg:_avgNivel(l.vals),total:l.vals.length}))
     .sort((a,b)=>b.avg-a.avg);
 
-  const csvRows=[['LAO','Avg Logro','Logrado','En Progreso','No Logrado','No Eval','Total','# Competencias','# Cursos']];
+  // La escala se resuelve por LAO usando cualquiera de sus cursos asociados
+  // (en la práctica un LAO pertenece a un solo curso, así que comparten escala).
+  const escalaPorLao = entries.map(l => resolverEscalaParaCurso([...l.cursos][0]));
+  const columnasBase = construirColumnasNivel(escalaPorLao[0] || ESCALA_NIVELES_DEFAULT);
+
+  const csvRows=[['LAO','Avg Logro', ...columnasBase.map(c=>c.label), 'Total','# Competencias','# Cursos']];
   let html=`<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-    <th>#</th><th>LAO / Estrategia de Avalúo</th><th>Avg</th><th>Logrado</th><th>En Prog.</th><th>No Logrado</th><th>Total</th><th>Distribución</th><th>Cursos</th>
+    <th>#</th><th>LAO / Estrategia de Avalúo</th><th>Avg</th>${columnasBase.map(c=>`<th>${c.label}</th>`).join('')}<th>Total</th><th>Distribución</th><th>Cursos</th>
   </tr></thead><tbody>`;
   entries.forEach((l,i)=>{
-    const col=_colorForAvg(l.avg);
+    const escala = escalaPorLao[i] || ESCALA_NIVELES_DEFAULT;
+    const columnas = construirColumnasNivel(escala);
+    const counts = contarEnColumnas(l.vals, columnas);
+    const col=_colorForAvg(l.avg, Math.max(...escala.niveles.map(n=>n.valor)));
     html+=`<tr>
       <td style="color:${col};font-weight:800">#${i+1}</td>
       <td style="max-width:300px;font-size:0.8rem">${l.lao}</td>
       <td>${_avgBadge(l.avg)}</td>
-      <td><span class="nivel-pill nivel-L">${l.n3}</span></td>
-      <td><span class="nivel-pill nivel-P">${l.n2}</span></td>
-      <td><span class="nivel-pill nivel-N">${l.n1+l.n0}</span></td>
+      ${counts.map(n=>`<td>${n}</td>`).join('')}
       <td>${l.total}</td>
-      <td>${_miniBar(l.n3,l.n2,l.n1,l.n0,l.total)}</td>
+      <td>${_miniBarDinamico(counts,l.total)}</td>
       <td style="font-size:0.75rem">${[...l.cursos].map(id=>db.cursos.find(c=>c.id===id)?.codigo||id).join(', ')}</td>
     </tr>`;
-    csvRows.push([l.lao,l.avg?.toFixed(2),l.n3,l.n2,l.n1,l.n0,l.total,l.comps.size,l.cursos.size]);
+    csvRows.push([l.lao,l.avg?.toFixed(2),...counts,l.total,l.comps.size,l.cursos.size]);
   });
   html+='</tbody></table></div>';
   el.innerHTML=html;
@@ -6690,7 +6765,7 @@ function saveR6Threshold() {
 }
 
 function renderR6() {
-  const globalT = parseFloat(document.getElementById('r6-threshold-global')?.value)||1.5;
+  const globalT = parseFloat(document.getElementById('r6-threshold-global')?.value)||2;
   const overrideT = document.getElementById('r6-threshold')?.value;
   const threshold = overrideT!==''&&overrideT!==undefined&&!isNaN(parseFloat(overrideT))
     ? parseFloat(overrideT) : globalT;
@@ -7513,13 +7588,11 @@ function renderDashboard2() {
                 const cell = matrix[code]?.[p];
                 if (!cell) return `<td style="text-align:center;padding:4px;color:#d1d5db">—</td>`;
                 const avg = cell.sum / cell.count;
-                const bg = avg>=2.5?'#d1fae5':avg>=2?'#fef3c7':avg>=1.5?'#ffedd5':'#fee2e2';
-                const col = avg>=2.5?'#065f46':avg>=2?'#92400e':avg>=1.5?'#7c2d12':'#7f1d1d';
+                const { bg, col } = _bgColParaAvg(avg);
                 return `<td style="text-align:center;padding:4px;background:${bg}"><span style="font-weight:800;font-size:0.78rem;color:${col}">${avg.toFixed(2)}</span><br><span style="font-size:0.6rem;color:${col}">n=${cell.count}</span></td>`;
               }).join('')}
               ${globalAvg !== null ? (() => {
-                const bg = globalAvg>=2.5?'#d1fae5':globalAvg>=2?'#fef3c7':globalAvg>=1.5?'#ffedd5':'#fee2e2';
-                const col = globalAvg>=2.5?'#065f46':globalAvg>=2?'#92400e':globalAvg>=1.5?'#7c2d12':'#7f1d1d';
+                const { bg, col } = _bgColParaAvg(globalAvg);
                 return `<td style="text-align:center;padding:4px;background:${bg};border-left:2px solid var(--border)"><span style="font-weight:800;color:${col}">${globalAvg.toFixed(2)}</span></td>`;
               })() : '<td style="text-align:center;color:#d1d5db">—</td>'}
             </tr>`;
