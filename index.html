@@ -1690,12 +1690,10 @@
       <button class="modal-close" onclick="closeModal('modal-rubrica-builder');openModal('modal-lao')">✕</button>
     </div>
     <input type="hidden" id="rb-lao-id">
+    <div id="rb-escala-info" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;padding:8px 12px;background:var(--cream);border-radius:6px"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:0.82rem;color:var(--muted)">Filas = criterios de evaluación · Columnas = niveles de la escala · Cada celda describe la ejecución esperada en ese nivel para ese criterio.</div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-outline btn-sm" onclick="rbAgregarNivel()">+ Nivel (columna)</button>
-        <button class="btn btn-outline btn-sm" onclick="rbAgregarCriterio()">+ Criterio (fila)</button>
-      </div>
+      <button class="btn btn-outline btn-sm" onclick="rbAgregarCriterio()">+ Criterio (fila)</button>
     </div>
     <div style="overflow-x:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px">
       <table id="rb-grid-table" class="rb-grid-table"></table>
@@ -4525,6 +4523,7 @@ function guardarLao() {
 // ── Constructor de Rúbrica (grid criterios × niveles) ──────────
 let _rbNiveles = [];
 let _rbCriterios = [];
+let _rbEscalaActual = null; // la Escala de Niveles de la que se heredaron las columnas (solo informativo)
 
 function abrirRubricaBuilder() {
   const laoId = document.getElementById('lao-edit-id').value;
@@ -4533,6 +4532,9 @@ function abrirRubricaBuilder() {
   const rubrica = db.rubricas.find(r => r.laoId === laoId);
   document.getElementById('rb-lao-id').value = laoId;
   if (rubrica) {
+    // Las columnas de una rúbrica YA CREADA se mantienen tal como se
+    // guardaron (la escala que estaba vigente en ese momento) — así el
+    // legado no se reinterpreta si la escala cambia después.
     _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
     // Normaliza criterios de formatos anteriores: celdas puede faltar; la
     // vinculación a competencias puede venir como competenciaId (un solo
@@ -4548,12 +4550,11 @@ function abrirRubricaBuilder() {
       return { ...c, celdas: c.celdas || {}, competencias };
     });
   } else {
-    _rbNiveles = [
-      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Excelente', puntos: 100 },
-      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Satisfactorio', puntos: 85 },
-      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Insatisfactorio', puntos: 60 },
-      { id: 'niv_' + Math.random().toString(36).slice(2, 6), label: 'Deficiente', puntos: 25 },
-    ];
+    // Rúbrica NUEVA: las columnas se heredan de la Escala de Niveles vigente
+    // para el programa de este curso — ya no se definen libremente aquí.
+    const escala = resolverEscalaParaCurso(lao.cursoId);
+    _rbEscalaActual = escala;
+    _rbNiveles = (escala?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => ({ id: String(n.valor), label: n.titulo, puntos: n.valor }));
     _rbCriterios = (lao?.competencias || []).map(cc => ({
       id: 'crit_' + Math.random().toString(36).slice(2, 6),
       nombre: '', peso: Math.round(100 / (lao.competencias.length || 1)),
@@ -4670,13 +4671,12 @@ function _renderRubricaGrid() {
   }).filter(Boolean);
 
   const table = document.getElementById('rb-grid-table');
+  const nombreEscala = _rbEscalaActual?.nombre || 'la escala vigente';
+  const infoEscala = document.getElementById('rb-escala-info');
+  if (infoEscala) infoEscala.textContent = `Columnas heredadas de: ${nombreEscala} — para agregar/quitar niveles, edítalos en "Escalas de Niveles".`;
   const theadNiveles = _rbNiveles.map(n => `
-    <th class="rb-nivel-header" style="min-width:200px">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
-        <button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="rbEliminarNivel('${n.id}')" title="Eliminar este nivel">🗑 Eliminar nivel</button>
-      </div>
-      <input type="text" value="${n.label}" onchange="rbUpdateNivel('${n.id}','label',this.value)" placeholder="Etiqueta">
-      <input type="number" class="rb-puntos" value="${n.puntos}" onchange="rbUpdateNivel('${n.id}','puntos',this.value)" placeholder="Puntos" style="width:70px">
+    <th class="rb-nivel-header" style="min-width:170px">
+      <div style="font-weight:800;font-family:'Montserrat',sans-serif">${n.puntos} · ${n.label}</div>
     </th>`).join('');
 
   table.innerHTML = `
@@ -4736,7 +4736,7 @@ function guardarRubricaBuilder() {
   if (existente) {
     Object.assign(existente, record);
   } else {
-    db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...record, fechaCreacion: new Date().toISOString() });
+    db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...record, escalaId: _rbEscalaActual?.id || null, fechaCreacion: new Date().toISOString() });
   }
   saveDB();
   closeModal('modal-rubrica-builder');
@@ -5571,26 +5571,25 @@ function _rbPesoParaCompetencia(criterio, compId) {
 }
 
 function _calcNivelCompGrid(estId, compId) {
-  if (avRubricaActual) {
+  if (avModoActual === 'rubrica') {
     const critsComp = avRubricaActual.criterios.filter(c => _rbPesoParaCompetencia(c, compId) !== undefined);
     if (!critsComp.length) return null;
-    const maxPuntos = Math.max(...avRubricaActual.niveles.map(n => n.puntos), 1);
-    let sumPeso = 0, sumPct = 0;
+    let sumPeso = 0, sumPuntos = 0;
     critsComp.forEach(c => {
       const nivelId = avClaseData[estId]?._criterios?.[c.id];
       if (!nivelId) return;
       const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
       if (!nivel) return;
       const pesoComp = _rbPesoParaCompetencia(c, compId) || 0;
-      sumPct += (nivel.puntos / maxPuntos) * 100 * pesoComp;
+      sumPuntos += nivel.puntos * pesoComp;
       sumPeso += pesoComp;
     });
     if (!sumPeso) return null;
-    return _nivelDesdePuntos(sumPct / sumPeso, avLaoActual.umbrales);
+    // Promedio ponderado directamente en los puntos de la escala Likert (ej.
+    // 0-4), redondeado al entero más cercano — ya no se usan umbrales.
+    return Math.round(sumPuntos / sumPeso);
   }
-  const puntaje = avClaseData[estId]?._puntaje;
-  if (puntaje === '' || puntaje === undefined || puntaje === null || isNaN(puntaje)) return null;
-  return _nivelDesdePuntos((parseFloat(puntaje) / (avLaoActual.escalaMax || 100)) * 100, avLaoActual.umbrales);
+  return null; // modo directa: el nivel es la elección directa del profesor, sin cálculo
 }
 
 function renderGrid() {
@@ -5748,7 +5747,6 @@ function guardarTodaLaClase() {
   const fecha     = document.getElementById('av-fecha').value;
   const profesor  = document.getElementById('av-profesor').value.trim();
   const curso     = db.cursos.find(x => x.id === cursoId) || {};
-  const maxPuntosRubrica = avModoActual === 'rubrica' ? Math.max(...avRubricaActual.niveles.map(n => n.puntos), 1) : null;
   let guardados = 0, saltados = 0;
 
   avEstudiantesActuales.forEach(est => {
@@ -5767,26 +5765,30 @@ function guardarTodaLaClase() {
 
     let evaluaciones, notaLao;
     if (avModoActual === 'rubrica') {
-      // Por cada competencia que mide este LAO: calcula el % logrado (puede
-      // variar por competencia, según qué criterios la alimentan) y el Nivel
-      // resultante usando los umbrales propios de este LAO.
+      // Por cada competencia que mide este LAO: promedio ponderado
+      // DIRECTAMENTE en los puntos de la escala Likert de este LAO (ej.
+      // 0-4), redondeado al entero más cercano para obtener el Nivel final
+      // — ya no se usan umbrales. También se guarda un % normalizado
+      // (0-100) en puntajeLao, únicamente para cuando dos LAOs distintos
+      // midan la misma competencia y haya que combinarlos (Fase 1).
+      const maxValorEscala = Math.max(...avRubricaActual.niveles.map(n => n.puntos), 1);
       evaluaciones = avCompsActuales.map(c => {
         const critsComp = avRubricaActual.criterios.filter(cr => _rbPesoParaCompetencia(cr, c.id) !== undefined);
-        let sumPeso = 0, sumPct = 0;
+        let sumPeso = 0, sumPuntos = 0;
         critsComp.forEach(cr => {
           const nivelId = resp._criterios?.[cr.id];
           if (!nivelId) return;
           const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
           if (!nivel) return;
           const pesoComp = _rbPesoParaCompetencia(cr, c.id) || 0;
-          sumPct += (nivel.puntos / maxPuntosRubrica) * 100 * pesoComp;
+          sumPuntos += nivel.puntos * pesoComp;
           sumPeso += pesoComp;
         });
-        const pct = sumPeso ? sumPct / sumPeso : null;
-        const puntajeLao = pct !== null ? (pct / 100) * (avLaoActual.escalaMax || 100) : null;
+        const puntosPromedio = sumPeso ? sumPuntos / sumPeso : null;
+        const puntajeLao = puntosPromedio !== null ? (puntosPromedio / maxValorEscala) * 100 : null;
         return {
           competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
-          puntajeLao, nivel: pct !== null ? _nivelDesdePuntos(pct, avLaoActual.umbrales) : '',
+          puntajeLao, nivel: puntosPromedio !== null ? Math.round(puntosPromedio) : '',
           lao: avLaoActual.nombre,
         };
       });
