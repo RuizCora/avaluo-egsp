@@ -1573,7 +1573,7 @@
 
 <!-- Modal Escala de Niveles -->
 <div id="modal-escala" class="modal-overlay">
-  <div class="modal" style="max-width:760px">
+  <div class="modal" style="max-width:min(1300px,96vw);width:96vw">
     <div class="modal-header">
       <div class="modal-title" id="modal-escala-title">📐 Nueva Escala de Niveles</div>
       <button class="modal-close" onclick="closeModal('modal-escala')">✕</button>
@@ -1596,7 +1596,7 @@
       <strong style="font-size:0.88rem">Niveles</strong>
       <button class="btn btn-outline btn-sm" onclick="escAgregarNivel()">+ Agregar nivel</button>
     </div>
-    <div id="esc-niveles-list"></div>
+    <div id="esc-niveles-list" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px"></div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px">
       <strong style="font-size:0.88rem">Agrupaciones para Reportes</strong>
@@ -1614,54 +1614,63 @@
 
 <!-- Modal LAO -->
 <div id="modal-lao" class="modal-overlay">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:min(980px,96vw);width:96vw">
     <div class="modal-header">
       <div class="modal-title" id="modal-lao-title">📋 Nuevo LAO</div>
       <button class="modal-close" onclick="closeModal('modal-lao')">✕</button>
     </div>
     <input type="hidden" id="lao-edit-id">
-    <div class="form-row">
-      <div class="form-group" style="min-width:0">
-        <label>Curso *</label>
-        <select id="lao-curso" onchange="laoOnCursoChange()" style="width:100%;max-width:100%"><option value="">— Seleccionar —</option></select>
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:start">
+      <div style="min-width:0">
+        <div class="form-row">
+          <div class="form-group" style="min-width:0">
+            <label>Curso *</label>
+            <select id="lao-curso" onchange="laoOnCursoChange()" style="width:100%;max-width:100%"><option value="">— Seleccionar —</option></select>
+          </div>
+          <div class="form-group">
+            <label>Título del LAO *</label>
+            <input type="text" id="lao-titulo" placeholder="ej. Estudio de Caso">
+          </div>
+        </div>
+        <div id="lao-nombre-preview" style="font-size:0.78rem;color:var(--muted);margin:-8px 0 14px"></div>
+        <div class="form-group">
+          <label>Descripción</label>
+          <textarea id="lao-desc" placeholder="Describe brevemente este LAO, su propósito y contexto..."></textarea>
+        </div>
+        <div style="margin-bottom:0">
+          <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Competencias Medidas</div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px">Marca las competencias que mide este LAO. Si más de un LAO mide la misma competencia en este curso, define qué % aporta cada uno.</div>
+          <div id="lao-comps-wrap" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px">
+            <div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <label>Título del LAO *</label>
-        <input type="text" id="lao-titulo" placeholder="ej. Estudio de Caso">
+      <div style="min-width:0">
+        <div style="font-size:0.78rem;color:var(--muted);margin-bottom:14px;background:var(--cream);padding:10px 12px;border-radius:6px">
+          ℹ️ La Nota del LAO siempre se registra en % (0-100), igual que la Nota Final del curso. El nivel por competencia se mide con la Escala de Niveles vigente para el programa de este curso — sin rúbrica, el profesor lo elige directamente por competencia; con rúbrica, se calcula de los criterios.
+        </div>
+        <div class="form-group">
+          <label>Modo de Evaluación</label>
+          <select id="lao-modo-eval">
+            <option value="libre">Libre — el profesor elige rúbrica o directa al evaluar (si hay rúbrica configurada)</option>
+            <option value="requiere_rubrica">Requiere Rúbrica — solo se puede evaluar con rúbrica</option>
+            <option value="solo_directa">Solo Directa — nunca usa rúbrica, aunque exista una configurada</option>
+          </select>
+        </div>
+        <div style="align-items:center;background:var(--cream);padding:10px 14px;border-radius:8px;margin-top:10px;display:flex">
+          <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;margin:0">
+            <input type="checkbox" id="lao-oficial" style="width:auto" checked>
+            <label style="margin:0">Oficial del curso (visible para cualquier profesor que lo enseñe)</label>
+          </div>
+        </div>
+        <div id="lao-rubrica-row" style="margin-top:14px;display:none">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="abrirRubricaBuilder()">📊 <span id="lao-rubrica-btn-label">Configurar Rúbrica</span></button>
+            <button class="btn btn-danger btn-sm" id="lao-rubrica-eliminar-btn" style="display:none" onclick="eliminarRubricaDesdeModal()">🗑 Eliminar Rúbrica</button>
+          </div>
+          <span style="font-size:0.78rem;color:var(--muted);display:block;margin-top:6px">Opcional (salvo que el modo sea "Requiere Rúbrica") — sin rúbrica, este LAO se evalúa directamente por competencia.</span>
+        </div>
       </div>
-    </div>
-    <div id="lao-nombre-preview" style="font-size:0.78rem;color:var(--muted);margin:-8px 0 14px"></div>
-    <div class="form-group">
-      <label>Descripción</label>
-      <textarea id="lao-desc" placeholder="Describe brevemente este LAO, su propósito y contexto..."></textarea>
-    </div>
-    <div style="margin-bottom:16px">
-      <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Competencias Medidas</div>
-      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px">Marca las competencias que mide este LAO. Si más de un LAO mide la misma competencia en este curso, define qué % aporta cada uno.</div>
-      <div id="lao-comps-wrap" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px">
-        <div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>
-      </div>
-    </div>
-    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--cream);padding:8px 12px;border-radius:6px">
-      ℹ️ La Nota del LAO siempre se registra en % (0-100), igual que la Nota Final del curso. El nivel por competencia se mide con la Escala de Niveles vigente para el programa de este curso — sin rúbrica, el profesor lo elige directamente por competencia; con rúbrica, se calcula de los criterios.
-    </div>
-    <div class="form-group" style="margin-top:6px">
-      <label>Modo de Evaluación</label>
-      <select id="lao-modo-eval">
-        <option value="libre">Libre — el profesor elige rúbrica o directa al evaluar (si hay rúbrica configurada)</option>
-        <option value="requiere_rubrica">Requiere Rúbrica — solo se puede evaluar con rúbrica</option>
-        <option value="solo_directa">Solo Directa — nunca usa rúbrica, aunque exista una configurada</option>
-      </select>
-    </div>
-    <div class="form-row" style="align-items:center;background:var(--cream);padding:10px 14px;border-radius:8px;margin-top:6px">
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;margin:0">
-        <input type="checkbox" id="lao-oficial" style="width:auto" checked>
-        <label style="margin:0">Oficial del curso (visible para cualquier profesor que lo enseñe)</label>
-      </div>
-    </div>
-    <div id="lao-rubrica-row" style="margin-top:14px;display:none">
-      <button class="btn btn-outline btn-sm" onclick="abrirRubricaBuilder()">📊 <span id="lao-rubrica-btn-label">Configurar Rúbrica</span></button>
-      <span style="font-size:0.78rem;color:var(--muted);margin-left:8px">Opcional (salvo que el modo sea "Requiere Rúbrica") — sin rúbrica, este LAO se evalúa directamente por competencia.</span>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-lao')">Cancelar</button>
@@ -4109,14 +4118,18 @@ function escOnAlcanceChange(preseleccion) {
 
 function _renderEscNiveles() {
   const el = document.getElementById('esc-niveles-list');
-  el.innerHTML = _escNiveles.map((n, i) => `
-    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;background:var(--cream);border-radius:8px;padding:8px 10px">
-      <div style="width:40px;text-align:center;font-weight:800;font-family:'Montserrat',sans-serif;padding-top:6px">${n.valor}</div>
-      <div style="flex:1">
-        <input type="text" value="${n.titulo}" placeholder="Título" onchange="escUpdateNivel(${i},'titulo',this.value)" style="margin-bottom:4px">
-        <textarea placeholder="Descripción" onchange="escUpdateNivel(${i},'descripcion',this.value)" style="min-height:44px">${n.descripcion || ''}</textarea>
+  // Se muestran de mayor a menor (el más alto a la izquierda), aunque el
+  // arreglo interno siga en su orden original — se referencia el índice
+  // real para que escUpdateNivel/escEliminarNivel sigan editando lo correcto.
+  const orden = _escNiveles.map((n, i) => ({ n, i })).sort((a, b) => b.n.valor - a.n.valor);
+  el.innerHTML = orden.map(({ n, i }) => `
+    <div style="flex:0 0 220px;background:var(--cream);border-radius:8px;padding:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-weight:800;font-family:'Montserrat',sans-serif;font-size:1.1rem">${n.valor}</div>
+        <button class="btn btn-danger btn-sm" onclick="escEliminarNivel(${i})" title="Eliminar nivel">🗑</button>
       </div>
-      <button class="btn btn-danger btn-sm" style="margin-top:6px" onclick="escEliminarNivel(${i})" title="Eliminar nivel">🗑</button>
+      <input type="text" value="${n.titulo}" placeholder="Título" onchange="escUpdateNivel(${i},'titulo',this.value)" style="margin-bottom:6px;width:100%">
+      <textarea placeholder="Descripción" onchange="escUpdateNivel(${i},'descripcion',this.value)" style="min-height:100px;width:100%">${n.descripcion || ''}</textarea>
     </div>`).join('');
 }
 
@@ -4376,10 +4389,29 @@ function renderLaos() {
       ${isAdmin ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="abrirEditarLao('${l.id}')">✏️ Editar</button>
         ${!l.esOficial && !l.compartido ? `<button class="btn btn-outline btn-sm" onclick="compartirLao('${l.id}')">🔗 Compartir con todos</button>` : ''}
-        ${!l.isGenerico ? `<button class="btn btn-danger btn-sm" onclick="eliminarLao('${l.id}')">🗑</button>` : ''}
+        ${rubrica ? `<button class="btn btn-outline btn-sm" onclick="eliminarRubricaDesdeLista('${l.id}')">🗑 Solo rúbrica</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="eliminarLao('${l.id}')">🗑 Eliminar LAO</button>
       </div>` : ''}
     </div>`;
   }).join('');
+}
+
+function eliminarRubricaDesdeLista(laoId) {
+  if (!confirm('¿Eliminar solo la rúbrica de este LAO? El LAO seguirá existiendo, evaluado directamente por competencia.')) return;
+  db.rubricas = db.rubricas.filter(r => r.laoId !== laoId);
+  saveDB(); renderLaos();
+  notify('Rúbrica eliminada', '🗑');
+}
+
+function eliminarRubricaDesdeModal() {
+  const laoId = document.getElementById('lao-edit-id').value;
+  if (!laoId) return;
+  if (!confirm('¿Eliminar la rúbrica de este LAO? El LAO seguirá existiendo, evaluado directamente por competencia.')) return;
+  db.rubricas = db.rubricas.filter(r => r.laoId !== laoId);
+  saveDB();
+  document.getElementById('lao-rubrica-btn-label').textContent = 'Configurar Rúbrica';
+  document.getElementById('lao-rubrica-eliminar-btn').style.display = 'none';
+  notify('Rúbrica eliminada', '🗑');
 }
 
 function compartirLao(id) {
@@ -4430,6 +4462,7 @@ function abrirEditarLao(id) {
   document.getElementById('lao-rubrica-row').style.display = '';
   const rubrica = db.rubricas.find(r => r.laoId === id);
   document.getElementById('lao-rubrica-btn-label').textContent = rubrica ? 'Editar Rúbrica' : 'Configurar Rúbrica';
+  document.getElementById('lao-rubrica-eliminar-btn').style.display = rubrica ? '' : 'none';
   openModal('modal-lao');
 }
 
@@ -4526,7 +4559,9 @@ function abrirRubricaBuilder() {
     // para el programa de este curso — ya no se definen libremente aquí.
     const escala = resolverEscalaParaCurso(lao.cursoId);
     _rbEscalaActual = escala;
-    _rbNiveles = (escala?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => ({ id: String(n.valor), label: n.titulo, puntos: n.valor }));
+    _rbNiveles = [...(escala?.niveles || ESCALA_NIVELES_DEFAULT.niveles)]
+      .sort((a, b) => b.valor - a.valor)
+      .map(n => ({ id: String(n.valor), label: n.titulo, puntos: n.valor }));
     _rbCriterios = (lao?.competencias || []).map(cc => ({
       id: 'crit_' + Math.random().toString(36).slice(2, 6),
       nombre: '', peso: Math.round(100 / (lao.competencias.length || 1)),
@@ -4637,6 +4672,9 @@ function _rbActualizarPesoTotal() {
 function _renderRubricaGrid() {
   const laoId = document.getElementById('rb-lao-id').value;
   const lao = db.laos.find(l => l.id === laoId);
+  // Las columnas siempre se muestran de mayor a menor (la más alta a la
+  // izquierda), sin importar el orden en que se guardaron originalmente.
+  _rbNiveles.sort((a, b) => b.puntos - a.puntos);
   const compOpts = (lao?.competencias || []).map(cc => {
     const comp = db.competencias.find(c => c.id === cc.competenciaId);
     return comp ? { id: comp.id, label: comp.codigo } : null;
