@@ -1260,9 +1260,11 @@
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Gestión</div>
   <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">Departamentos y Programas</button>
+  <button class="tab-btn" data-tab="escalas" onclick="showTab('escalas', this)" style="display:none">Escalas de Niveles</button>
   <button class="tab-btn" data-tab="cursos" onclick="showTab('cursos', this)">Cursos</button>
   <button class="tab-btn" data-tab="secciones" onclick="showTab('secciones', this)">Secciones</button>
   <button class="tab-btn" data-tab="laos" onclick="showTab('laos', this)">LAOs</button>
+  <button class="tab-btn" data-tab="escalas" onclick="showTab('escalas', this)" style="display:none">Escalas de Niveles</button>
   <button class="tab-btn" data-tab="competencias" onclick="showTab('competencias', this)">Competencias</button>
   <button class="tab-btn" data-tab="avaluo" onclick="showTab('avaluo', this)">Avalúo</button>
 
@@ -1550,6 +1552,61 @@
   </div>
   <div id="lista-laos" style="margin-top:14px">
     <div class="empty-state"><div class="empty-icon">📋</div><p>Aún no hay LAOs registrados</p></div>
+  </div>
+</div>
+
+<!-- ==================== ESCALAS DE NIVELES ==================== -->
+<div id="panel-escalas" class="panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title">Escalas de Niveles</div>
+      <div class="section-sub">Define los niveles (título + descripción) que se usan para evaluar competencias — global o por programa.</div>
+    </div>
+    <button class="btn btn-primary" onclick="abrirNuevaEscala()">+ Nueva Escala</button>
+  </div>
+  <div id="lista-escalas" style="margin-top:14px">
+    <div class="empty-state"><div class="empty-icon">📐</div><p>Cargando...</p></div>
+  </div>
+</div>
+
+<!-- Modal Escala de Niveles -->
+<div id="modal-escala" class="modal-overlay">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-escala-title">📐 Nueva Escala de Niveles</div>
+      <button class="modal-close" onclick="closeModal('modal-escala')">✕</button>
+    </div>
+    <input type="hidden" id="esc-edit-id">
+    <div class="form-group">
+      <label>Nombre *</label>
+      <input type="text" id="esc-nombre" placeholder="ej. Escala Estándar EGSP">
+    </div>
+    <div class="form-group">
+      <label>Alcance</label>
+      <select id="esc-alcance" onchange="escOnAlcanceChange()">
+        <option value="todos">Todos los programas</option>
+        <option value="programas">Programas específicos</option>
+      </select>
+      <div id="esc-programas-wrap" style="display:none;margin-top:8px;max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px"></div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px">
+      <strong style="font-size:0.88rem">Niveles</strong>
+      <button class="btn btn-outline btn-sm" onclick="escAgregarNivel()">+ Agregar nivel</button>
+    </div>
+    <div id="esc-niveles-list"></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px">
+      <strong style="font-size:0.88rem">Agrupaciones para Reportes</strong>
+      <button class="btn btn-outline btn-sm" onclick="escAgregarAgrupacion()">+ Agregar agrupación</button>
+    </div>
+    <div style="font-size:0.76rem;color:var(--muted);margin-bottom:6px">Ej. mostrar "Competent" y "Proficient" juntos como "Logrado" en reportes, sin perder el detalle en Avalúo.</div>
+    <div id="esc-agrupaciones-list"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-escala')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarEscala()">💾 Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -2674,7 +2731,8 @@ let db = {
   departamentos: [],    // catálogo de departamentos (cada programa pertenece a uno)
   bancoCompetencias: [], // banco/framework de competencias por programa (antes hardcodeado en ALL_COMPETENCIAS)
   laos: [],              // Learning Assessment Opportunities — entidades propias, ligadas a curso + competencias
-  rubricas: []            // rúbricas (grid criterios × niveles), ligadas 1:1 a un LAO
+  rubricas: [],           // rúbricas (grid criterios × niveles), ligadas 1:1 a un LAO
+  escalasNiveles: []      // escalas de niveles configurables (títulos/descripciones/agrupaciones), con alcance global o por programa
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2698,7 +2756,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2731,6 +2789,7 @@ function loadDB() {
   if (!db.bancoCompetencias) db.bancoCompetencias = [];
   if (!db.laos)         db.laos = [];
   if (!db.rubricas)     db.rubricas = [];
+  if (!db.escalasNiveles) db.escalasNiveles = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -2808,6 +2867,7 @@ function showTab(tabId, btn) {
   if (tabId === 'cursos') renderCursos();
   if (tabId === 'secciones') { populateCursoSelects(); renderSecciones(); }
   if (tabId === 'laos') { populateCursoSelects(); renderLaos(); }
+  if (tabId === 'escalas') renderEscalas();
   if (tabId === 'competencias') { populateCursoSelects(); renderCompetencias(); }
   if (tabId === 'avaluo') { populateCursoSelects(); setDefaultDate(); }
   if (tabId === 'base-datos') { populateCursoSelects(); renderBaseDatos(); }
@@ -3920,6 +3980,272 @@ function _ensureBancoCompetenciasSeeded() {
     }
   });
   if (changed) saveDB();
+}
+
+// ======================== ESCALAS DE NIVELES ========================
+// Reemplaza el sistema fijo de "Nivel 0-3" por un catálogo configurable
+// (títulos, descripciones, cuántos niveles hay) con alcance global o por
+// programa. Cada LAO/avalúo GUARDA una referencia (escalaId) a la escala
+// vigente al momento de crearse/evaluarse — así, si el admin luego cambia
+// la escala, los datos ya guardados no se reinterpretan retroactivamente
+// (legado intacto, tal como se acordó).
+const ESCALA_NIVELES_DEFAULT = {
+  nombre: 'Escala Estándar EGSP',
+  niveles: [
+    { valor: 0, titulo: 'Unacceptable', descripcion: "Student can't perform the competence or provides no elements with which to evaluate it." },
+    { valor: 1, titulo: 'Novice/below expectation', descripcion: 'Student does not demonstrate the minimum requirement to execute expected skills/knowledge according to the action expressed in competence. Student requires substantial oversight and direction.' },
+    { valor: 2, titulo: 'Developing/need improvement', descripcion: 'Student demonstrate expected skills/knowledge partially according to the action expressed in competence. Student can performance the competence with guidance and require improvement.' },
+    { valor: 3, titulo: 'Competent/meet expectations', descripcion: 'Student demonstrate expected skills/knowledge consistently and according to the action expressed in competence. Student can perform the competence without guidance.' },
+    { valor: 4, titulo: 'Proficient/Exceeds expectations', descripcion: 'Student demonstrates skills/knowledge of higher complexity and creativity consistently above the action expressed in competence without guidance.' },
+  ],
+  agrupaciones: [
+    { id: 'grp_logrado', nombre: 'Logrado', valores: [3, 4] },
+  ],
+};
+
+function _ensureEscalaNivelesSeeded() {
+  if (!db.escalasNiveles) db.escalasNiveles = [];
+  const yaHayGlobal = db.escalasNiveles.some(e => e.activa && e.aplicaA === 'todos');
+  if (yaHayGlobal) return;
+  db.escalasNiveles.push({
+    id: 'esc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    nombre: ESCALA_NIVELES_DEFAULT.nombre,
+    niveles: JSON.parse(JSON.stringify(ESCALA_NIVELES_DEFAULT.niveles)),
+    aplicaA: 'todos', programaIds: [],
+    agrupaciones: JSON.parse(JSON.stringify(ESCALA_NIVELES_DEFAULT.agrupaciones)),
+    activa: true, fechaCreacion: new Date().toISOString(),
+  });
+  saveDB();
+}
+
+// Resuelve qué escala aplica a un curso: primero busca una escala ACTIVA
+// específica para el programa de ese curso; si no hay, usa la global.
+function resolverEscalaParaCurso(cursoId) {
+  _ensureEscalaNivelesSeeded();
+  const curso = db.cursos.find(c => c.id === cursoId);
+  if (!curso) return db.escalasNiveles.find(e => e.activa && e.aplicaA === 'todos') || null;
+  const especifica = db.escalasNiveles.find(e =>
+    e.activa && e.aplicaA === 'programas' && curso.programaId && e.programaIds?.includes(curso.programaId));
+  if (especifica) return especifica;
+  return db.escalasNiveles.find(e => e.activa && e.aplicaA === 'todos') || null;
+}
+
+// Info de un nivel (título/descripción) dentro de una escala dada — con
+// fallback genérico si el valor no se encuentra (escala vieja/legado).
+function nivelInfo(valor, escala) {
+  if (valor === '' || valor === null || valor === undefined) return { titulo: 'N/A', descripcion: 'No evaluado' };
+  const n = escala?.niveles?.find(x => String(x.valor) === String(valor));
+  return n || { titulo: 'Nivel ' + valor, descripcion: '' };
+}
+
+// Etiqueta agrupada de un nivel para reportes (ej. "Competent" y "Proficient"
+// mostrados juntos como "Logrado" si esa agrupación está activa en la escala).
+// Si el valor no cae en ninguna agrupación, se usa su propio título.
+function nivelEtiquetaAgrupada(valor, escala) {
+  if (valor === '' || valor === null || valor === undefined) return 'N/A';
+  const grp = escala?.agrupaciones?.find(g => g.valores.map(String).includes(String(valor)));
+  if (grp) return grp.nombre;
+  return nivelInfo(valor, escala).titulo;
+}
+
+// ======================== ESCALAS DE NIVELES — pantalla admin ========================
+let _escNiveles = [];
+let _escAgrupaciones = [];
+
+function renderEscalas() {
+  _ensureEscalaNivelesSeeded();
+  const el = document.getElementById('lista-escalas');
+  const escalas = [...db.escalasNiveles].sort((a, b) => (b.activa - a.activa) || (a.nombre || '').localeCompare(b.nombre || ''));
+  if (!escalas.length) { el.innerHTML = '<div class="empty-state"><p>Sin escalas todavía</p></div>'; return; }
+
+  el.innerHTML = escalas.map(e => {
+    const alcanceLabel = e.aplicaA === 'todos'
+      ? 'Todos los programas'
+      : 'Programas: ' + (e.programaIds || []).map(pid => db.programas.find(p => p.id === pid)?.nombre || '—').join(', ');
+    const nivelesBadges = e.niveles.map(n => `<span class="badge badge-blue" style="margin:2px" title="${n.descripcion || ''}">${n.valor} · ${n.titulo}</span>`).join('');
+    const agrupBadges = (e.agrupaciones || []).map(g => `<span class="badge badge-gold" style="margin:2px">${g.nombre} = {${g.valores.join(', ')}}</span>`).join('') || '<span style="font-size:0.76rem;color:var(--muted)">Sin agrupaciones</span>';
+    return `<div class="card" style="margin-bottom:12px;padding:14px 16px;${e.activa ? '' : 'opacity:0.55'}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800;font-size:0.95rem">${e.nombre} ${e.activa ? '' : '<span class="badge badge-gold">Archivada</span>'}</div>
+          <div style="font-size:0.76rem;color:var(--muted);margin-top:2px">${alcanceLabel}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarEscala('${e.id}')">✏️ Editar</button>
+          ${e.activa ? `<button class="btn btn-danger btn-sm" onclick="archivarEscala('${e.id}')">🗄 Archivar</button>` : `<button class="btn btn-outline btn-sm" onclick="reactivarEscala('${e.id}')">↩️ Reactivar</button>`}
+        </div>
+      </div>
+      <div style="margin-top:8px">${nivelesBadges}</div>
+      <div style="margin-top:6px">${agrupBadges}</div>
+    </div>`;
+  }).join('');
+}
+
+function abrirNuevaEscala() {
+  document.getElementById('modal-escala-title').textContent = '📐 Nueva Escala de Niveles';
+  document.getElementById('esc-edit-id').value = '';
+  document.getElementById('esc-nombre').value = '';
+  document.getElementById('esc-alcance').value = 'todos';
+  _escNiveles = JSON.parse(JSON.stringify(ESCALA_NIVELES_DEFAULT.niveles));
+  _escAgrupaciones = JSON.parse(JSON.stringify(ESCALA_NIVELES_DEFAULT.agrupaciones));
+  escOnAlcanceChange();
+  _renderEscNiveles();
+  _renderEscAgrupaciones();
+  openModal('modal-escala');
+}
+
+function abrirEditarEscala(id) {
+  const e = db.escalasNiveles.find(x => x.id === id);
+  if (!e) return;
+  document.getElementById('modal-escala-title').textContent = '✏️ Editar Escala de Niveles';
+  document.getElementById('esc-edit-id').value = id;
+  document.getElementById('esc-nombre').value = e.nombre;
+  document.getElementById('esc-alcance').value = e.aplicaA;
+  _escNiveles = JSON.parse(JSON.stringify(e.niveles));
+  _escAgrupaciones = JSON.parse(JSON.stringify(e.agrupaciones || []));
+  escOnAlcanceChange(e.programaIds || []);
+  _renderEscNiveles();
+  _renderEscAgrupaciones();
+  openModal('modal-escala');
+}
+
+function escOnAlcanceChange(preseleccion) {
+  const alcance = document.getElementById('esc-alcance').value;
+  const wrap = document.getElementById('esc-programas-wrap');
+  wrap.style.display = alcance === 'programas' ? '' : 'none';
+  if (alcance !== 'programas') return;
+  const pre = new Set(preseleccion || []);
+  wrap.innerHTML = [...db.programas].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(p =>
+    `<label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.82rem">
+      <input type="checkbox" class="esc-prog-check" value="${p.id}" ${pre.has(p.id) ? 'checked' : ''}>${p.nombre}
+    </label>`).join('');
+}
+
+function _renderEscNiveles() {
+  const el = document.getElementById('esc-niveles-list');
+  el.innerHTML = _escNiveles.map((n, i) => `
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;background:var(--cream);border-radius:8px;padding:8px 10px">
+      <div style="width:40px;text-align:center;font-weight:800;font-family:'Montserrat',sans-serif;padding-top:6px">${n.valor}</div>
+      <div style="flex:1">
+        <input type="text" value="${n.titulo}" placeholder="Título" onchange="escUpdateNivel(${i},'titulo',this.value)" style="margin-bottom:4px">
+        <textarea placeholder="Descripción" onchange="escUpdateNivel(${i},'descripcion',this.value)" style="min-height:44px">${n.descripcion || ''}</textarea>
+      </div>
+      <button class="btn btn-danger btn-sm" style="margin-top:6px" onclick="escEliminarNivel(${i})" title="Eliminar nivel">🗑</button>
+    </div>`).join('');
+}
+
+function escAgregarNivel() {
+  const nuevoValor = _escNiveles.length ? Math.max(..._escNiveles.map(n => n.valor)) + 1 : 0;
+  _escNiveles.push({ valor: nuevoValor, titulo: '', descripcion: '' });
+  _renderEscNiveles();
+}
+function escEliminarNivel(idx) {
+  if (_escNiveles.length <= 1) { notify('Debe haber al menos un nivel', '⚠️'); return; }
+  _escNiveles.splice(idx, 1);
+  // Renumerar 0..N en orden, para mantener una escala continua
+  _escNiveles.forEach((n, i) => { n.valor = i; });
+  _renderEscNiveles();
+  _renderEscAgrupaciones();
+}
+function escUpdateNivel(idx, campo, val) {
+  if (_escNiveles[idx]) _escNiveles[idx][campo] = val;
+}
+
+function _renderEscAgrupaciones() {
+  const el = document.getElementById('esc-agrupaciones-list');
+  if (!_escAgrupaciones.length) { el.innerHTML = '<div style="font-size:0.78rem;color:var(--muted)">Sin agrupaciones — cada nivel se muestra por separado en reportes.</div>'; return; }
+  el.innerHTML = _escAgrupaciones.map((g, i) => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;background:var(--cream);border-radius:8px;padding:8px 10px;flex-wrap:wrap">
+      <input type="text" value="${g.nombre}" placeholder="Nombre del grupo (ej. Logrado)" onchange="escUpdateAgrupacion(${i},'nombre',this.value)" style="flex:1;min-width:140px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${_escNiveles.map(n => `<label style="display:flex;align-items:center;gap:3px;font-size:0.76rem">
+          <input type="checkbox" ${g.valores.includes(n.valor) ? 'checked' : ''} onchange="escToggleAgrupacionValor(${i},${n.valor},this.checked)">${n.valor}
+        </label>`).join('')}
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="escEliminarAgrupacion(${i})">🗑</button>
+    </div>`).join('');
+}
+function escAgregarAgrupacion() {
+  _escAgrupaciones.push({ id: 'grp_' + Math.random().toString(36).slice(2, 6), nombre: '', valores: [] });
+  _renderEscAgrupaciones();
+}
+function escEliminarAgrupacion(idx) { _escAgrupaciones.splice(idx, 1); _renderEscAgrupaciones(); }
+function escUpdateAgrupacion(idx, campo, val) { if (_escAgrupaciones[idx]) _escAgrupaciones[idx][campo] = val; }
+function escToggleAgrupacionValor(idx, valor, checked) {
+  const g = _escAgrupaciones[idx];
+  if (!g) return;
+  if (checked && !g.valores.includes(valor)) g.valores.push(valor);
+  if (!checked) g.valores = g.valores.filter(v => v !== valor);
+}
+
+// Si solo cambió texto (títulos/descripciones) se edita en el sitio. Si
+// cambió la CANTIDAD de niveles o sus VALORES numéricos, la escala anterior
+// se archiva y se crea una nueva — así los avalúos ya guardados, que
+// referencian la escala vieja por id, nunca se reinterpretan.
+function guardarEscala() {
+  const nombre = document.getElementById('esc-nombre').value.trim();
+  if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
+  if (!_escNiveles.length) { notify('Agrega al menos un nivel', '⚠️'); return; }
+  if (_escNiveles.some(n => !n.titulo.trim())) { notify('Todos los niveles necesitan un título', '⚠️'); return; }
+
+  const aplicaA = document.getElementById('esc-alcance').value;
+  const programaIds = aplicaA === 'programas' ? [...document.querySelectorAll('.esc-prog-check:checked')].map(c => c.value) : [];
+  if (aplicaA === 'programas' && !programaIds.length) { notify('Selecciona al menos un programa', '⚠️'); return; }
+
+  const editId = document.getElementById('esc-edit-id').value;
+  const niveles = JSON.parse(JSON.stringify(_escNiveles)).sort((a, b) => a.valor - b.valor);
+  const agrupaciones = JSON.parse(JSON.stringify(_escAgrupaciones)).filter(g => g.nombre.trim() && g.valores.length);
+
+  if (editId) {
+    const actual = db.escalasNiveles.find(x => x.id === editId);
+    if (!actual) return;
+    const valoresIguales = actual.niveles.length === niveles.length &&
+      actual.niveles.every((n, i) => n.valor === niveles[i].valor);
+    if (valoresIguales) {
+      // Solo texto cambió: edición en el sitio
+      actual.nombre = nombre; actual.aplicaA = aplicaA; actual.programaIds = programaIds;
+      actual.niveles = niveles; actual.agrupaciones = agrupaciones;
+    } else {
+      // Cambió la estructura: archiva la vieja, crea una nueva
+      if (!confirm('Cambiaste la cantidad o los valores de los niveles. Esto archivará la escala actual (los avalúos ya guardados no se verán afectados) y creará una nueva versión. ¿Continuar?')) return;
+      actual.activa = false;
+      db.escalasNiveles.push({
+        id: 'esc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        nombre, niveles, aplicaA, programaIds, agrupaciones, activa: true, fechaCreacion: new Date().toISOString(),
+      });
+    }
+  } else {
+    db.escalasNiveles.push({
+      id: 'esc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      nombre, niveles, aplicaA, programaIds, agrupaciones, activa: true, fechaCreacion: new Date().toISOString(),
+    });
+  }
+  saveDB();
+  closeModal('modal-escala');
+  renderEscalas();
+  notify('Escala guardada ✓');
+}
+
+function archivarEscala(id) {
+  const e = db.escalasNiveles.find(x => x.id === id);
+  if (!e) return;
+  if (e.aplicaA === 'todos') {
+    const otrasGlobalesActivas = db.escalasNiveles.some(x => x.id !== id && x.activa && x.aplicaA === 'todos');
+    if (!otrasGlobalesActivas && !confirm('Esta es la única escala global activa — al archivarla, se creará una escala por defecto automáticamente la próxima vez que se necesite. ¿Continuar?')) return;
+  }
+  if (!confirm(`¿Archivar "${e.nombre}"? Los avalúos ya guardados con esta escala no se ven afectados.`)) return;
+  e.activa = false;
+  saveDB();
+  renderEscalas();
+  notify('Escala archivada', '🗄');
+}
+function reactivarEscala(id) {
+  const e = db.escalasNiveles.find(x => x.id === id);
+  if (!e) return;
+  e.activa = true;
+  saveDB();
+  renderEscalas();
+  notify('Escala reactivada ✓');
 }
 
 // ======================== LAOs — núcleo ========================
@@ -8184,12 +8510,12 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true },
-  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly' },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true, escalas:true },
+  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false },
 };
 
 function setViewAs(role) {
