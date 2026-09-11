@@ -374,6 +374,7 @@
     flex-shrink: 0;
   }
   .grid-lvl:hover { transform: scale(1.12); }
+  .grid-lvl.sel-4 { background:#a7f3d0; border-color:#059669;         color:#064e3b; }
   .grid-lvl.sel-3 { background:#d1fae5; border-color:var(--sage);   color:#065f46; }
   .grid-lvl.sel-2 { background:#fef3c7; border-color:var(--gold);   color:#92400e; }
   .grid-lvl.sel-1 { background:#ffedd5; border-color:#f97316;       color:#7c2d12; }
@@ -689,6 +690,7 @@
   .readonly-notice { background: #fde8e3; border: 1.5px solid var(--egsp-coral); border-radius: 10px; padding: 10px 16px; font-size: 0.82rem; color: #9a3412; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 
   /* ── GRID level buttons -> coral for L3 ─────────────────── */
+  .grid-lvl.sel-4 { background: #059669 !important; color: #fff !important; }
   .grid-lvl.sel-3 { background: var(--egsp-coral) !important; color: #fff !important; }
   .grid-lvl.sel-2 { background: var(--egsp-gray) !important; color: #fff !important; }
   .grid-lvl.sel-1 { background: #f97316 !important; color: #fff !important; }
@@ -1640,22 +1642,8 @@
         <div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>
       </div>
     </div>
-    <div style="margin-bottom:4px">
-      <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px">Calificación y Conversión a Nivel</div>
-      <div class="form-row" style="align-items:flex-start">
-        <div class="form-group" style="flex:0 0 130px">
-          <label>Escala Máxima</label>
-          <input type="number" id="lao-escala-max" value="100" min="1" style="width:100%">
-        </div>
-        <div class="form-group" style="flex:1">
-          <label>Umbrales (puntaje mínimo, en % de la escala, para cada nivel)</label>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-            <div><div style="font-size:0.73rem;font-weight:600;color:#2e7d32">N3 Logrado ≥</div><input type="number" id="lao-umbral-3" value="85" min="0" max="100" style="width:100%"></div>
-            <div><div style="font-size:0.73rem;font-weight:600;color:#f59e0b">N2 En Progreso ≥</div><input type="number" id="lao-umbral-2" value="70" min="0" max="100" style="width:100%"></div>
-            <div><div style="font-size:0.73rem;font-weight:600;color:#ef4444">N1 Novato ≥</div><input type="number" id="lao-umbral-1" value="60" min="0" max="100" style="width:100%"></div>
-          </div>
-        </div>
-      </div>
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--cream);padding:8px 12px;border-radius:6px">
+      ℹ️ La Nota del LAO siempre se registra en % (0-100), igual que la Nota Final del curso. El nivel por competencia se mide con la Escala de Niveles vigente para el programa de este curso — sin rúbrica, el profesor lo elige directamente por competencia; con rúbrica, se calcula de los criterios.
     </div>
     <div class="form-group" style="margin-top:6px">
       <label>Modo de Evaluación</label>
@@ -4295,8 +4283,7 @@ function _ensureLaoGenericoPorCurso(cursoId) {
     nombre: nombreLao(cursoId, 'Evaluación General'),
     descripcion: 'LAO genérico creado automáticamente — pendiente que el curso defina su(s) LAO(s) oficial(es).',
     competencias: comps.map(c => ({ competenciaId: c.id, peso: 100 })),
-    escalaMax: 3,
-    umbrales: [{ nivelComp: 3, minPuntos: 2.5 }, { nivelComp: 2, minPuntos: 1.5 }, { nivelComp: 1, minPuntos: 0.5 }],
+    modoEvaluacion: 'libre',
     esOficial: true, compartido: true, profesorEmail: null, creadoPor: 'sistema',
     isGenerico: true, fechaCreacion: new Date().toISOString(),
   };
@@ -4313,12 +4300,13 @@ function laosDisponiblesPara(cursoId, userEmail, esAdmin) {
   return todos.filter(l => l.esOficial || l.compartido || l.profesorEmail === userEmail);
 }
 
-// Calcula el nivel final (0-3) de una competencia para un estudiante en un
-// curso, combinando TODOS los LAOs aplicables que la midan. Con un solo LAO
-// contribuyendo, usa los umbrales propios de ese LAO (comportamiento idéntico
-// al caso simple de un solo LAO). Con varios, normaliza cada uno a % de su
-// propia escala, promedia ponderado por el peso configurado en cada LAO para
-// esa competencia, y convierte el resultado con el umbral global.
+// Calcula el nivel final de una competencia para un estudiante en un curso,
+// combinando TODOS los LAOs aplicables que la midan. ev.puntajeLao ya viene
+// normalizado a % (0-100) desde el momento en que se guardó el avalúo. Con
+// un solo LAO contribuyendo, el % se convierte directamente a un punto de
+// la escala Likert vigente del curso, redondeado. Con varios, primero se
+// promedia ponderado en % (por el peso configurado en cada LAO para esa
+// competencia) y luego se convierte una sola vez.
 function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, avaluosCurso) {
   const laosDelCurso = (db.laos || []).filter(l => l.cursoId === cursoId &&
     l.competencias?.some(cc => cc.competenciaId === competenciaId));
@@ -4330,16 +4318,14 @@ function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, aval
     if (!av) return;
     const ev = av.evaluaciones?.find(e => e.competenciaId === competenciaId);
     if (!ev || ev.puntajeLao === undefined || ev.puntajeLao === null) return;
-    const pct = (ev.puntajeLao / (lao.escalaMax || 100)) * 100;
-    contribuciones.push({ pct, peso: compCfg?.peso ?? 100, umbrales: lao.umbrales });
+    contribuciones.push({ pct: ev.puntajeLao, peso: compCfg?.peso ?? 100 });
   });
   if (!contribuciones.length) return null;
-  if (contribuciones.length === 1) {
-    return _nivelDesdePuntos(contribuciones[0].pct, contribuciones[0].umbrales);
-  }
   const totalPeso = contribuciones.reduce((s, c) => s + c.peso, 0) || 1;
   const pctFinal = contribuciones.reduce((s, c) => s + (c.pct * c.peso), 0) / totalPeso;
-  return _nivelDesdePuntos(pctFinal, NIVEL_UMBRAL_GLOBAL);
+  const escala = resolverEscalaParaCurso(cursoId);
+  const maxValor = escala?.niveles?.length ? Math.max(...escala.niveles.map(n => n.valor)) : 4;
+  return Math.round((pctFinal / 100) * maxValor);
 }
 
 // ======================== LAOs — pestaña ========================
@@ -4419,10 +4405,6 @@ function abrirNuevoLao() {
   document.getElementById('lao-curso').value = '';
   document.getElementById('lao-titulo').value = '';
   document.getElementById('lao-desc').value = '';
-  document.getElementById('lao-escala-max').value = 100;
-  document.getElementById('lao-umbral-3').value = 85;
-  document.getElementById('lao-umbral-2').value = 70;
-  document.getElementById('lao-umbral-1').value = 60;
   document.getElementById('lao-oficial').checked = true;
   document.getElementById('lao-modo-eval').value = 'libre';
   document.getElementById('lao-comps-wrap').innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Selecciona un curso primero</div>';
@@ -4441,11 +4423,6 @@ function abrirEditarLao(id) {
   const prefijo = curso ? curso.codigo + ' ' : '';
   document.getElementById('lao-titulo').value = l.nombre.startsWith(prefijo) ? l.nombre.slice(prefijo.length) : l.nombre;
   document.getElementById('lao-desc').value = l.descripcion || '';
-  document.getElementById('lao-escala-max').value = l.escalaMax || 100;
-  const u = l.umbrales || LAO_UMBRALES_DEFAULT;
-  document.getElementById('lao-umbral-3').value = u.find(x => x.nivelComp === 3)?.minPuntos ?? 85;
-  document.getElementById('lao-umbral-2').value = u.find(x => x.nivelComp === 2)?.minPuntos ?? 70;
-  document.getElementById('lao-umbral-1').value = u.find(x => x.nivelComp === 1)?.minPuntos ?? 60;
   document.getElementById('lao-oficial').checked = !!l.esOficial;
   document.getElementById('lao-modo-eval').value = l.modoEvaluacion || 'libre';
   laoOnCursoChange(l.competencias || []);
@@ -4492,15 +4469,10 @@ function guardarLao() {
     const pesoInput = document.querySelector(`.lao-comp-peso[data-comp="${chk.value}"]`);
     return { competenciaId: chk.value, peso: parseFloat(pesoInput.value) || 100 };
   });
-  const umbrales = [
-    { nivelComp: 3, minPuntos: parseFloat(document.getElementById('lao-umbral-3').value) || 85 },
-    { nivelComp: 2, minPuntos: parseFloat(document.getElementById('lao-umbral-2').value) || 70 },
-    { nivelComp: 1, minPuntos: parseFloat(document.getElementById('lao-umbral-1').value) || 60 },
-  ];
   const editId = document.getElementById('lao-edit-id').value;
   const record = {
     cursoId, nombre: nombreLao(cursoId, titulo), descripcion: document.getElementById('lao-desc').value.trim(),
-    competencias, escalaMax: parseFloat(document.getElementById('lao-escala-max').value) || 100, umbrales,
+    competencias,
     esOficial: document.getElementById('lao-oficial').checked,
     modoEvaluacion: document.getElementById('lao-modo-eval').value || 'libre',
   };
@@ -5419,6 +5391,7 @@ function onSeccionChange() {
 }
 
 let avModoActual = 'directa'; // 'rubrica' | 'directa'
+let avEscalaActual = null;    // Escala de Niveles resuelta para el curso — usada por las pastillas del modo directa
 
 function _modosDisponiblesLao(lao, rubrica) {
   const tieneRubrica = !!rubrica;
@@ -5479,6 +5452,7 @@ function buildGrid(cursoId) {
   const compIds = (avLaoActual.competencias || []).map(cc => cc.competenciaId);
   avCompsActuales = db.competencias.filter(c => compIds.includes(c.id));
   avEstudiantesActuales = avSeccionActual?.estudiantes || [];
+  avEscalaActual = resolverEscalaParaCurso(cursoId);
 
   if (!avCompsActuales.length) {
     notify('Este LAO no tiene competencias asignadas', '⚠️'); return;
@@ -5542,7 +5516,7 @@ function buildGrid(cursoId) {
     thead.innerHTML = `<tr>
       <th class="col-estudiante">Estudiante</th>
       ${compCols}
-      <th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">Escala 0–${avLaoActual.escalaMax}</span></th>
+      <th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>
       <th class="col-nota col-grade" style="min-width:90px;background:#2a2a4a">Nota Final<br>del Curso</th>
       <th class="col-nota" style="min-width:90px">Comentario</th>
     </tr>`;
@@ -5615,23 +5589,27 @@ function renderGrid() {
       }).join(' ');
       previewCell = `<td class="td-nota" id="prevcomp-${est.id}" style="line-height:1.7">${nivelesPreview}</td>`;
     } else {
-      // Modo directa: una pastilla 3/2/1/0 por competencia (juicio del profesor,
-      // sin ninguna fórmula de por medio) + una Nota del LAO aparte.
+      // Modo directa: una pastilla por nivel de la Escala vigente por
+      // competencia (juicio del profesor, sin ninguna fórmula de por medio)
+      // + una Nota del LAO aparte. Sin selección = N/A (no es lo mismo que
+      // elegir el nivel más bajo, que sí es una evaluación real).
+      const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
       inputCells = avCompsActuales.map(c => {
         const sel = avClaseData[est.id]?._nivelesDirectos?.[c.id] || '';
         return `<td class="grid-cell">
           <div class="grid-level-btns">
-            ${['3','2','1','0'].map(v => `
+            ${nivelesEscala.map(n => { const v = String(n.valor); return `
               <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${est.id}-${c.id}-${v}"
                 onclick="gridSetNivelDirecto('${est.id}','${c.id}','${v}')"
-                title="Nivel ${v}">${v}</div>`).join('')}
+                title="${n.valor} · ${n.titulo}">${v}</div>`; }).join('')}
           </div>
+          <div style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
         </td>`;
       }).join('');
       const notaLao = avClaseData[est.id]?._notaLao ?? '';
       previewCell = `<td class="grid-cell">
-        <input type="number" min="0" max="${avLaoActual.escalaMax}" step="0.1" value="${notaLao}"
-          oninput="gridSetNotaLao('${est.id}',this.value)" style="width:90px" placeholder="0–${avLaoActual.escalaMax}" title="Nota del LAO (independiente del nivel por competencia)">
+        <input type="number" min="0" max="100" step="0.1" value="${notaLao}"
+          oninput="gridSetNotaLao('${est.id}',this.value)" style="width:90px" placeholder="0–100" title="Nota del LAO en % (independiente del nivel por competencia)">
       </td>`;
     }
 
@@ -5667,10 +5645,13 @@ function gridSetNivelDirecto(estId, compId, valor) {
   if (!avClaseData[estId]) avClaseData[estId] = { _nivelesDirectos: {} };
   if (!avClaseData[estId]._nivelesDirectos) avClaseData[estId]._nivelesDirectos = {};
   avClaseData[estId]._nivelesDirectos[compId] = valor;
-  ['3','2','1','0'].forEach(v => {
+  const valores = (avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => String(n.valor));
+  valores.forEach(v => {
     const btn = document.getElementById(`gl-${estId}-${compId}-${v}`);
     if (btn) btn.className = 'grid-lvl' + (v === valor ? ' sel-' + v : '');
   });
+  const label = document.getElementById(`gl-${estId}-${compId}-${valores[0]}`)?.closest('td')?.querySelector('div:last-child');
+  if (label) label.textContent = valor === '' ? 'N/A' : nivelInfo(valor, avEscalaActual).titulo;
   updateGridProgress();
 }
 
