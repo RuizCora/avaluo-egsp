@@ -11248,7 +11248,8 @@ async function dummyLoadAll() {
 
   // ── Avalúos ──
   const letraMap = n => n>=93?'A':n>=85?'B+':n>=80?'B':n>=75?'C+':n>=70?'C':n>=60?'D':'F';
-  const nivelesPool = ['3','3','3','2','2','1'];
+  // Actualizado a la escala de 5 niveles (0-4) — antes solo llegaba a 3.
+  const nivelesPool = ['4','3','3','3','2','2','1','0'];
   const comentariosPool = [
     'Demuestra excelente dominio del contenido. Supera las expectativas del curso.',
     'Progreso notable durante el semestre. Áreas de mejora identificadas.',
@@ -11256,13 +11257,6 @@ async function dummyLoadAll() {
     'Participa activamente en discusiones. Necesita fortalecer la escritura académica.',
     'Excelente trabajo en grupo y capacidad para integrar teoría y práctica.',
     'Muestra dominio técnico pero requiere mayor profundidad en análisis crítico.',
-    '',''
-  ];
-  const observacionesPool = [
-    'Respuesta completa y bien fundamentada.',
-    'Demuestra comprensión del concepto.',
-    'Puede mejorar la profundidad del análisis.',
-    'Excelente aplicación al contexto clínico.',
     '',''
   ];
   function rndFrom(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
@@ -11280,12 +11274,35 @@ async function dummyLoadAll() {
     compByCurso[c.cursoId].push(c);
   });
 
+  // ── LAOs de prueba — un LAO oficial de calificación directa por curso,
+  // igual que el sistema real: los avalúos se evalúan a través de un LAO,
+  // no directamente. Se etiquetan como dummy para poder limpiarlos.
+  const laoByCurso = {};
+  cursos.forEach(curso => {
+    const comps = compByCurso[curso.id] || [];
+    if (!comps.length) return;
+    const lao = {
+      id: dummyId('lao'),
+      cursoId: curso.id,
+      nombre: `${curso.codigo} Avalúo del Curso`,
+      descripcion: 'LAO de prueba — evaluación directa por competencia.',
+      competencias: comps.map(c => ({ competenciaId: c.id, peso: 100 })),
+      modoEvaluacion: 'libre',
+      esOficial: true, compartido: true, profesorEmail: null, creadoPor: 'sistema',
+      isGenerico: false, origenSolicitudId: null, fechaCreacion: new Date().toISOString(),
+      [DUMMY_TAG]: true,
+    };
+    db.laos.push(lao);
+    laoByCurso[curso.id] = lao;
+  });
+
   const avaluoEntries = [];
   secciones.forEach(sec => {
     const cursoObj = cursos.find(c=>c.id===sec.cursoId);
     if (!cursoObj) return;
     const comps = compByCurso[sec.cursoId] || [];
-    if (!comps.length) return;
+    const lao = laoByCurso[sec.cursoId];
+    if (!comps.length || !lao) return;
     sec.estudiantes.forEach(est => {
       const nota = rndNota();
       avaluoEntries.push({
@@ -11300,6 +11317,10 @@ async function dummyLoadAll() {
         semestre: sec.semestre,
         fecha: fechasBySem[sec.semestre] || '2025-03-20',
         profesor: sec.profesor,
+        laoId: lao.id,
+        laoNombre: lao.nombre,
+        modoEvaluacion: 'directa',
+        notaLao: rndNota(),
         comentarioGeneral: rndFrom(comentariosPool),
         notaFinal: nota,
         notaFinalLetra: letraMap(nota),
@@ -11308,9 +11329,8 @@ async function dummyLoadAll() {
           competenciaCodigo: comp.codigo,
           competenciaDesc: comp.descripcion,
           nivel: rndNivel(),
-          laoGrade: Math.round(60 + Math.random()*40),
-          lao: '',
-          observacion: rndFrom(observacionesPool),
+          puntajeLao: null,
+          lao: lao.nombre,
         })),
         fechaRegistro: new Date().toISOString(),
         [DUMMY_TAG]: true
@@ -11445,6 +11465,11 @@ async function dummyDeleteAll() {
   db.secciones    = db.secciones.filter(x => !x[DUMMY_TAG]);
   db.avaluos      = db.avaluos.filter(x => !x[DUMMY_TAG]);
   db.facultad     = db.facultad.filter(x => !x[DUMMY_TAG]);
+  if (db.laos) {
+    db.laos = db.laos.filter(x => !x[DUMMY_TAG]);
+    // limpia también cualquier rúbrica huérfana (de un LAO que ya no existe)
+    if (db.rubricas) db.rubricas = db.rubricas.filter(r => db.laos.some(l => l.id === r.laoId));
+  }
   if (db.programas)   db.programas   = db.programas.filter(x => !x[DUMMY_TAG]);
   if (db.departamentos) db.departamentos = db.departamentos.filter(x => !x[DUMMY_TAG]);
   if (db.codigosProg) db.codigosProg = db.codigosProg.filter(x => !x[DUMMY_TAG]);
