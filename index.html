@@ -3215,7 +3215,15 @@ function abrirNuevoEstudiante() {
   openModal('modal-estudiante');
 }
 
-function abrirEditarEstudiante(id) {
+// Nombre distinto a propósito de la función de más abajo (línea ~6364,
+// preexistente): esa otra "abrirEditarEstudiante(secId, estId)" edita la
+// matrícula de un estudiante DENTRO de una Sección (db.secciones), algo no
+// relacionado con el roster de Estudiantes (db.estudiantes) de esta fase.
+// Como JavaScript no permite dos funciones con el mismo nombre en el mismo
+// scope, la declarada más abajo en el archivo gana y pisaba silenciosamente
+// a esta — por eso el lápiz de editar en la pestaña Estudiantes no hacía
+// nada (llamaba a la función equivocada, con los argumentos equivocados).
+function abrirEditarEstudianteRoster(id) {
   const est = db.estudiantes.find(x => x.id === id);
   if (!est) return;
   document.getElementById('modal-estudiante-title').textContent = '✏️ Editar Estudiante';
@@ -3346,7 +3354,7 @@ function renderEstudiantesTab() {
         <td>${e.secuencia ? `<span class="badge badge-gold">${e.secuencia}</span>` : '—'}</td>
         <td>${e.registracion || '—'}</td>
         ${puedeEditar ? `<td class="actions-cell">
-          <button class="btn btn-outline btn-sm" onclick="abrirEditarEstudiante('${e.id}')">✏️</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarEstudianteRoster('${e.id}')">✏️</button>
           <button class="btn btn-outline btn-sm" onclick="eliminarEstudiante('${e.id}')">🗑</button>
         </td>` : ''}
       </tr>`;
