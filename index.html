@@ -3188,6 +3188,19 @@ function _populateEstudianteSecuenciaSelect() {
   sel.value = opciones.includes(prev) ? prev : opciones[0];
 }
 
+// Un "Año Comienzo" (cohorte) tiene la forma AAAA-AA, donde AA son los
+// últimos dos dígitos del año siguiente al primero (ej. 2026-27, nunca
+// 2026-28 ni 2026-26) — es un año académico consecutivo, no dos años sueltos.
+// Vacío se considera válido aquí (el campo es opcional); quien llama decide
+// si lo vacío bloquea o no.
+function _anioComienzoValido(anio) {
+  if (!anio) return true;
+  if (!/^\d{4}-\d{2}$/.test(anio)) return false;
+  const [y1, y2] = anio.split('-');
+  const esperado = (parseInt(y1, 10) + 1) % 100;
+  return parseInt(y2, 10) === esperado;
+}
+
 function abrirNuevoEstudiante() {
   document.getElementById('modal-estudiante-title').textContent = '🎓 Nuevo Estudiante';
   document.getElementById('est-edit-id').value = '';
@@ -3221,15 +3234,15 @@ function abrirEditarEstudiante(id) {
 
 function guardarEstudiante() {
   const numero = document.getElementById('est-numero').value.trim();
-  const nombre = document.getElementById('est-nombre').value.trim();
+  const nombre = document.getElementById('est-nombre').value.trim().toUpperCase();
   const programaId = document.getElementById('est-programa').value;
   const anioComienzo = document.getElementById('est-anio-comienzo').value.trim();
   const registracion = document.getElementById('est-registracion').value.trim();
   const secuencia = document.getElementById('est-secuencia').value;
   if (!numero || !nombre) { notify('Número y nombre son requeridos', '⚠️'); return; }
   if (!programaId) { notify('Selecciona un programa', '⚠️'); return; }
-  if (anioComienzo && !/^\d{4}-\d{2}$/.test(anioComienzo)) {
-    notify('Año Comienzo debe tener el formato AAAA-AA (ej. 2025-26)', '⚠️'); return;
+  if (anioComienzo && !_anioComienzoValido(anioComienzo)) {
+    notify('Año Comienzo debe ser un año académico consecutivo, formato AAAA-AA (ej. 2026-27, no 2026-28)', '⚠️'); return;
   }
   const editId = document.getElementById('est-edit-id').value;
   if (editId) {
@@ -3329,7 +3342,7 @@ function renderEstudiantesTab() {
         <td>${e.numero}</td>
         <td>${e.nombre}</td>
         <td>${prog ? `<span class="badge badge-blue">${prog.nombre}</span>` : '<span class="badge badge-red">Sin programa</span>'}</td>
-        <td>${e.anioComienzo || '—'}</td>
+        <td>${e.anioComienzo ? (_anioComienzoValido(e.anioComienzo) ? e.anioComienzo : `<span class="badge badge-rust" title="Debe ser un año académico consecutivo, ej. 2026-27">⚠ ${e.anioComienzo}</span>`) : '—'}</td>
         <td>${e.secuencia ? `<span class="badge badge-gold">${e.secuencia}</span>` : '—'}</td>
         <td>${e.registracion || '—'}</td>
         ${puedeEditar ? `<td class="actions-cell">
@@ -3359,7 +3372,9 @@ function parseRosterEstudiantes(text) {
     // sin necesidad de detectar el encabezado por texto/idioma.
     if (!numero || !/^\d+$/.test(numero) || !nombre) return;
     registros.push({
-      nombre,
+      // Mayúsculas siempre, para que el nombre quede consistente con el
+      // resto del roster sin importar cómo venga capitalizado en el archivo.
+      nombre: nombre.toUpperCase(),
       numero,
       codigoPrograma: codigoPrograma || '',
       anioComienzo: (partes[3] || '').trim(),
@@ -3392,6 +3407,10 @@ function _prepararImportEstudiantes(registros) {
       ...r,
       programaId,
       programaNombre: programaId ? (db.programas.find(p => p.id === programaId)?.nombre || null) : null,
+      // No bloquea el import (igual que un programa no reconocido) — solo se
+      // marca en la vista previa para que se revise/corrija después, ya que
+      // este archivo lo genera el Registrador y no siempre viene limpio.
+      anioValido: _anioComienzoValido(r.anioComienzo),
       esNuevo: !existente,
       estudianteIdExistente: existente ? existente.id : null,
       seleccionado: true,
@@ -3467,11 +3486,13 @@ function renderImportEstudiantesPreview() {
   const actualizar = _importEstudiantesData.length - nuevos;
   const sinPrograma = _importEstudiantesData.filter(r => !r.programaId).length;
   const sinDatos = _importEstudiantesData.filter(r => !r.anioComienzo || !r.registracion).length;
+  const anioInvalido = _importEstudiantesData.filter(r => r.anioComienzo && !r.anioValido).length;
   const secuenciaIgnorada = _importEstudiantesData.filter(r => r._origenPlantilla && r.secuenciaOriginal && r.secuenciaOriginal !== r.secuencia).length;
   resumenEl.innerHTML = `${_importEstudiantesData.length} estudiante(s) en el archivo — ` +
     `<strong>${nuevos} nuevo(s)</strong>, <strong>${actualizar} a actualizar</strong>` +
     (sinPrograma ? `, <span style="color:var(--rust)"><strong>${sinPrograma} con ${esPlantilla ? 'programa' : 'código de programa'} no reconocido</strong></span> (se importan igual, sin programa — revisar luego)` : '') +
     (sinDatos ? `, ${sinDatos} con Año Comienzo o Registración en blanco (se importan igual)` : '') +
+    (anioInvalido ? `, <span style="color:var(--rust)"><strong>${anioInvalido} con Año Comienzo inválido</strong></span> (ej. 2026-28 en vez de 2026-27 — se importan igual, revisar luego)` : '') +
     (secuenciaIgnorada ? `, <span style="color:var(--rust)"><strong>${secuenciaIgnorada} con Secuencia no válida para su programa</strong></span> (se ignora esa Secuencia, se importa el resto)` : '');
 
   const filtro = (document.getElementById('import-est-filtro')?.value || '').trim().toLowerCase();
@@ -3486,7 +3507,7 @@ function renderImportEstudiantesPreview() {
       <td>${r.numero}</td>
       <td>${r.nombre}</td>
       <td>${r.programaId ? r.programaNombre : `<span class="badge badge-rust">Sin reconocer: ${r.programaNombre || r.codigoPrograma || '—'}</span>`}</td>
-      <td>${r.anioComienzo || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${r.anioComienzo ? (r.anioValido ? r.anioComienzo : `<span class="badge badge-rust" title="Debe ser un año académico consecutivo, ej. 2026-27">⚠ ${r.anioComienzo}</span>`) : '<span style="color:var(--muted)">—</span>'}</td>
       ${esPlantilla ? `<td>${r.secuencia || '<span style="color:var(--muted)">—</span>'}</td>` : ''}
       <td>${r.registracion || '<span style="color:var(--muted)">—</span>'}</td>
       <td>${r.esNuevo ? '<span class="badge badge-green">Nuevo</span>' : '<span class="badge badge-blue">Actualizar</span>'}</td>
@@ -3840,7 +3861,9 @@ function parseRosterEstudiantesXlsx(arrayBuffer) {
     const nombre = String(fila[idx.nombre] ?? '').trim();
     if (!numero || !/^\d+$/.test(numero) || !nombre) continue; // fila en blanco de captura futura
     registros.push({
-      nombre,
+      // Mayúsculas siempre — si alguien escribió el nombre en minúscula al
+      // capturar en la plantilla, queda consistente con el resto del roster.
+      nombre: nombre.toUpperCase(),
       numero,
       programaNombre: idx.programa !== -1 ? String(fila[idx.programa] ?? '').trim() : '',
       anioComienzo: idx.anioComienzo !== -1 ? String(fila[idx.anioComienzo] ?? '').trim() : '',
@@ -3868,6 +3891,7 @@ function _prepararImportEstudiantesXlsx(registros) {
       programaNombre: prog ? prog.nombre : (r.programaNombre || null),
       secuencia: secuenciaValida,
       secuenciaOriginal: r.secuencia || '',
+      anioValido: _anioComienzoValido(r.anioComienzo),
       esNuevo: !existente,
       estudianteIdExistente: existente ? existente.id : null,
       seleccionado: true,
