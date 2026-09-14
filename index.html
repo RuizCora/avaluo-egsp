@@ -12505,16 +12505,11 @@ async function dummyLoadAll() {
 
   const ts = Date.now();
 
-  // ── Departamentos (nuevo catálogo — antes esto no existía) ──
-  const deptList = [
-    { id: dummyId('depto'), nombre: 'Salud Pública',   [DUMMY_TAG]: true },
-    { id: dummyId('depto'), nombre: 'Epidemiología',    [DUMMY_TAG]: true },
-    { id: dummyId('depto'), nombre: 'Bioestadística',   [DUMMY_TAG]: true },
-    { id: dummyId('depto'), nombre: 'Educación Salud',  [DUMMY_TAG]: true },
-  ];
-  if (!db.departamentos) db.departamentos = [];
-  db.departamentos.push(...deptList);
-  const deptoIdPor = nombre => deptList.find(d => d.nombre === nombre)?.id || null;
+  // ── Departamentos: ya NO se fabrica un catálogo aparte — si Edgardo tiene
+  // departamentos reales configurados, los programas/cursos reales que se
+  // usan más abajo ya están ligados a ellos. El campo "departamento" de las
+  // cuentas de facultad de prueba (más abajo) es solo texto descriptivo, no
+  // crea ninguna entrada nueva en el catálogo de Departamentos.
 
   // ── Programas: se reutiliza el catálogo REAL ya sembrado por
   // _ensureProgramCatalogSeeded() (Fase A del Sistema de Estudiantes), en vez
@@ -12528,63 +12523,24 @@ async function dummyLoadAll() {
     'DrPH-Determinantes Sociales de la Salud', 'MPHE-Educación en Salud Pública',
   ];
 
-  // ── Cursos ──
-  const cursos = [
-    { id: dummyId('cur'), codigo:'SALP-5010', nombre:'Fundamentos de Salud Pública',           departamento:'Salud Pública',   creditos:'3', descripcion:'Introducción a los conceptos y principios esenciales de salud pública desde una perspectiva ecológica.',    programa:PROGRAMAS_DUMMY[0], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'SALP-5020', nombre:'Política y Sistemas de Salud',            departamento:'Salud Pública',   creditos:'3', descripcion:'Análisis de políticas de salud, sistemas de financiamiento y gobernanza en Puerto Rico y Latinoamérica.', programa:PROGRAMAS_DUMMY[0], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EPID-6010', nombre:'Epidemiología Descriptiva',               departamento:'Epidemiología',   creditos:'3', descripcion:'Distribución y determinantes de enfermedades; medidas de frecuencia y diseños observacionales.',           programa:PROGRAMAS_DUMMY[1], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EPID-6020', nombre:'Epidemiología Analítica',                 departamento:'Epidemiología',   creditos:'3', descripcion:'Métodos analíticos, causalidad, sesgo, confusión e interacción en estudios epidemiológicos.',               programa:PROGRAMAS_DUMMY[1], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'BIOS-5010', nombre:'Bioestadística I',                        departamento:'Bioestadística',  creditos:'3', descripcion:'Estadística descriptiva, probabilidad, distribuciones e inferencia básica para ciencias de la salud.',      programa:PROGRAMAS_DUMMY[2], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'BIOS-5020', nombre:'Bioestadística II',                       departamento:'Bioestadística',  creditos:'3', descripcion:'Regresión lineal y logística, análisis de supervivencia, ANOVA y diseño de estudios.',                      programa:PROGRAMAS_DUMMY[2], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'DRPH-7010', nombre:'Liderazgo en Salud Pública',              departamento:'Salud Pública',   creditos:'3', descripcion:'Marcos de liderazgo organizacional y estratégico en organizaciones de salud pública.',                      programa:PROGRAMAS_DUMMY[3], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EDSA-5010', nombre:'Comunicación en Salud',                   departamento:'Educación Salud', creditos:'3', descripcion:'Estrategias de comunicación efectiva para la promoción de la salud y educación de poblaciones.',             programa:PROGRAMAS_DUMMY[4], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-  ];
-  db.cursos.push(...cursos);
-
-  // ── Competencias (each with multiple LAOs separated by |) ──
-  const competencias = [
-    // SALP-5010
-    { id: dummyId('comp'), cursoId:cursos[0].id, codigo:'C1-SP10', descripcion:'Identificar determinantes sociales de salud en poblaciones vulnerables', criterios:'Analiza factores socioeconómicos que afectan la salud|Evalúa determinantes culturales y ambientales|Relaciona inequidades de salud con contexto histórico', tipo:'Conocimiento', peso:'25', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[0].id, codigo:'C2-SP10', descripcion:'Aplicar marcos conceptuales de salud pública en contextos comunitarios',  criterios:'Utiliza el modelo ecológico para analizar problemas|Propone intervenciones basadas en evidencia|Demuestra pensamiento sistémico en salud comunitaria', tipo:'Habilidad',    peso:'25', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[0].id, codigo:'C3-SP10', descripcion:'Demostrar competencia cultural en la práctica de salud pública',            criterios:'Reconoce y respeta diversidad cultural|Adapta intervenciones al contexto cultural|Demuestra sensibilidad hacia comunidades marginadas', tipo:'Actitud',     peso:'20', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[0].id, codigo:'C4-SP10', descripcion:'Comunicar hallazgos de salud pública a audiencias diversas',               criterios:'Presenta datos con claridad y rigor|Adapta el mensaje según la audiencia|Utiliza visualizaciones efectivas de datos', tipo:'Habilidad',    peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // SALP-5020
-    { id: dummyId('comp'), cursoId:cursos[1].id, codigo:'C1-SP20', descripcion:'Analizar políticas de salud y su impacto en determinantes sociales',        criterios:'Evalúa legislación y reglamentación de salud pública|Identifica actores clave en el proceso de política|Analiza consecuencias no intencionadas de las políticas', tipo:'Conocimiento', peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[1].id, codigo:'C2-SP20', descripcion:'Evaluar modelos de financiamiento y gobernanza en sistemas de salud',       criterios:'Compara sistemas de salud de diferentes países|Identifica ineficiencias en el sistema de salud de PR|Propone mejoras basadas en modelos exitosos', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[1].id, codigo:'C3-SP20', descripcion:'Desarrollar propuestas de política basadas en evidencia',                   criterios:'Formula recomendaciones fundamentadas en literatura|Considera factibilidad política y recursos disponibles|Incorpora perspectivas de comunidades afectadas', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // EPID-6010
-    { id: dummyId('comp'), cursoId:cursos[2].id, codigo:'C1-EP10', descripcion:'Calcular e interpretar medidas de frecuencia epidemiológica',               criterios:'Calcula incidencia y prevalencia correctamente|Interpreta tasas brutas y ajustadas|Selecciona la medida apropiada según el contexto', tipo:'Habilidad',    peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[2].id, codigo:'C2-EP10', descripcion:'Diseñar y evaluar estudios observacionales en epidemiología',               criterios:'Selecciona diseño epidemiológico apropiado|Identifica y controla fuentes de sesgo|Determina el tamaño de muestra necesario', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[2].id, codigo:'C3-EP10', descripcion:'Construir e interpretar tablas de 2x2 y medidas de asociación',            criterios:'Calcula RR, OR e IC correctamente|Interpreta significancia estadística vs clínica|Aplica pruebas de hipótesis apropiadas', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // EPID-6020
-    { id: dummyId('comp'), cursoId:cursos[3].id, codigo:'C1-EP20', descripcion:'Aplicar métodos analíticos para evaluar causalidad en epidemiología',       criterios:'Aplica los criterios de Bradford Hill|Distingue causalidad de asociación|Evalúa consistencia y plausibilidad biológica', tipo:'Conocimiento', peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[3].id, codigo:'C2-EP20', descripcion:'Identificar y controlar sesgo, confusión e interacción en estudios',        criterios:'Identifica tipos de sesgo de selección y medición|Aplica estratificación y regresión para controlar confusión|Evalúa modificación de efecto', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[3].id, codigo:'C3-EP20', descripcion:'Interpretar resultados de análisis epidemiológico multivariado',            criterios:'Lee e interpreta tablas de regresión logística|Evalúa bondad de ajuste del modelo|Presenta resultados en forma comprensible', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // BIOS-5010
-    { id: dummyId('comp'), cursoId:cursos[4].id, codigo:'C1-BS10', descripcion:'Seleccionar y aplicar pruebas estadísticas apropiadas según tipo de variable', criterios:'Identifica escala de medición de variables|Selecciona prueba paramétrica o no paramétrica correcta|Justifica la selección de la prueba con criterios válidos', tipo:'Habilidad',    peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[4].id, codigo:'C2-BS10', descripcion:'Interpretar resultados de análisis estadístico descriptivo e inferencial',  criterios:'Interpreta media, mediana, DE y rango|Lee tablas de contingencia e histogramas|Interpreta valor p e intervalos de confianza en contexto clínico', tipo:'Conocimiento', peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[4].id, codigo:'C3-BS10', descripcion:'Utilizar software estadístico para análisis de datos de salud',             criterios:'Importa y limpia datos en el software|Ejecuta análisis apropiados con código correcto|Genera visualizaciones publicables', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // BIOS-5020
-    { id: dummyId('comp'), cursoId:cursos[5].id, codigo:'C1-BS20', descripcion:'Construir e interpretar modelos de regresión lineal múltiple',              criterios:'Verifica supuestos de regresión lineal|Interpreta coeficientes e IC|Evalúa ajuste del modelo con R² y residuales', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[5].id, codigo:'C2-BS20', descripcion:'Aplicar regresión logística a datos de salud dicotómicos',                  criterios:'Interpreta ORs ajustados del modelo logístico|Evalúa clasificación con curva ROC|Aplica el modelo a datos epidemiológicos reales', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[5].id, codigo:'C3-BS20', descripcion:'Interpretar análisis de supervivencia con curvas Kaplan-Meier',             criterios:'Lee e interpreta curvas KM|Aplica el log-rank test|Interpreta HR en regresión de Cox', tipo:'Habilidad',    peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // DRPH-7010
-    { id: dummyId('comp'), cursoId:cursos[6].id, codigo:'C1-DR70', descripcion:'Aplicar marcos de liderazgo transformacional en organizaciones de salud',   criterios:'Identifica estilos de liderazgo apropiados por contexto|Demuestra habilidades de comunicación estratégica|Motiva e inspira equipos multidisciplinarios', tipo:'Actitud',     peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[6].id, codigo:'C2-DR70', descripcion:'Gestionar cambio organizacional en sistemas de salud pública',               criterios:'Aplica modelos de gestión del cambio|Identifica resistencias institucionales|Diseña estrategias de implementación sostenibles', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[6].id, codigo:'C3-DR70', descripcion:'Desarrollar pensamiento estratégico para la práctica avanzada de salud',    criterios:'Formula visión estratégica con horizonte a largo plazo|Analiza entorno político, social y económico|Alinea estrategia con misión organizacional', tipo:'Conocimiento', peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // EDSA-5010
-    { id: dummyId('comp'), cursoId:cursos[7].id, codigo:'C1-ED50', descripcion:'Diseñar mensajes de salud efectivos para diferentes audiencias',             criterios:'Adapta lenguaje según nivel de literacia en salud|Aplica teorías de comunicación persuasiva|Produce materiales accesibles y culturalmente apropiados', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[7].id, codigo:'C2-ED50', descripcion:'Utilizar canales digitales y medios sociales para promoción de salud',       criterios:'Selecciona plataformas según perfil de la audiencia|Evalúa efectividad de campañas digitales|Aplica principios de marketing social', tipo:'Habilidad',    peso:'35', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('comp'), cursoId:cursos[7].id, codigo:'C3-ED50', descripcion:'Evaluar programas de educación en salud usando indicadores medibles',        criterios:'Selecciona indicadores de proceso y resultado|Diseña instrumentos de evaluación válidos|Interpreta resultados para mejora continua', tipo:'Conocimiento', peso:'30', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-  ];
-  db.competencias.push(...competencias);
+  // ── Cursos y Competencias: se usan los cursos y competencias REALES que
+  // Edgardo ya tiene registrados en el sistema — antes esta sección fabricaba
+  // 8 cursos y 22 competencias inventados (códigos como "SALP-5010") que no
+  // correspondían a nada real, y Edgardo reportó ver "cursos que no existen"
+  // en Secciones y Avalúos. Ahora se toman hasta 8 cursos reales (NO
+  // marcados [DUMMY_TAG]) que ya tengan al menos una competencia real
+  // definida; si todavía no hay ninguno así, no se generan secciones ni
+  // avalúos de prueba — se avisa claramente en vez de inventar cursos
+  // fantasma (ver mensaje final más abajo).
+  const compByCurso = {};
+  (db.competencias || []).forEach(c => {
+    if (c[DUMMY_TAG]) return; // solo competencias reales
+    if (!compByCurso[c.cursoId]) compByCurso[c.cursoId] = [];
+    compByCurso[c.cursoId].push(c);
+  });
+  const cursos = (db.cursos || [])
+    .filter(c => !c[DUMMY_TAG] && (compByCurso[c.id] || []).length > 0)
+    .slice(0, 8);
 
   // ── Helper for student IDs and names ──
   const studentPool = [
@@ -12601,40 +12557,33 @@ async function dummyLoadAll() {
     return studentPool.slice(offset||0, (offset||0)+n);
   }
 
-  // ── Secciones (spanning 3 academic years, multiple terms) ──
-  const secciones = [
-    // 2023 – T2
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2023T2', estudiantes:makeStudents(8,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[2].id, numero:'001', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2023T2', estudiantes:makeStudents(7,4),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[4].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2023T2', estudiantes:makeStudents(9,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // 2024 – T1
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2024T1', estudiantes:makeStudents(8,2),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[1].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2024T1', estudiantes:makeStudents(7,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[3].id, numero:'001', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2024T1', estudiantes:makeStudents(6,6),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[5].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2024T1', estudiantes:makeStudents(8,4),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // 2024 – T2
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2024T2', estudiantes:makeStudents(9,1),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'002', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2024T2', estudiantes:makeStudents(7,7),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[2].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2024T2', estudiantes:makeStudents(8,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[4].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2024T2', estudiantes:makeStudents(10,0), fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[6].id, numero:'001', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2024T2', estudiantes:makeStudents(6,10), fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // 2024 – T3
-    { id:dummyId('sec'), cursoId:cursos[1].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2024T3', estudiantes:makeStudents(8,3),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[3].id, numero:'001', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2024T3', estudiantes:makeStudents(7,5),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[7].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2024T3', estudiantes:makeStudents(8,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-
-    // 2025 – T1
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2025T1', estudiantes:makeStudents(8,4),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[0].id, numero:'002', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2025T1', estudiantes:makeStudents(6,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[2].id, numero:'001', profesor:'Dra. Elena Reyes',    profesorEmail:'ereyes.dummy@rcm.upr.edu',      semestre:'2025T1', estudiantes:makeStudents(7,8),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[4].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2025T1', estudiantes:makeStudents(9,2),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[5].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2025T1', estudiantes:makeStudents(7,6),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[6].id, numero:'001', profesor:'Dr. Marcos Soto',     profesorEmail:'msoto.dummy@rcm.upr.edu',       semestre:'2025T1', estudiantes:makeStudents(5,11), fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('sec'), cursoId:cursos[7].id, numero:'001', profesor:'Prof. Ana Villanueva',profesorEmail:'avillanueva.dummy@rcm.upr.edu', semestre:'2025T1', estudiantes:makeStudents(8,0),  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+  // ── Secciones — una o más secciones por CADA curso real seleccionado
+  // arriba, repartidas en los mismos 5 trimestres de prueba (2023T2 →
+  // 2025T1) y rotando entre los 3 profesores de prueba. Generalizado para
+  // adaptarse a cuántos cursos reales con competencias existan (antes
+  // asumía siempre exactamente 8 cursos fijos).
+  const SEMESTRES_DUMMY = ['2023T2', '2024T1', '2024T2', '2024T3', '2025T1'];
+  const PROFESORES_DUMMY = [
+    { nombre: 'Dra. Elena Reyes',     email: 'ereyes.dummy@rcm.upr.edu' },
+    { nombre: 'Dr. Marcos Soto',      email: 'msoto.dummy@rcm.upr.edu' },
+    { nombre: 'Prof. Ana Villanueva', email: 'avillanueva.dummy@rcm.upr.edu' },
   ];
+  const secciones = [];
+  cursos.forEach((curso, ci) => {
+    const nSecciones = 2 + (ci % 2); // 2 o 3 secciones por curso, con variedad
+    for (let s = 0; s < nSecciones; s++) {
+      const semestre = SEMESTRES_DUMMY[(ci + s) % SEMESTRES_DUMMY.length];
+      const prof = PROFESORES_DUMMY[(ci + s) % PROFESORES_DUMMY.length];
+      const n = 6 + ((ci + s) % 4); // 6 a 9 estudiantes por sección
+      const offset = (ci * 3 + s * 2) % studentPool.length;
+      secciones.push({
+        id: dummyId('sec'), cursoId: curso.id, numero: s === 0 ? '001' : (s === 1 ? '002' : '003'),
+        profesor: prof.nombre, profesorEmail: prof.email, semestre,
+        estudiantes: makeStudents(n, offset),
+        fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+      });
+    }
+  });
   db.secciones.push(...secciones);
 
   // ── Estudiantes (Fase B del Sistema de Estudiantes) — un registro real en
@@ -12665,8 +12614,6 @@ async function dummyLoadAll() {
 
   // ── Avalúos ──
   const letraMap = n => n>=93?'A':n>=85?'B+':n>=80?'B':n>=75?'C+':n>=70?'C':n>=60?'D':'F';
-  // Actualizado a la escala de 5 niveles (0-4) — antes solo llegaba a 3.
-  const nivelesPool = ['4','3','3','3','2','2','1','0'];
   const comentariosPool = [
     'Demuestra excelente dominio del contenido. Supera las expectativas del curso.',
     'Progreso notable durante el semestre. Áreas de mejora identificadas.',
@@ -12677,27 +12624,50 @@ async function dummyLoadAll() {
     '',''
   ];
   function rndFrom(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
-  function rndNivel() { return rndFrom(nivelesPool); }
   function rndNota() { return Math.round(65 + Math.random()*35); }
   const fechasBySem = {
     '2023T2':'2023-08-20','2024T1':'2024-03-15','2024T2':'2024-08-18',
     '2024T3':'2024-11-10','2025T1':'2025-03-20'
   };
 
-  // Map curso → its competencias
-  const compByCurso = {};
-  competencias.forEach(c => {
-    if (!compByCurso[c.cursoId]) compByCurso[c.cursoId] = [];
-    compByCurso[c.cursoId].push(c);
+  // ── Niveles de evaluación — se usa la escala REAL activa para cada curso
+  // (global o específica de su programa, `resolverEscalaParaCurso()`, ya
+  // configurada en el sistema) en vez de un pool fijo 0-4 hardcodeado, para
+  // que los avalúos de prueba se lean con los mismos niveles que Edgardo
+  // tiene configurados hoy — si algún día cambia la escala, los datos de
+  // prueba automáticamente la siguen.
+  _ensureEscalaNivelesSeeded();
+  function _poolNivelesPonderado(valores) {
+    // valores viene ascendente (bajo→alto); se pondera hacia los niveles
+    // más altos para que la mayoría de los avalúos de prueba lean como
+    // aprobatorios, igual que el criterio anterior.
+    const pool = [];
+    valores.forEach((v, i) => {
+      const reps = Math.max(1, Math.round(((i + 1) / valores.length) * 4));
+      for (let r = 0; r < reps; r++) pool.push(v);
+    });
+    return pool;
+  }
+  const poolNivelesPorCurso = {};
+  cursos.forEach(curso => {
+    const escala = resolverEscalaParaCurso(curso.id);
+    const valores = (escala?.niveles || []).map(n => String(n.valor));
+    poolNivelesPorCurso[curso.id] = valores.length ? _poolNivelesPonderado(valores) : ['4','3','2','1','0'];
   });
+  function rndNivel(cursoId) { return rndFrom(poolNivelesPorCurso[cursoId] || ['4','3','2','1','0']); }
 
-  // ── LAOs de prueba — un LAO oficial de calificación directa por curso,
-  // igual que el sistema real: los avalúos se evalúan a través de un LAO,
-  // no directamente. Se etiquetan como dummy para poder limpiarlos.
+  // ── LAOs — se reutiliza el LAO oficial REAL del curso si ya existe uno
+  // (así los avalúos de prueba se califican contra el mismo instrumento que
+  // Edgardo ya tiene configurado); si el curso real todavía no tiene un LAO
+  // oficial, se crea uno de prueba (etiquetado, se limpia con "Eliminar
+  // Datos de Prueba") para que los avalúos tengan con qué evaluarse — el
+  // curso en sí sigue siendo siempre uno real, nunca inventado.
   const laoByCurso = {};
   cursos.forEach(curso => {
     const comps = compByCurso[curso.id] || [];
     if (!comps.length) return;
+    const laoReal = (db.laos || []).find(l => l.cursoId === curso.id && l.esOficial && !l[DUMMY_TAG]);
+    if (laoReal) { laoByCurso[curso.id] = laoReal; return; }
     const lao = {
       id: dummyId('lao'),
       cursoId: curso.id,
@@ -12745,7 +12715,7 @@ async function dummyLoadAll() {
           competenciaId: comp.id,
           competenciaCodigo: comp.codigo,
           competenciaDesc: comp.descripcion,
-          nivel: rndNivel(),
+          nivel: rndNivel(sec.cursoId),
           puntajeLao: null,
           lao: lao.nombre,
         })),
@@ -12862,7 +12832,10 @@ async function dummyLoadAll() {
   await adiesSaveData();
 
   // ── Update modal UI ──
-  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong>, <strong>${avaluoEntries.length} avalúos</strong> cargados en <strong>${secciones.length} secciones</strong> para <strong>${cursos.length} cursos</strong> a lo largo de 5 trimestres (2023T2 → 2025T1).<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, 'success');
+  const resumenCursos = cursos.length
+    ? `<strong>${avaluoEntries.length} avalúos</strong> en <strong>${secciones.length} secciones</strong> de tus cursos reales (<strong>${cursos.map(c => c.codigo).join(', ')}</strong>) a lo largo de 5 trimestres (2023T2 → 2025T1).`
+    : `⚠ No se generaron secciones ni avalúos de prueba: no encontré ningún curso real con al menos una competencia definida. Crea un curso en la pestaña "Cursos" y sus competencias en "Competencias", y vuelve a cargar los datos de prueba.`;
+  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> de prueba cargados. ${resumenCursos}<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
@@ -12909,8 +12882,11 @@ async function dummyDeleteAll() {
 
 
 async function dummyCheckLoaded() {
-  // Show delete button if dummy data exists
-  const hasDummy = db.cursos.some(x=>x[DUMMY_TAG]) || db.avaluos.some(x=>x[DUMMY_TAG]);
+  // Show delete button if dummy data exists. Ya no se puede confiar en
+  // db.cursos/db.competencias (ahora los datos de prueba reutilizan cursos
+  // REALES, sin [DUMMY_TAG]) — se revisa también estudiantes/facultad, que
+  // sí siguen siendo siempre fabricados por el generador de prueba.
+  const hasDummy = (db.avaluos||[]).some(x=>x[DUMMY_TAG]) || (db.estudiantes||[]).some(x=>x[DUMMY_TAG]) || (db.facultad||[]).some(x=>x[DUMMY_TAG]);
   const adiesData = await adiesLoadData();
   const hasAdiesDummy = adiesData.sections.some(s=>s[DUMMY_TAG]);
   const loaded = hasDummy || hasAdiesDummy;
