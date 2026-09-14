@@ -2260,6 +2260,11 @@
       <label>Departamento</label>
       <select id="prog-cat-departamento"><option value="">— Sin asignar —</option></select>
     </div>
+    <div class="form-group">
+      <label>Secuencias disponibles y duración</label>
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px">Regular aplica siempre. Marca Desacelerada y/o Acelerada solo si el programa las ofrece. La duración (años + trimestres) se usará más adelante para calcular tasas de graduación.</div>
+      <div id="prog-cat-secuencias" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-programa-catalogo')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarProgramaCatalogo()">💾 Guardar</button>
@@ -3909,6 +3914,13 @@ function _ensureProgramCatalogSeeded() {
   // Agrega como registros reales los 10 programas que hoy solo existen
   // hardcodeados en PROG_ORDER, si todavía no están en el catálogo por nombre
   const nombresExistentes = new Set(db.programas.map(p => p.nombre));
+  // Los nombres ya renombrados por Fase A (a su nombre canónico del
+  // Registrador) no deben volver a sembrarse con su nombre viejo solo porque
+  // ese nombre viejo ya no existe tal cual — si no, cada carga resucitaría un
+  // programa "fantasma" con el nombre anterior.
+  Object.entries(PROG_RENAME_MAP_FASE_A).forEach(([nombreViejo, nombreNuevo]) => {
+    if (nombresExistentes.has(nombreNuevo)) nombresExistentes.add(nombreViejo);
+  });
   PROG_ORDER_DEFAULT.forEach(nombre => {
     if (!nombresExistentes.has(nombre)) {
       db.programas.push({
@@ -3919,6 +3931,128 @@ function _ensureProgramCatalogSeeded() {
       changed = true;
     }
   });
+  if (changed) saveDB();
+  _ensureFaseA_ProgramasEstudiantes();
+}
+
+// ======================== FASE A: Programas de Estudiantes (Avalúo) ========================
+// Renombra el catálogo de programas existente a los nombres canónicos usados
+// por el informe de nuevo ingreso del Registrador, crea los programas nuevos
+// que todavía no existían, añade a cada programa su configuración de
+// Secuencias (Regular/Desacelerada/Acelerada con duración en años+trimestres,
+// usada más adelante para tasas de graduación), y siembra en codigosProg los
+// códigos código-de-programa → nombre-de-programa del informe. Idempotente:
+// segura de correr en cada carga, no duplica ni revierte cambios manuales.
+const PROG_RENAME_MAP_FASE_A = {
+  'MHSA':                                    'MHSA-Administración de Servicios de Salud',
+  'DrPH HSAM':                               'DrPH-Análisis de Sistemas de Salud y Gerencia',
+  'MPH Biostatistics':                       'MPH-Bioestadística',
+  'DrPH Social Determinants of Health':      'DrPH-Determinantes Sociales de la Salud',
+  'MPHE':                                    'MPHE-Educación en Salud Pública',
+  'MPH Epidemiology':                        'MPH-Epidemiología',
+  'MPH Gerontology':                         'MPH-Gerontología',
+  'DrPH Environmental Health':               'DrPH-Salud Ambiental',
+  'MPH General':                             'MPH-General',
+  'MPH Environmental Health':                'MPH-Salud Ambiental',
+  'MPH/MPHE':                                'MPH Core',
+  // 'DrPH Core' se deja intacto a propósito — sin código de admisión propio,
+  // es una secuencia medular compartida entre programas DrPH (pendiente
+  // decidir cómo modelar eso; fuera del alcance de esta fase).
+};
+
+const PROGRAMAS_NUEVOS_FASE_A = [
+  'MS-Nutrición', 'MS-Demografía', 'MS-Epidemiología',
+  'Certificado Graduado de Gerontología', 'MS-Higiene Industrial',
+  'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana',
+  'Certificado Profesional en la Salud de la Madre y la Niñez',
+];
+
+const CODIGOS_PROG_FASE_A = [
+  { codigo: 'SP ADSS MAS', programa: 'MHSA-Administración de Servicios de Salud' },
+  { codigo: 'SP ANSG DSP', programa: 'DrPH-Análisis de Sistemas de Salud y Gerencia' },
+  { codigo: 'SP BIOE MSB', programa: 'MPH-Bioestadística' },
+  { codigo: 'SP CNUT MSL', programa: 'MS-Nutrición' },
+  { codigo: 'SP DEMO MDE', programa: 'MS-Demografía' },
+  { codigo: 'SP DESS DSP', programa: 'DrPH-Determinantes Sociales de la Salud' },
+  { codigo: 'SP EDSA MES', programa: 'MPHE-Educación en Salud Pública' },
+  { codigo: 'SP EPID MSE', programa: 'MPH-Epidemiología' },
+  { codigo: 'SP EPIM MCE', programa: 'MS-Epidemiología' },
+  { codigo: 'SP GERO CCG', programa: 'Certificado Graduado de Gerontología' },
+  { codigo: 'SP GERO MPG', programa: 'MPH-Gerontología' },
+  { codigo: 'SP HIGI MHI', programa: 'MS-Higiene Industrial' },
+  { codigo: 'SP INTV CIT', programa: 'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana' },
+  { codigo: 'SP MCHI CMC', programa: 'Certificado Profesional en la Salud de la Madre y la Niñez' },
+  { codigo: 'SP SAAM DSP', programa: 'DrPH-Salud Ambiental' },
+  { codigo: 'SP SALP MSP', programa: 'MPH-General' },
+  { codigo: 'SP SAMB MAB', programa: 'MPH-Salud Ambiental' },
+];
+
+// Renombra un programa y sincroniza los strings denormalizados que usan
+// cursos, banco de competencias y facultad (mismo mecanismo que ya usa
+// guardarProgramaCatalogo() para renombres manuales desde la UI).
+function _renombrarProgramaCascada(prog, nombreNuevo) {
+  const nombreAnterior = prog.nombre;
+  if (nombreAnterior === nombreNuevo) return;
+  prog.nombre = nombreNuevo;
+  db.cursos.forEach(c => { if (c.programaId === prog.id) c.programa = nombreNuevo; });
+  (db.bancoCompetencias || []).forEach(bc => { if (bc.programa === nombreAnterior) bc.programa = nombreNuevo; });
+  (db.facultad || []).forEach(f => {
+    if (f.programaIds && f.programaIds.includes(prog.id) && f.programas) {
+      f.programas = f.programas.split('|').map(s => s.trim() === nombreAnterior ? nombreNuevo : s.trim()).join('|');
+    }
+  });
+}
+
+function _secuenciasVacias() {
+  return {
+    regular:      { duracion: { anios: null, trimestres: null } },
+    desacelerada: { activa: false, duracion: { anios: null, trimestres: null } },
+    acelerada:    { activa: false, duracion: { anios: null, trimestres: null } },
+  };
+}
+
+function _ensureFaseA_ProgramasEstudiantes() {
+  let changed = false;
+
+  // 1) Renombrar programas existentes a los nombres canónicos del Registrador
+  Object.entries(PROG_RENAME_MAP_FASE_A).forEach(([nombreViejo, nombreNuevo]) => {
+    const prog = db.programas.find(p => p.nombre === nombreViejo);
+    if (prog) { _renombrarProgramaCascada(prog, nombreNuevo); changed = true; }
+  });
+
+  // 2) Crear programas nuevos que todavía no existan en el catálogo
+  const nombresExistentes = new Set(db.programas.map(p => p.nombre));
+  PROGRAMAS_NUEVOS_FASE_A.forEach(nombre => {
+    if (!nombresExistentes.has(nombre)) {
+      db.programas.push({
+        id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        nombre, tipo: '', descripcion: '', departamentoId: null, secuencias: _secuenciasVacias(),
+        fechaCreacion: new Date().toISOString(),
+      });
+      changed = true;
+    }
+  });
+
+  // 3) Asegurar que todo programa (incluyendo los ya existentes de antes de
+  // esta fase) tenga su estructura de Secuencias
+  db.programas.forEach(p => {
+    if (!p.secuencias) { p.secuencias = _secuenciasVacias(); changed = true; }
+  });
+
+  // 4) Sembrar los códigos de programa del informe del Registrador en
+  // codigosProg (no duplica si el código ya existe — por ejemplo si el admin
+  // ya lo había añadido manualmente)
+  if (!db.codigosProg) db.codigosProg = [];
+  CODIGOS_PROG_FASE_A.forEach(cp => {
+    if (!db.codigosProg.find(x => x.codigo === cp.codigo)) {
+      db.codigosProg.push({
+        id: 'cod_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        codigo: cp.codigo, programa: cp.programa,
+      });
+      changed = true;
+    }
+  });
+
   if (changed) saveDB();
 }
 
@@ -4994,6 +5128,7 @@ function abrirNuevoPrograma() {
   document.getElementById('prog-cat-nombre').value = '';
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = '';
+  document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(_secuenciasVacias());
   openModal('modal-programa-catalogo');
 }
 function abrirEditarPrograma(id) {
@@ -5004,7 +5139,50 @@ function abrirEditarPrograma(id) {
   document.getElementById('prog-cat-nombre').value = p.nombre;
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = p.departamentoId || '';
+  document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(p.secuencias || _secuenciasVacias());
   openModal('modal-programa-catalogo');
+}
+
+// ── Editor de Secuencias dentro del modal de Programa ──────────────────────
+const SECUENCIAS_CONFIG = [
+  { key: 'regular',      label: 'Regular',      opcional: false },
+  { key: 'desacelerada', label: 'Desacelerada', opcional: true },
+  { key: 'acelerada',    label: 'Acelerada',     opcional: true },
+];
+function _secuenciasEditorHTML(secuencias) {
+  const s = secuencias || _secuenciasVacias();
+  return SECUENCIAS_CONFIG.map(({ key, label, opcional }) => {
+    const activa = opcional ? !!s[key]?.activa : true;
+    const anios = s[key]?.duracion?.anios ?? '';
+    const trimestres = s[key]?.duracion?.trimestres ?? '';
+    const etiqueta = opcional
+      ? `<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;min-width:112px;cursor:pointer"><input type="checkbox" id="prog-cat-sec-${key}-activa" ${activa ? 'checked' : ''} onchange="_toggleSecuenciaDuracion('${key}')"> ${label}</label>`
+      : `<div style="font-size:0.82rem;min-width:112px;font-weight:600">${label}</div>`;
+    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;flex-wrap:wrap">
+      ${etiqueta}
+      <input type="number" min="0" id="prog-cat-sec-${key}-anios" placeholder="Años" value="${anios}" style="width:64px" ${activa ? '' : 'disabled'}>
+      <span style="font-size:0.75rem;color:var(--muted)">años</span>
+      <input type="number" min="0" id="prog-cat-sec-${key}-trimestres" placeholder="Trim." value="${trimestres}" style="width:64px" ${activa ? '' : 'disabled'}>
+      <span style="font-size:0.75rem;color:var(--muted)">trimestres</span>
+    </div>`;
+  }).join('');
+}
+function _toggleSecuenciaDuracion(key) {
+  const activa = document.getElementById(`prog-cat-sec-${key}-activa`).checked;
+  document.getElementById(`prog-cat-sec-${key}-anios`).disabled = !activa;
+  document.getElementById(`prog-cat-sec-${key}-trimestres`).disabled = !activa;
+}
+function _leerSecuenciasDelForm() {
+  const secuencias = {};
+  SECUENCIAS_CONFIG.forEach(({ key, opcional }) => {
+    const anios = document.getElementById(`prog-cat-sec-${key}-anios`).value;
+    const trimestres = document.getElementById(`prog-cat-sec-${key}-trimestres`).value;
+    const duracion = { anios: anios === '' ? null : parseInt(anios, 10), trimestres: trimestres === '' ? null : parseInt(trimestres, 10) };
+    secuencias[key] = opcional
+      ? { activa: document.getElementById(`prog-cat-sec-${key}-activa`).checked, duracion }
+      : { duracion };
+  });
+  return secuencias;
 }
 function _populateDeptoSelect() {
   const sel = document.getElementById('prog-cat-departamento');
@@ -5015,6 +5193,7 @@ function guardarProgramaCatalogo() {
   const nombre = document.getElementById('prog-cat-nombre').value.trim();
   if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
   const departamentoId = document.getElementById('prog-cat-departamento').value || null;
+  const secuencias = _leerSecuenciasDelForm();
   const editId = document.getElementById('prog-cat-edit-id').value;
   if (editId) {
     const p = db.programas.find(x => x.id === editId);
@@ -5022,6 +5201,7 @@ function guardarProgramaCatalogo() {
       const nombreAnterior = p.nombre;
       p.nombre = nombre;
       p.departamentoId = departamentoId;
+      p.secuencias = secuencias;
       // Renombrar en cascada: mantiene sincronizados los strings denormalizados
       // que usan cursos, el banco de competencias, y facultad — para que nada
       // quede "huérfano" apuntando al nombre viejo.
@@ -5041,7 +5221,7 @@ function guardarProgramaCatalogo() {
     }
     db.programas.push({
       id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      nombre, tipo: '', descripcion: '', departamentoId, fechaCreacion: new Date().toISOString(),
+      nombre, tipo: '', descripcion: '', departamentoId, secuencias, fechaCreacion: new Date().toISOString(),
     });
   }
   saveDB();
