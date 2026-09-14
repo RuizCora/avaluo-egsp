@@ -1940,6 +1940,7 @@
     <button class="rpt-tab" id="rtab-r6" onclick="showReport('r6')">R6 · En Riesgo</button>
     <button class="rpt-tab" id="rtab-r7" onclick="showReport('r7')">R7 · Facultad</button>
     <button class="rpt-tab" id="rtab-r8" onclick="showReport('r8')">R8 · Notas</button>
+    <button class="rpt-tab" id="rtab-r9" onclick="showReport('r9')">R9 · Cohortes</button>
   </div>
 
   <!-- Export toolbar (shown per report) -->
@@ -2076,6 +2077,27 @@
         </select></div>
     </div>
     <div id="r8-body"></div>
+  </div>
+
+  <!-- R9 — Estudiantes por Cohorte y Secuencia (Fase E) -->
+  <div id="rpt-r9" class="rpt-pane" style="display:none">
+    <div class="rpt-filter-bar">
+      <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
+        <select id="r9-prog" class="dash-select" onchange="renderR9()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Año Comienzo</label>
+        <select id="r9-anio" class="dash-select" onchange="renderR9()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Secuencia</label>
+        <select id="r9-secuencia" class="dash-select" onchange="renderR9()">
+          <option value="">Todas</option>
+          <option value="Regular">Regular</option>
+          <option value="Desacelerada">Desacelerada</option>
+          <option value="Acelerada">Acelerada</option>
+          <option value="Vespertina">Vespertina</option>
+          <option value="Plan de Estudio">Plan de Estudio</option>
+          <option value="__sin_asignar__">Sin asignar</option>
+        </select></div>
+    </div>
+    <div id="r9-body"></div>
   </div>
 
 </div>
@@ -7458,7 +7480,7 @@ function showReport(id) {
   const bar = document.getElementById('rpt-export-bar');
   if (bar) bar.style.display='flex';
   // render
-  const renders = {r1:renderR1,r2:renderR2,r3:renderR3,r4:renderR4,r5:renderR5,r6:renderR6,r7:renderR7,r8:renderR8};
+  const renders = {r1:renderR1,r2:renderR2,r3:renderR3,r4:renderR4,r5:renderR5,r6:renderR6,r7:renderR7,r8:renderR8,r9:renderR9};
   if (renders[id]) renders[id]();
 }
 
@@ -7482,6 +7504,13 @@ function renderReportes() {
   const canR7 = currentUser?.rol==='admin' || e?.isDirector;
   const r7tab = document.getElementById('rtab-r7');
   if (r7tab) r7tab.classList.toggle('hidden', !canR7);
+  // R9 — Programa/Año Comienzo, derivados de db.estudiantes visibles para
+  // este usuario (no de avaluos/cursos, que es un universo distinto).
+  const estVisibles = (db.estudiantes||[]).filter(canSeeEstudiante);
+  const r9Progs = [...new Set(estVisibles.map(est => db.programas.find(p=>p.id===est.programaId)?.nombre).filter(Boolean))].sort();
+  const r9Anios = [...new Set(estVisibles.map(est => est.anioComienzo).filter(Boolean))].sort().reverse();
+  _populateSelect('r9-prog', r9Progs);
+  _populateSelect('r9-anio', r9Anios);
   showReport(_activeReport);
 }
 
@@ -8202,6 +8231,110 @@ function renderR8() {
 
   el.innerHTML = html;
   _reportCSVData = csvRows; _reportCSVName = 'R8_notas_finales.csv';
+}
+
+// ── R9 — Estudiantes por Cohorte y Secuencia (Fase E) ──────────
+// Sienta las bases para el futuro cálculo de tasas de graduación (que usará
+// la duración de secuencia configurada por programa en Fase A) sin calcular
+// nada de eso todavía — por ahora es solo un reporte: cuántos estudiantes
+// hay por Programa × Año Comienzo (cohorte) × Secuencia, con el detalle de
+// cada estudiante debajo. Reutiliza canSeeEstudiante() (Fase B) para que la
+// visibilidad por rol sea idéntica a la de la pestaña Estudiantes.
+const R9_SECUENCIA_COLS = ['Regular', 'Desacelerada', 'Acelerada', 'Vespertina', 'Plan de Estudio'];
+
+function renderR9() {
+  const filtroProg = document.getElementById('r9-prog')?.value || '';
+  const filtroAnio = document.getElementById('r9-anio')?.value || '';
+  const filtroSecuencia = document.getElementById('r9-secuencia')?.value || '';
+  document.getElementById('rpt-export-title').textContent = 'R9 · Estudiantes por Cohorte y Secuencia';
+
+  const el = document.getElementById('r9-body');
+  let visibles = (db.estudiantes || []).filter(canSeeEstudiante);
+  visibles = visibles.filter(est => {
+    const prog = db.programas.find(p => p.id === est.programaId);
+    if (filtroProg && prog?.nombre !== filtroProg) return false;
+    if (filtroAnio && est.anioComienzo !== filtroAnio) return false;
+    if (filtroSecuencia === '__sin_asignar__') { if (est.secuencia) return false; }
+    else if (filtroSecuencia && est.secuencia !== filtroSecuencia) return false;
+    return true;
+  });
+
+  if (!visibles.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🎓</div><p>Sin estudiantes para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R9_cohortes.csv';
+    return;
+  }
+
+  // Agrupa por Programa (nombre resuelto vía programaId, no el texto libre)
+  const porPrograma = {};
+  visibles.forEach(est => {
+    const prog = db.programas.find(p => p.id === est.programaId);
+    const nombrePrograma = prog?.nombre || 'Sin Programa';
+    if (!porPrograma[nombrePrograma]) porPrograma[nombrePrograma] = [];
+    porPrograma[nombrePrograma].push(est);
+  });
+
+  const etiquetaSecuencia = est => R9_SECUENCIA_COLS.includes(est.secuencia) ? est.secuencia : null; // null → "Sin asignar"
+  const etiquetaAnio = est => est.anioComienzo || null; // null → "Sin asignar"
+  const badgeAnio = anio => anio
+    ? (_anioComienzoValido(anio) ? anio : `<span class="badge badge-rust" title="Debe ser un año académico consecutivo, ej. 2026-27">⚠ ${anio}</span>`)
+    : '<span style="color:var(--muted)">Sin asignar</span>';
+
+  let html = '';
+  const csvRows = [['Programa', 'Año Comienzo', 'Secuencia', 'Número', 'Nombre', 'Registración']];
+
+  Object.entries(porPrograma).sort(([a], [b]) => a.localeCompare(b)).forEach(([nombrePrograma, estudiantesPrograma]) => {
+    // Años presentes en este programa, ordenados de más reciente a más
+    // antiguo (comparación de texto sirve porque el formato AAAA-AA siempre
+    // tiene 4 dígitos de año) — "Sin asignar" (año en blanco) va al final.
+    const aniosConDatos = [...new Set(estudiantesPrograma.map(etiquetaAnio))];
+    const aniosOrdenados = aniosConDatos.filter(a => a !== null).sort().reverse();
+    if (aniosConDatos.includes(null)) aniosOrdenados.push(null);
+
+    // ---- Matriz de conteos: filas = Año Comienzo, columnas = Secuencia ----
+    html += `<div class="rpt-section-head"><span>${nombrePrograma}</span><span style="font-size:0.8rem;font-weight:400;color:var(--muted)">${estudiantesPrograma.length} estudiante(s)</span></div>`;
+    html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th>Año Comienzo</th>${R9_SECUENCIA_COLS.map(c => `<th>${c}</th>`).join('')}<th>Sin asignar</th><th>Total</th>
+    </tr></thead><tbody>`;
+    const totalesPorColumna = new Array(R9_SECUENCIA_COLS.length + 1).fill(0); // + "Sin asignar"
+    aniosOrdenados.forEach(anio => {
+      const estAnio = estudiantesPrograma.filter(est => etiquetaAnio(est) === anio);
+      const conteos = R9_SECUENCIA_COLS.map(col => estAnio.filter(est => etiquetaSecuencia(est) === col).length);
+      const sinAsignar = estAnio.filter(est => etiquetaSecuencia(est) === null).length;
+      [...conteos, sinAsignar].forEach((n, i) => { totalesPorColumna[i] += n; });
+      html += `<tr>
+        <td>${badgeAnio(anio)}</td>
+        ${conteos.map(n => `<td>${n || '—'}</td>`).join('')}
+        <td>${sinAsignar || '—'}</td>
+        <td><strong>${estAnio.length}</strong></td>
+      </tr>`;
+    });
+    html += `<tr style="font-weight:700;border-top:2px solid var(--border)">
+      <td>Total</td>${totalesPorColumna.map(n => `<td>${n || '—'}</td>`).join('')}<td>${estudiantesPrograma.length}</td>
+    </tr>`;
+    html += '</tbody></table></div>';
+
+    // ---- Detalle: listado de estudiantes agrupado por Año Comienzo · Secuencia ----
+    aniosOrdenados.forEach(anio => {
+      [...R9_SECUENCIA_COLS, null].forEach(secuencia => {
+        const grupo = estudiantesPrograma
+          .filter(est => etiquetaAnio(est) === anio && etiquetaSecuencia(est) === secuencia)
+          .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+        if (!grupo.length) return;
+        const etiquetaSec = secuencia || 'Sin asignar';
+        html += `<div style="font-size:0.82rem;font-weight:700;margin:10px 0 4px;color:var(--ink)">${anio || 'Sin asignar'} · ${etiquetaSec} (${grupo.length})</div>`;
+        html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+          <th>Número</th><th>Nombre</th><th>Registración</th>
+        </tr></thead><tbody>${grupo.map(est => `<tr>
+          <td>${est.numero}</td><td>${est.nombre}</td><td>${est.registracion || '—'}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+        grupo.forEach(est => csvRows.push([nombrePrograma, anio || 'Sin asignar', etiquetaSec, est.numero, est.nombre, est.registracion || '']));
+      });
+    });
+  });
+
+  el.innerHTML = html;
+  _reportCSVData = csvRows; _reportCSVName = 'R9_cohortes.csv';
 }
 
 // ======================== DASHBOARD ========================
