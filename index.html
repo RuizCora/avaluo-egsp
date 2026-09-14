@@ -1262,6 +1262,7 @@
   <div class="sidebar-divider"></div>
   <div class="sidebar-label">Gestión</div>
   <button class="tab-btn" data-tab="departamentos" onclick="showTab('departamentos', this)" style="display:none">Departamentos y Programas</button>
+  <button class="tab-btn" data-tab="estudiantes" onclick="showTab('estudiantes', this)" style="display:none">Estudiantes</button>
   <button class="tab-btn" data-tab="escalas" onclick="showTab('escalas', this)" style="display:none">Escalas de Niveles</button>
   <button class="tab-btn" data-tab="cursos" onclick="showTab('cursos', this)">Cursos</button>
   <button class="tab-btn" data-tab="secciones" onclick="showTab('secciones', this)">Secciones</button>
@@ -1467,6 +1468,40 @@
   </div>
   <div id="tabla-cursos">
     <div class="empty-state"><div class="empty-icon">📚</div><p>Aún no hay cursos registrados</p></div>
+  </div>
+</div>
+
+<!-- ==================== ESTUDIANTES (Fase B) ==================== -->
+<div id="panel-estudiantes" class="panel">
+  <div id="readonly-notice-estudiantes" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — ves los estudiantes de tus programas/asesorados.</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title">Estudiantes</div>
+      <div class="section-sub">Roster de estudiantes por programa, cohorte y secuencia</div>
+    </div>
+    <span id="btn-nuevo-estudiante"><button class="btn btn-primary" onclick="abrirNuevoEstudiante()">+ Nuevo Estudiante</button></span>
+  </div>
+  <div class="rpt-filter-bar" style="margin-bottom:14px">
+    <div class="dash-filter-group" style="flex:1;min-width:200px"><label class="dash-filter-label">🔍 Buscar</label>
+      <input type="text" id="est-buscar" placeholder="Número o nombre..." oninput="renderEstudiantesTab()"
+        class="dash-select" style="width:100%"></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
+      <select id="est-filtro-programa" class="dash-select" onchange="renderEstudiantesTab()"><option value="">Todos</option></select></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Año Comienzo</label>
+      <select id="est-filtro-anio" class="dash-select" onchange="renderEstudiantesTab()"><option value="">Todos</option></select></div>
+    <div class="dash-filter-group"><label class="dash-filter-label">Secuencia</label>
+      <select id="est-filtro-secuencia" class="dash-select" onchange="renderEstudiantesTab()">
+        <option value="">Todas</option>
+        <option value="Regular">Regular</option>
+        <option value="Desacelerada">Desacelerada</option>
+        <option value="Acelerada">Acelerada</option>
+        <option value="Vespertina">Vespertina</option>
+        <option value="Plan de Estudio">Plan de Estudio</option>
+        <option value="__sin_asignar__">Sin asignar</option>
+      </select></div>
+  </div>
+  <div id="tabla-estudiantes">
+    <div class="empty-state"><div class="empty-icon">🎓</div><p>Aún no hay estudiantes registrados</p></div>
   </div>
 </div>
 
@@ -2620,6 +2655,58 @@
   </div>
 </div>
 
+<!-- Modal Estudiante (Fase B — roster de estudiantes, no confundir con
+     modal-add-estudiante que añade un nombre suelto a una sección) -->
+<div id="modal-estudiante" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-estudiante-title">🎓 Nuevo Estudiante</div>
+      <button class="modal-close" onclick="closeModal('modal-estudiante')">✕</button>
+    </div>
+    <input type="hidden" id="est-edit-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Número de Estudiante *</label>
+        <input type="text" id="est-numero" placeholder="ej. 801030177">
+        <div id="est-numero-hint" style="font-size:0.72rem;color:var(--muted);margin-top:3px">Identificador único — no se puede editar después de creado.</div>
+      </div>
+      <div class="form-group">
+        <label>Nombre *</label>
+        <input type="text" id="est-nombre" placeholder="ej. ALICEA LUNA, SARA I">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Programa *</label>
+        <select id="est-programa" onchange="_populateEstudianteSecuenciaSelect()">
+          <option value="">— Seleccionar —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Año Comienzo</label>
+        <input type="text" id="est-anio-comienzo" placeholder="ej. 2025-26" pattern="\d{4}-\d{2}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Secuencia</label>
+        <select id="est-secuencia">
+          <option value="">— Seleccionar un programa primero —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Registración</label>
+        <input type="text" id="est-registracion" placeholder="ej. AP" maxlength="10">
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Código tal y cual aparece en el informe del Registrador.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-estudiante')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarEstudiante()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Competencia -->
 <div id="modal-competencia" class="modal-overlay">
   <div class="modal">
@@ -2732,7 +2819,8 @@ let db = {
   bancoCompetencias: [], // banco/framework de competencias por programa (antes hardcodeado en ALL_COMPETENCIAS)
   laos: [],              // Learning Assessment Opportunities — entidades propias, ligadas a curso + competencias
   rubricas: [],           // rúbricas (grid criterios × niveles), ligadas 1:1 a un LAO
-  escalasNiveles: []      // escalas de niveles configurables (títulos/descripciones/agrupaciones), con alcance global o por programa
+  escalasNiveles: [],     // escalas de niveles configurables (títulos/descripciones/agrupaciones), con alcance global o por programa
+  estudiantes: []         // Fase B: roster de estudiantes — {id, numero, nombre, programaId, anioComienzo, registracion, secuencia}
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2756,7 +2844,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2790,6 +2878,7 @@ function loadDB() {
   if (!db.laos)         db.laos = [];
   if (!db.rubricas)     db.rubricas = [];
   if (!db.escalasNiveles) db.escalasNiveles = [];
+  if (!db.estudiantes)  db.estudiantes = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -2879,6 +2968,7 @@ function showTab(tabId, btn) {
   if (tabId === 'solicitudes') renderSolicitudes();
   if (tabId === 'configuracion') renderConfiguracion();
   if (tabId === 'departamentos') renderDepartamentosProgramas();
+  if (tabId === 'estudiantes') renderEstudiantesTab();
 }
 
 function openModal(id) {
@@ -3001,6 +3091,207 @@ function _ensureCursosMigratedToProgramCatalog() {
     }
   });
   if (changed) saveDB();
+}
+
+// ======================== FASE B: ESTUDIANTES ========================
+// Roster de estudiantes: entidad propia (db.estudiantes), fuente adicional
+// que NO reemplaza ni modifica avaluos/asesorias existentes. Acceso: admin
+// y decano ven todo; director/coordinador ven los estudiantes de sus
+// programas (reutiliza canSeeProgram()); profesor-asesor ve sus asesorados
+// (reutiliza currentUser.efectivo.advisees, ya poblado por asesorias).
+function canSeeEstudiante(est) {
+  if (!currentUser) return false;
+  if (currentUser.rol === 'admin' || currentUser.rol === 'decano') return true;
+  const e = currentUser.efectivo;
+  if ((e?.isDirector || e?.isCoordinator)) {
+    const prog = db.programas.find(p => p.id === est.programaId);
+    if (canSeeProgram(prog?.nombre)) return true;
+  }
+  if (e?.advisees?.includes(est.numero)) return true;
+  return false;
+}
+
+function _populateEstudianteProgramaSelect() {
+  _ensureProgramCatalogSeeded();
+  const sel = document.getElementById('est-programa');
+  if (!sel) return;
+  const prev = sel.value;
+  const ordenados = [...db.programas].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  sel.innerHTML = '<option value="">— Seleccionar —</option>' +
+    ordenados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  sel.value = prev;
+}
+
+// Arma las opciones de Secuencia para el programa seleccionado: Regular
+// siempre, las opcionales (Desacelerada/Acelerada/Vespertina) solo si ese
+// programa las tiene activas, y "Plan de Estudio" siempre al final (aplica
+// fuera de las secuencias oficiales del programa, no se configura por
+// programa). Si todavía no hay programa seleccionado, muestra el mínimo
+// (Regular + Plan de Estudio) para no bloquear el formulario.
+function _populateEstudianteSecuenciaSelect() {
+  const sel = document.getElementById('est-secuencia');
+  if (!sel) return;
+  const prev = sel.value;
+  const programaId = document.getElementById('est-programa')?.value || '';
+  const prog = db.programas.find(p => p.id === programaId);
+  const opciones = [];
+  SECUENCIAS_CONFIG.forEach(({ key, label, opcional }) => {
+    if (!opcional) { opciones.push(label); return; }
+    if (prog?.secuencias?.[key]?.activa) opciones.push(label);
+  });
+  opciones.push('Plan de Estudio');
+  sel.innerHTML = opciones.map(o => `<option value="${o}">${o}</option>`).join('');
+  sel.value = opciones.includes(prev) ? prev : opciones[0];
+}
+
+function abrirNuevoEstudiante() {
+  document.getElementById('modal-estudiante-title').textContent = '🎓 Nuevo Estudiante';
+  document.getElementById('est-edit-id').value = '';
+  document.getElementById('est-numero').value = '';
+  document.getElementById('est-numero').disabled = false;
+  document.getElementById('est-nombre').value = '';
+  document.getElementById('est-anio-comienzo').value = '';
+  document.getElementById('est-registracion').value = '';
+  _populateEstudianteProgramaSelect();
+  document.getElementById('est-programa').value = '';
+  _populateEstudianteSecuenciaSelect();
+  openModal('modal-estudiante');
+}
+
+function abrirEditarEstudiante(id) {
+  const est = db.estudiantes.find(x => x.id === id);
+  if (!est) return;
+  document.getElementById('modal-estudiante-title').textContent = '✏️ Editar Estudiante';
+  document.getElementById('est-edit-id').value = id;
+  document.getElementById('est-numero').value = est.numero;
+  document.getElementById('est-numero').disabled = true; // no editable tras creado — es la clave de referencia
+  document.getElementById('est-nombre').value = est.nombre;
+  document.getElementById('est-anio-comienzo').value = est.anioComienzo || '';
+  document.getElementById('est-registracion').value = est.registracion || '';
+  _populateEstudianteProgramaSelect();
+  document.getElementById('est-programa').value = est.programaId || '';
+  _populateEstudianteSecuenciaSelect();
+  document.getElementById('est-secuencia').value = est.secuencia || '';
+  openModal('modal-estudiante');
+}
+
+function guardarEstudiante() {
+  const numero = document.getElementById('est-numero').value.trim();
+  const nombre = document.getElementById('est-nombre').value.trim();
+  const programaId = document.getElementById('est-programa').value;
+  const anioComienzo = document.getElementById('est-anio-comienzo').value.trim();
+  const registracion = document.getElementById('est-registracion').value.trim();
+  const secuencia = document.getElementById('est-secuencia').value;
+  if (!numero || !nombre) { notify('Número y nombre son requeridos', '⚠️'); return; }
+  if (!programaId) { notify('Selecciona un programa', '⚠️'); return; }
+  if (anioComienzo && !/^\d{4}-\d{2}$/.test(anioComienzo)) {
+    notify('Año Comienzo debe tener el formato AAAA-AA (ej. 2025-26)', '⚠️'); return;
+  }
+  const editId = document.getElementById('est-edit-id').value;
+  if (editId) {
+    const est = db.estudiantes.find(x => x.id === editId);
+    if (est) {
+      est.nombre = nombre; est.programaId = programaId; est.anioComienzo = anioComienzo;
+      est.registracion = registracion; est.secuencia = secuencia;
+      est.fechaActualizacion = new Date().toISOString();
+    }
+  } else {
+    if (db.estudiantes.some(x => x.numero === numero)) {
+      notify('Ya existe un estudiante con ese número', '⚠️'); return;
+    }
+    db.estudiantes.push({
+      id: 'est_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      numero, nombre, programaId, anioComienzo, registracion, secuencia,
+      fechaCreacion: new Date().toISOString(), fechaActualizacion: new Date().toISOString(),
+    });
+  }
+  saveDB();
+  closeModal('modal-estudiante');
+  renderEstudiantesTab();
+  notify('Estudiante guardado ✓');
+}
+
+function eliminarEstudiante(id) {
+  const est = db.estudiantes.find(x => x.id === id);
+  if (!est) return;
+  if (!confirm(`¿Eliminar a ${est.nombre} (${est.numero}) del roster?`)) return;
+  db.estudiantes = db.estudiantes.filter(x => x.id !== id);
+  saveDB();
+  renderEstudiantesTab();
+  notify('Estudiante eliminado', '🗑');
+}
+
+function renderEstudiantesTab() {
+  const el = document.getElementById('tabla-estudiantes');
+  const notice = document.getElementById('readonly-notice-estudiantes');
+  const soloLectura = authIsReadonly('estudiantes');
+  if (notice) notice.style.display = soloLectura ? 'flex' : 'none';
+  const btnNuevo = document.getElementById('btn-nuevo-estudiante');
+  if (btnNuevo) btnNuevo.style.display = (!authCan('estudiantes') || soloLectura) ? 'none' : '';
+
+  const visibles = db.estudiantes.filter(canSeeEstudiante);
+
+  const progSel = document.getElementById('est-filtro-programa');
+  if (progSel) {
+    const prev = progSel.value;
+    const progNombres = [...new Set(visibles.map(e => db.programas.find(p => p.id === e.programaId)?.nombre).filter(Boolean))].sort();
+    progSel.innerHTML = '<option value="">Todos</option>' + progNombres.map(n => `<option value="${n}">${n}</option>`).join('');
+    progSel.value = prev;
+  }
+  const anioSel = document.getElementById('est-filtro-anio');
+  if (anioSel) {
+    const prev = anioSel.value;
+    const anios = [...new Set(visibles.map(e => e.anioComienzo).filter(Boolean))].sort().reverse();
+    anioSel.innerHTML = '<option value="">Todos</option>' + anios.map(a => `<option value="${a}">${a}</option>`).join('');
+    anioSel.value = prev;
+  }
+
+  if (!visibles.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🎓</div><p>${db.estudiantes.length ? 'No tienes estudiantes visibles con tu acceso actual' : 'Aún no hay estudiantes registrados'}</p></div>`;
+    return;
+  }
+
+  const busqueda = (document.getElementById('est-buscar')?.value || '').trim().toLowerCase();
+  const filtroPrograma = document.getElementById('est-filtro-programa')?.value || '';
+  const filtroAnio = document.getElementById('est-filtro-anio')?.value || '';
+  const filtroSecuencia = document.getElementById('est-filtro-secuencia')?.value || '';
+
+  let filtrados = visibles.filter(e => {
+    const prog = db.programas.find(p => p.id === e.programaId);
+    if (busqueda && !`${e.numero} ${e.nombre}`.toLowerCase().includes(busqueda)) return false;
+    if (filtroPrograma && prog?.nombre !== filtroPrograma) return false;
+    if (filtroAnio && e.anioComienzo !== filtroAnio) return false;
+    if (filtroSecuencia === '__sin_asignar__') { if (e.secuencia) return false; }
+    else if (filtroSecuencia && e.secuencia !== filtroSecuencia) return false;
+    return true;
+  });
+
+  filtrados.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+
+  if (!filtrados.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>Sin resultados para esos filtros</p></div>';
+    return;
+  }
+
+  const puedeEditar = authCan('estudiantes') && !soloLectura;
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Secuencia</th><th>Registración</th>${puedeEditar ? '<th>Acciones</th>' : ''}</tr></thead>
+    <tbody>${filtrados.map(e => {
+      const prog = db.programas.find(p => p.id === e.programaId);
+      return `<tr>
+        <td>${e.numero}</td>
+        <td>${e.nombre}</td>
+        <td>${prog ? `<span class="badge badge-blue">${prog.nombre}</span>` : '<span class="badge badge-red">Sin programa</span>'}</td>
+        <td>${e.anioComienzo || '—'}</td>
+        <td>${e.secuencia ? `<span class="badge badge-gold">${e.secuencia}</span>` : '—'}</td>
+        <td>${e.registracion || '—'}</td>
+        ${puedeEditar ? `<td class="actions-cell">
+          <button class="btn btn-outline btn-sm" onclick="abrirEditarEstudiante('${e.id}')">✏️</button>
+          <button class="btn btn-outline btn-sm" onclick="eliminarEstudiante('${e.id}')">🗑</button>
+        </td>` : ''}
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
 }
 
 function renderCursos() {
@@ -4008,6 +4299,7 @@ function _secuenciasVacias() {
     regular:      { duracion: { anios: null, trimestres: null } },
     desacelerada: { activa: false, duracion: { anios: null, trimestres: null } },
     acelerada:    { activa: false, duracion: { anios: null, trimestres: null } },
+    vespertina:   { activa: false, duracion: { anios: null, trimestres: null } },
   };
 }
 
@@ -4034,9 +4326,15 @@ function _ensureFaseA_ProgramasEstudiantes() {
   });
 
   // 3) Asegurar que todo programa (incluyendo los ya existentes de antes de
-  // esta fase) tenga su estructura de Secuencias
+  // esta fase) tenga su estructura de Secuencias, y que tenga TODAS las
+  // sub-claves esperadas (ej. "vespertina" se añadió después de la primera
+  // entrega de esta fase — esto la rellena en programas que ya se habían
+  // migrado sin ella, sin pisar lo que el admin ya haya configurado)
   db.programas.forEach(p => {
-    if (!p.secuencias) { p.secuencias = _secuenciasVacias(); changed = true; }
+    if (!p.secuencias) { p.secuencias = _secuenciasVacias(); changed = true; return; }
+    Object.keys(_secuenciasVacias()).forEach(key => {
+      if (!p.secuencias[key]) { p.secuencias[key] = _secuenciasVacias()[key]; changed = true; }
+    });
   });
 
   // 4) Sembrar los códigos de programa del informe del Registrador en
@@ -5148,6 +5446,7 @@ const SECUENCIAS_CONFIG = [
   { key: 'regular',      label: 'Regular',      opcional: false },
   { key: 'desacelerada', label: 'Desacelerada', opcional: true },
   { key: 'acelerada',    label: 'Acelerada',     opcional: true },
+  { key: 'vespertina',   label: 'Vespertina',    opcional: true },
 ];
 function _secuenciasEditorHTML(secuencias) {
   const s = secuencias || _secuenciasVacias();
@@ -8784,12 +9083,12 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // ── Role -> tab access map ──────────────────────────────────
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
-  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true, escalas:true },
-  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false },
+  admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true, escalas:true, estudiantes:true },
+  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false, estudiantes:false },
 };
 
 function setViewAs(role) {
