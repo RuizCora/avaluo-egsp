@@ -1482,7 +1482,7 @@
     <span id="btn-nuevo-estudiante"><button class="btn btn-primary" onclick="abrirNuevoEstudiante()">+ Nuevo Estudiante</button></span>
   </div>
 
-  <!-- Roster de nuevo ingreso del Registrador (Fase C) — solo visible con acceso de escritura -->
+  <!-- Roster de nuevo ingreso del Registrador (Fase C) + plantilla propia con Secuencia (Fase D) — solo visible con acceso de escritura -->
   <div id="estudiantes-dropzone-wrap" style="display:none;margin-bottom:18px">
     <div id="estudiantes-dropzone"
       style="border:2.5px dashed var(--gold);border-radius:14px;background:#fef9ee;padding:22px 20px;text-align:center;cursor:pointer;transition:all 0.2s"
@@ -1491,10 +1491,15 @@
       ondragleave="this.style.background='#fef9ee'"
       ondrop="handleEstudiantesRosterDrop(event)">
       <div style="font-size:1.8rem;margin-bottom:6px">📂</div>
-      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra el informe de nuevo ingreso del Registrador aquí</div>
-      <div style="font-size:0.78rem;color:var(--muted)">Columnas esperadas: NOMBRE, NÚMERO ESTUDIANTE, PROGRAMA, AÑO COMIENZO, REGISTRACIÓN</div>
+      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra aquí el informe del Registrador o una plantilla ya completada</div>
+      <div style="font-size:0.78rem;color:var(--muted)">Informe del Registrador (.txt/.csv): NOMBRE, NÚMERO ESTUDIANTE, PROGRAMA, AÑO COMIENZO, REGISTRACIÓN</div>
+      <div style="font-size:0.78rem;color:var(--muted)">Plantilla del sistema (.xlsx): incluye además la Secuencia</div>
       <div style="font-size:0.76rem;color:var(--muted);margin-top:4px">O haz clic para seleccionar archivo</div>
-      <input type="file" id="estudiantes-file-input" accept=".txt,.csv" style="display:none" onchange="handleEstudiantesRosterFileInput(this)">
+      <input type="file" id="estudiantes-file-input" accept=".txt,.csv,.xlsx" style="display:none" onchange="handleEstudiantesRosterFileInput(this)">
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn btn-outline btn-sm" onclick="descargarPlantillaEstudiantes()">📥 Descargar plantilla (.xlsx)</button>
+      <span style="font-size:0.78rem;color:var(--muted)">Usa el filtro de Programa de abajo para escoger el programa de la plantilla — incluye la lista desplegable de Secuencia.</span>
     </div>
   </div>
 
@@ -3408,6 +3413,24 @@ function handleEstudiantesRosterFileInput(input) {
   input.value = '';
 }
 function processEstudiantesRosterFile(file) {
+  const esXlsx = /\.xlsx$/i.test(file.name);
+  if (esXlsx) {
+    // Plantilla generada por el sistema (Fase D) — trae Programa por nombre y Secuencia.
+    file.arrayBuffer().then(buf => {
+      const registros = parseRosterEstudiantesXlsx(buf);
+      if (!registros.length) {
+        notify('No se pudo leer ningún estudiante de esa plantilla — revisa el formato', '⚠️');
+        return;
+      }
+      _importEstudiantesData = _prepararImportEstudiantesXlsx(registros);
+      const filtroEl = document.getElementById('import-est-filtro');
+      if (filtroEl) filtroEl.value = '';
+      renderImportEstudiantesPreview();
+      openModal('modal-importar-estudiantes');
+    }).catch(() => notify('No se pudo leer ese archivo .xlsx', '⚠️'));
+    return;
+  }
+  // Informe crudo de nuevo ingreso del Registrador (Fase C) — texto Windows-1252.
   const reader = new FileReader();
   reader.onload = (e) => {
     const registros = parseRosterEstudiantes(e.target.result);
@@ -3439,40 +3462,48 @@ function renderImportEstudiantesPreview() {
   const resumenEl = document.getElementById('import-est-resumen');
   if (!_importEstudiantesData) { if (el) el.innerHTML = ''; if (resumenEl) resumenEl.innerHTML = ''; return; }
 
+  const esPlantilla = _importEstudiantesData.some(r => r._origenPlantilla);
   const nuevos = _importEstudiantesData.filter(r => r.esNuevo).length;
   const actualizar = _importEstudiantesData.length - nuevos;
   const sinPrograma = _importEstudiantesData.filter(r => !r.programaId).length;
   const sinDatos = _importEstudiantesData.filter(r => !r.anioComienzo || !r.registracion).length;
+  const secuenciaIgnorada = _importEstudiantesData.filter(r => r._origenPlantilla && r.secuenciaOriginal && r.secuenciaOriginal !== r.secuencia).length;
   resumenEl.innerHTML = `${_importEstudiantesData.length} estudiante(s) en el archivo — ` +
     `<strong>${nuevos} nuevo(s)</strong>, <strong>${actualizar} a actualizar</strong>` +
-    (sinPrograma ? `, <span style="color:var(--rust)"><strong>${sinPrograma} con código de programa no reconocido</strong></span> (se importan igual, sin programa — revisar luego)` : '') +
-    (sinDatos ? `, ${sinDatos} con Año Comienzo o Registración en blanco (se importan igual)` : '');
+    (sinPrograma ? `, <span style="color:var(--rust)"><strong>${sinPrograma} con ${esPlantilla ? 'programa' : 'código de programa'} no reconocido</strong></span> (se importan igual, sin programa — revisar luego)` : '') +
+    (sinDatos ? `, ${sinDatos} con Año Comienzo o Registración en blanco (se importan igual)` : '') +
+    (secuenciaIgnorada ? `, <span style="color:var(--rust)"><strong>${secuenciaIgnorada} con Secuencia no válida para su programa</strong></span> (se ignora esa Secuencia, se importa el resto)` : '');
 
   const filtro = (document.getElementById('import-est-filtro')?.value || '').trim().toLowerCase();
   const filtrados = _importEstudiantesData.filter(r => !filtro || `${r.numero} ${r.nombre}`.toLowerCase().includes(filtro));
 
   el.innerHTML = `<table>
     <thead><tr>
-      <th style="width:30px"></th><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Registración</th><th>Estado</th>
+      <th style="width:30px"></th><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th>${esPlantilla ? '<th>Secuencia</th>' : ''}<th>Registración</th><th>Estado</th>
     </tr></thead>
     <tbody>${filtrados.map(r => `<tr>
       <td><input type="checkbox" ${r.seleccionado ? 'checked' : ''} onchange="_toggleImportEstudianteRow('${r.numero}', this.checked)"></td>
       <td>${r.numero}</td>
       <td>${r.nombre}</td>
-      <td>${r.programaId ? r.programaNombre : `<span class="badge badge-rust">Sin reconocer: ${r.codigoPrograma || '—'}</span>`}</td>
+      <td>${r.programaId ? r.programaNombre : `<span class="badge badge-rust">Sin reconocer: ${r.programaNombre || r.codigoPrograma || '—'}</span>`}</td>
       <td>${r.anioComienzo || '<span style="color:var(--muted)">—</span>'}</td>
+      ${esPlantilla ? `<td>${r.secuencia || '<span style="color:var(--muted)">—</span>'}</td>` : ''}
       <td>${r.registracion || '<span style="color:var(--muted)">—</span>'}</td>
       <td>${r.esNuevo ? '<span class="badge badge-green">Nuevo</span>' : '<span class="badge badge-blue">Actualizar</span>'}</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
 
-// Aplica la importación de los registros seleccionados. Los estudiantes
-// nuevos se crean con Secuencia vacía (no viene en este archivo — se asigna
-// luego manualmente o vía la plantilla de Fase D). Los ya existentes
-// actualizan nombre/programa/año/registración, pero su Secuencia ya
-// asignada NUNCA se sobreescribe con este import, y un código de programa
-// no reconocido en esta fila no borra el programa que el estudiante ya tenía.
+// Aplica la importación de los registros seleccionados.
+// - Informe crudo del Registrador (Fase C, sin _origenPlantilla): nunca trae
+//   Secuencia, así que los nuevos se crean con Secuencia vacía y los
+//   existentes NUNCA se tocan en su Secuencia ya asignada. Un código de
+//   programa no reconocido en esta fila no borra el programa que el
+//   estudiante ya tenía.
+// - Plantilla del sistema (Fase D, _origenPlantilla): SÍ trae Secuencia
+//   (validada contra las opciones del programa en _prepararImportEstudiantesXlsx)
+//   y por eso SÍ se aplica, tanto a estudiantes nuevos como existentes — es
+//   el propósito de esta vía de entrada.
 function confirmarImportarEstudiantes() {
   if (!_importEstudiantesData) return;
   const seleccionados = _importEstudiantesData.filter(r => r.seleccionado);
@@ -3486,6 +3517,7 @@ function confirmarImportarEstudiantes() {
         if (r.programaId) est.programaId = r.programaId;
         est.anioComienzo = r.anioComienzo;
         est.registracion = r.registracion;
+        if (r._origenPlantilla && r.secuencia) est.secuencia = r.secuencia;
         est.fechaActualizacion = new Date().toISOString();
         actualizados++;
       }
@@ -3493,7 +3525,8 @@ function confirmarImportarEstudiantes() {
       db.estudiantes.push({
         id: 'est_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + (_seq++),
         numero: r.numero, nombre: r.nombre, programaId: r.programaId,
-        anioComienzo: r.anioComienzo, registracion: r.registracion, secuencia: '',
+        anioComienzo: r.anioComienzo, registracion: r.registracion,
+        secuencia: (r._origenPlantilla && r.secuencia) ? r.secuencia : '',
         fechaCreacion: new Date().toISOString(), fechaActualizacion: new Date().toISOString(),
       });
       creados++;
@@ -3504,6 +3537,343 @@ function confirmarImportarEstudiantes() {
   _importEstudiantesData = null;
   renderEstudiantesTab();
   notify(`Importación completa: ${creados} nuevo(s), ${actualizados} actualizado(s) ✓`);
+}
+
+// ======================== FASE D: Plantilla Excel con Secuencia (dropdown nativo) ========================
+// La librería SheetJS que ya carga la aplicación (xlsx.full.min.js, Community
+// Edition) puede LEER archivos .xlsx sin problema, pero su API pública no
+// tiene forma de ESCRIBIR validación de datos (el "dropdown" nativo de Excel/
+// Google Sheets/LibreOffice) — se comprobó vaciando su API (`XLSX.utils`) y
+// además inspeccionando el XML que produce: nunca incluye <dataValidations>.
+// Por eso, solo para esta plantilla, se construye el archivo .xlsx a mano:
+// un .xlsx es un .zip con partes XML adentro (formato OOXML). Aquí se arma
+// ese .zip (sin compresión, método STORE — válido según el estándar ZIP y
+// evita tener que implementar DEFLATE) y las partes XML mínimas necesarias,
+// incluyendo un <dataValidation type="list"> real en la hoja. Se validó que
+// el resultado abre correctamente (incluyendo el dropdown) tanto en
+// LibreOffice como leído de vuelta con openpyxl antes de integrarlo aquí.
+
+// ---- CRC32 (requerido por el encabezado de cada archivo dentro del .zip) ----
+const _XLSX_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function _xlsxCrc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = _XLSX_CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ---- Empaquetador ZIP mínimo (método STORE, sin compresión) ----
+// files: [{ name: 'xl/worksheets/sheet1.xml', data: string|Uint8Array }]
+// Devuelve un Uint8Array con el .zip completo (headers locales + directorio
+// central + EOCD), suficiente para que Excel/LibreOffice/Google Sheets lo
+// reconozcan como .xlsx válido.
+function _construirZipStore(files) {
+  const encoder = new TextEncoder();
+  const now = new Date();
+  const dosTime = ((now.getHours() & 0x1F) << 11) | ((now.getMinutes() & 0x3F) << 5) | ((now.getSeconds() >> 1) & 0x1F);
+  const dosDate = ((Math.max(0, now.getFullYear() - 1980) & 0x7F) << 9) | (((now.getMonth() + 1) & 0xF) << 5) | (now.getDate() & 0x1F);
+
+  const localChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  files.forEach(f => {
+    const nameBytes = encoder.encode(f.name);
+    const dataBytes = typeof f.data === 'string' ? encoder.encode(f.data) : f.data;
+    const crc = _xlsxCrc32(dataBytes);
+    const size = dataBytes.length;
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true); // bit 11 = nombres en UTF-8
+    local.setUint16(8, 0, true);      // compresión 0 = STORE
+    local.setUint16(10, dosTime, true);
+    local.setUint16(12, dosDate, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, size, true);
+    local.setUint32(22, size, true);
+    local.setUint16(26, nameBytes.length, true);
+    local.setUint16(28, 0, true);
+    localChunks.push(new Uint8Array(local.buffer), nameBytes, dataBytes);
+
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(4, 20, true);
+    central.setUint16(6, 20, true);
+    central.setUint16(8, 0x0800, true);
+    central.setUint16(10, 0, true);
+    central.setUint16(12, dosTime, true);
+    central.setUint16(14, dosDate, true);
+    central.setUint32(16, crc, true);
+    central.setUint32(20, size, true);
+    central.setUint32(24, size, true);
+    central.setUint16(28, nameBytes.length, true);
+    central.setUint16(30, 0, true);
+    central.setUint16(32, 0, true);
+    central.setUint16(34, 0, true);
+    central.setUint16(36, 0, true);
+    central.setUint32(38, 0, true);
+    central.setUint32(42, offset, true);
+    centralChunks.push(new Uint8Array(central.buffer), nameBytes);
+
+    offset += local.buffer.byteLength + nameBytes.length + dataBytes.length;
+  });
+
+  const centralStart = offset;
+  let centralSize = 0;
+  centralChunks.forEach(c => { centralSize += c.length; });
+
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(4, 0, true);
+  eocd.setUint16(6, 0, true);
+  eocd.setUint16(8, files.length, true);
+  eocd.setUint16(10, files.length, true);
+  eocd.setUint32(12, centralSize, true);
+  eocd.setUint32(16, centralStart, true);
+  eocd.setUint16(20, 0, true);
+
+  const totalSize = offset + centralSize + 22;
+  const out = new Uint8Array(totalSize);
+  let p = 0;
+  [...localChunks, ...centralChunks, new Uint8Array(eocd.buffer)].forEach(chunk => { out.set(chunk, p); p += chunk.length; });
+  return out;
+}
+
+function _xlsxXmlEscape(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+function _xlsxColLetter(n) {
+  let s = '';
+  while (n > 0) { const rem = (n - 1) % 26; s = String.fromCharCode(65 + rem) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// headers: array de encabezados de columna
+// rows: array de arrays con los valores de cada fila (strings)
+// dropdownCol: número de columna (1-indexado) que lleva el dropdown (Secuencia)
+// dropdownOptions: opciones del dropdown
+// numRowsMin: cuántas filas (además de las de datos) quedan con el dropdown activo, para captura manual adicional
+function _construirHojaEstudiantesXml(headers, rows, dropdownCol, dropdownOptions, numRowsMin) {
+  const totalDataRows = Math.max(rows.length, numRowsMin || 0);
+  const totalRows = 1 + totalDataRows;
+  const dim = `A1:${_xlsxColLetter(headers.length)}${totalRows}`;
+
+  let rowsXml = '';
+  let headerCells = '';
+  headers.forEach((h, i) => { headerCells += `<c r="${_xlsxColLetter(i + 1)}1" t="inlineStr" s="1"><is><t>${_xlsxXmlEscape(h)}</t></is></c>`; });
+  rowsXml += `<row r="1">${headerCells}</row>`;
+
+  for (let r = 0; r < totalDataRows; r++) {
+    const rowNum = r + 2;
+    const rowData = rows[r] || [];
+    let cells = '';
+    headers.forEach((h, i) => {
+      const val = rowData[i];
+      if (val === undefined || val === null || val === '') return;
+      cells += `<c r="${_xlsxColLetter(i + 1)}${rowNum}" t="inlineStr"><is><t>${_xlsxXmlEscape(val)}</t></is></c>`;
+    });
+    rowsXml += `<row r="${rowNum}">${cells}</row>`;
+  }
+
+  const dvCol = _xlsxColLetter(dropdownCol);
+  const listFormula = dropdownOptions.map(o => _xlsxXmlEscape(o)).join(',');
+  const dvRange = `${dvCol}2:${dvCol}${totalRows}`;
+  const dataValidations = `<dataValidations count="1"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorTitle="Valor no válido" error="Selecciona un valor de la lista." sqref="${dvRange}"><formula1>"${listFormula}"</formula1></dataValidation></dataValidations>`;
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<dimension ref="${dim}"/>
+<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols><col min="1" max="${headers.length}" width="24" customWidth="1"/></cols>
+<sheetData>${rowsXml}</sheetData>
+${dataValidations}
+</worksheet>`;
+}
+
+function _construirXlsxConDropdown({ headers, rows, dropdownCol, dropdownOptions, numRowsMin, nombreHoja }) {
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${_xlsxXmlEscape(nombreHoja || 'Estudiantes')}" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const sheet = _construirHojaEstudiantesXml(headers, rows, dropdownCol, dropdownOptions, numRowsMin);
+
+  return _construirZipStore([
+    { name: '[Content_Types].xml', data: contentTypes },
+    { name: '_rels/.rels', data: rootRels },
+    { name: 'xl/workbook.xml', data: workbook },
+    { name: 'xl/_rels/workbook.xml.rels', data: workbookRels },
+    { name: 'xl/styles.xml', data: styles },
+    { name: 'xl/worksheets/sheet1.xml', data: sheet },
+  ]);
+}
+
+// Encabezados de la plantilla — el orden importa: el importador de la
+// plantilla (parseRosterEstudiantesXlsx) los reconoce por nombre.
+const PLANTILLA_ESTUDIANTES_HEADERS = ['Número', 'Nombre', 'Programa', 'Año Comienzo', 'Secuencia', 'Registración'];
+
+// Arma la lista de opciones de Secuencia para el dropdown de un programa
+// dado, reutilizando exactamente la misma lógica que ya decide qué
+// secuencias mostrar en el formulario de "Nuevo Estudiante"
+// (_populateEstudianteSecuenciaSelect): Regular siempre, las opcionales solo
+// si el programa las tiene activas, y "Plan de Estudio" siempre al final.
+function _opcionesSecuenciaPrograma(prog) {
+  const opciones = [];
+  SECUENCIAS_CONFIG.forEach(({ key, label, opcional }) => {
+    if (!opcional) { opciones.push(label); return; }
+    if (prog?.secuencias?.[key]?.activa) opciones.push(label);
+  });
+  opciones.push('Plan de Estudio');
+  return opciones;
+}
+
+// Genera y descarga la plantilla .xlsx para el programa actualmente
+// seleccionado en el filtro de la pestaña Estudiantes (incluye a sus
+// estudiantes ya registrados, con la Secuencia que ya tengan, más filas en
+// blanco para capturar nuevo ingreso). Requiere que el filtro de Programa
+// no esté en "Todos", porque las opciones del dropdown de Secuencia y el
+// significado de "Año Comienzo" son específicos de cada programa.
+function descargarPlantillaEstudiantes() {
+  const nombrePrograma = document.getElementById('est-filtro-programa')?.value || '';
+  if (!nombrePrograma) {
+    notify('Selecciona un Programa en el filtro antes de descargar la plantilla', '⚠️');
+    return;
+  }
+  const prog = db.programas.find(p => p.nombre === nombrePrograma);
+  if (!prog) { notify('No se encontró ese programa', '⚠️'); return; }
+
+  const opcionesSecuencia = _opcionesSecuenciaPrograma(prog);
+  const estudiantesPrograma = db.estudiantes.filter(e => e.programaId === prog.id);
+  const rows = estudiantesPrograma
+    .slice()
+    .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+    .map(e => [e.numero, e.nombre, prog.nombre, e.anioComienzo || '', e.secuencia || '', e.registracion || '']);
+
+  const bytes = _construirXlsxConDropdown({
+    headers: PLANTILLA_ESTUDIANTES_HEADERS,
+    rows,
+    dropdownCol: 5, // Secuencia
+    dropdownOptions: opcionesSecuencia,
+    numRowsMin: rows.length + 30, // filas extra en blanco para nuevo ingreso, con el dropdown ya activo
+    nombreHoja: 'Estudiantes',
+  });
+
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const nombreArchivo = `Plantilla_Estudiantes_${nombrePrograma.replace(/[^\w-]+/g, '_')}.xlsx`;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  notify(`Plantilla descargada: ${estudiantesPrograma.length} estudiante(s) de ${nombrePrograma} + filas en blanco ✓`, '📥');
+}
+
+// ---- Importador de la plantilla (.xlsx) ----
+// A diferencia del informe crudo del Registrador (que llega por código de
+// programa y nunca trae Secuencia), la plantilla ya trae el nombre del
+// programa tal cual lo usa el catálogo, y sí trae Secuencia — por eso su
+// import SÍ actualiza la Secuencia de estudiantes existentes (es justo el
+// propósito de esta vía). Reutiliza SheetJS (ya cargado en la app) solo para
+// LEER — la limitación de escritura de dropdowns no aplica a la lectura.
+function parseRosterEstudiantesXlsx(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const filas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (!filas.length) return [];
+
+  // Ubica cada columna por el texto de su encabezado (no por posición fija),
+  // para tolerar que alguien reordene columnas en Excel sin romper el import.
+  const encabezado = filas[0].map(h => String(h || '').trim().toLowerCase());
+  const idx = {
+    numero: encabezado.findIndex(h => h.startsWith('número') || h.startsWith('numero')),
+    nombre: encabezado.findIndex(h => h.startsWith('nombre')),
+    programa: encabezado.findIndex(h => h.startsWith('programa')),
+    anioComienzo: encabezado.findIndex(h => h.startsWith('año comienzo') || h.startsWith('ano comienzo')),
+    secuencia: encabezado.findIndex(h => h.startsWith('secuencia')),
+    registracion: encabezado.findIndex(h => h.startsWith('registrac')),
+  };
+  if (idx.numero === -1 || idx.nombre === -1) return []; // no parece la plantilla esperada
+
+  const registros = [];
+  for (let r = 1; r < filas.length; r++) {
+    const fila = filas[r];
+    if (!fila) continue;
+    const numero = String(fila[idx.numero] ?? '').trim();
+    const nombre = String(fila[idx.nombre] ?? '').trim();
+    if (!numero || !/^\d+$/.test(numero) || !nombre) continue; // fila en blanco de captura futura
+    registros.push({
+      nombre,
+      numero,
+      programaNombre: idx.programa !== -1 ? String(fila[idx.programa] ?? '').trim() : '',
+      anioComienzo: idx.anioComienzo !== -1 ? String(fila[idx.anioComienzo] ?? '').trim() : '',
+      secuencia: idx.secuencia !== -1 ? String(fila[idx.secuencia] ?? '').trim() : '',
+      registracion: idx.registracion !== -1 ? String(fila[idx.registracion] ?? '').trim() : '',
+    });
+  }
+  return registros;
+}
+
+// Igual que _prepararImportEstudiantes (Fase C), pero resuelve el programa
+// por NOMBRE (columna "Programa" de la plantilla) en vez de por código, y
+// valida que la Secuencia venga en la lista de opciones válidas para ese
+// programa — si no, se importa igual pero sin Secuencia, para no guardar un
+// valor inventado o mal escrito.
+function _prepararImportEstudiantesXlsx(registros) {
+  return registros.map(r => {
+    const prog = r.programaNombre ? db.programas.find(p => p.nombre === r.programaNombre) : null;
+    const opcionesValidas = prog ? _opcionesSecuenciaPrograma(prog) : [];
+    const secuenciaValida = r.secuencia && opcionesValidas.includes(r.secuencia) ? r.secuencia : '';
+    const existente = db.estudiantes.find(e => e.numero === r.numero);
+    return {
+      ...r,
+      programaId: prog ? prog.id : null,
+      programaNombre: prog ? prog.nombre : (r.programaNombre || null),
+      secuencia: secuenciaValida,
+      secuenciaOriginal: r.secuencia || '',
+      esNuevo: !existente,
+      estudianteIdExistente: existente ? existente.id : null,
+      seleccionado: true,
+      _origenPlantilla: true,
+    };
+  });
 }
 
 function renderCursos() {
