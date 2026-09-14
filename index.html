@@ -1481,6 +1481,23 @@
     </div>
     <span id="btn-nuevo-estudiante"><button class="btn btn-primary" onclick="abrirNuevoEstudiante()">+ Nuevo Estudiante</button></span>
   </div>
+
+  <!-- Roster de nuevo ingreso del Registrador (Fase C) — solo visible con acceso de escritura -->
+  <div id="estudiantes-dropzone-wrap" style="display:none;margin-bottom:18px">
+    <div id="estudiantes-dropzone"
+      style="border:2.5px dashed var(--gold);border-radius:14px;background:#fef9ee;padding:22px 20px;text-align:center;cursor:pointer;transition:all 0.2s"
+      onclick="document.getElementById('estudiantes-file-input').click()"
+      ondragover="event.preventDefault();this.style.background='#fef3c7'"
+      ondragleave="this.style.background='#fef9ee'"
+      ondrop="handleEstudiantesRosterDrop(event)">
+      <div style="font-size:1.8rem;margin-bottom:6px">📂</div>
+      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra el informe de nuevo ingreso del Registrador aquí</div>
+      <div style="font-size:0.78rem;color:var(--muted)">Columnas esperadas: NOMBRE, NÚMERO ESTUDIANTE, PROGRAMA, AÑO COMIENZO, REGISTRACIÓN</div>
+      <div style="font-size:0.76rem;color:var(--muted);margin-top:4px">O haz clic para seleccionar archivo</div>
+      <input type="file" id="estudiantes-file-input" accept=".txt,.csv" style="display:none" onchange="handleEstudiantesRosterFileInput(this)">
+    </div>
+  </div>
+
   <div class="rpt-filter-bar" style="margin-bottom:14px">
     <div class="dash-filter-group" style="flex:1;min-width:200px"><label class="dash-filter-label">🔍 Buscar</label>
       <input type="text" id="est-buscar" placeholder="Número o nombre..." oninput="renderEstudiantesTab()"
@@ -2705,6 +2722,30 @@
   </div>
 </div>
 
+<!-- Modal Importar Roster de Estudiantes (Fase C) -->
+<div id="modal-importar-estudiantes" class="modal-overlay">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-header">
+      <div class="modal-title">🎓 Importar Roster de Estudiantes</div>
+      <button class="modal-close" onclick="closeModal('modal-importar-estudiantes')">✕</button>
+    </div>
+    <div id="import-est-resumen" style="font-size:0.85rem;background:var(--cream);border-radius:8px;padding:10px 14px;margin-bottom:14px"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="toggleAllImportEstudiantes(true)">☑ Seleccionar todos</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllImportEstudiantes(false)">☐ Deseleccionar todos</button>
+      </div>
+      <input type="text" id="import-est-filtro" placeholder="🔍 Filtrar por número o nombre..." oninput="renderImportEstudiantesPreview()"
+        style="padding:7px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:0.82rem;min-width:220px">
+    </div>
+    <div id="import-est-preview-body" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-importar-estudiantes')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarImportarEstudiantes()">✓ Importar seleccionados</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Competencia -->
 <div id="modal-competencia" class="modal-overlay">
   <div class="modal">
@@ -3225,7 +3266,10 @@ function renderEstudiantesTab() {
   const soloLectura = authIsReadonly('estudiantes');
   if (notice) notice.style.display = soloLectura ? 'flex' : 'none';
   const btnNuevo = document.getElementById('btn-nuevo-estudiante');
-  if (btnNuevo) btnNuevo.style.display = (!authCan('estudiantes') || soloLectura) ? 'none' : '';
+  const puedeEditarGlobal = authCan('estudiantes') && !soloLectura;
+  if (btnNuevo) btnNuevo.style.display = puedeEditarGlobal ? '' : 'none';
+  const dropWrap = document.getElementById('estudiantes-dropzone-wrap');
+  if (dropWrap) dropWrap.style.display = puedeEditarGlobal ? '' : 'none';
 
   const visibles = db.estudiantes.filter(canSeeEstudiante);
 
@@ -3271,7 +3315,7 @@ function renderEstudiantesTab() {
     return;
   }
 
-  const puedeEditar = authCan('estudiantes') && !soloLectura;
+  const puedeEditar = puedeEditarGlobal;
   el.innerHTML = `<div class="table-wrap"><table>
     <thead><tr><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Secuencia</th><th>Registración</th>${puedeEditar ? '<th>Acciones</th>' : ''}</tr></thead>
     <tbody>${filtrados.map(e => {
@@ -3290,6 +3334,176 @@ function renderEstudiantesTab() {
       </tr>`;
     }).join('')}</tbody>
   </table></div>`;
+}
+
+// ======================== FASE C: Importar Roster de Estudiantes (Registrador) ========================
+// Archivo de nuevo ingreso del Registrador: texto delimitado por ";", con
+// columnas NOMBRE / NÚMERO ESTUDIANTE / PROGRAMA (código) / AÑO COMIENZO /
+// REGISTRACIÓN. El archivo NO está en UTF-8 — viene en Windows-1252/Latin-1
+// del sistema del Registrador (por eso las Ñ/Ó/Á se ven corruptas si se lee
+// como UTF-8) — se lee explícitamente con readAsText(file, 'windows-1252').
+function parseRosterEstudiantes(text) {
+  const lineas = text.split(/\r?\n/);
+  const registros = [];
+  lineas.forEach(linea => {
+    if (!linea.trim()) return; // línea en blanco (ej. la última del archivo)
+    const partes = linea.split(';').map(p => p.trim());
+    const [nombre, numero, codigoPrograma] = partes;
+    // El número de estudiante debe ser numérico — así se descarta el
+    // encabezado ("NÚMERO ESTUDIANTE") y cualquier fila sin datos reales,
+    // sin necesidad de detectar el encabezado por texto/idioma.
+    if (!numero || !/^\d+$/.test(numero) || !nombre) return;
+    registros.push({
+      nombre,
+      numero,
+      codigoPrograma: codigoPrograma || '',
+      anioComienzo: (partes[3] || '').trim(),
+      registracion: (partes[4] || '').trim(),
+    });
+  });
+  return registros;
+}
+
+// Resuelve el código de programa del informe a un programaId real del
+// catálogo, vía codigosProg (sembrado en Fase A). Devuelve null si el
+// código no se reconoce — el registro se importa igual, sin programa
+// asignado, para revisión manual, en vez de bloquear la fila.
+function _resolverProgramaIdPorCodigoEstudiante(codigo) {
+  if (!codigo) return null;
+  const entry = db.codigosProg.find(cp => cp.codigo?.toUpperCase() === codigo.toUpperCase());
+  if (!entry) return null;
+  const prog = db.programas.find(p => p.nombre === entry.programa);
+  return prog ? prog.id : null;
+}
+
+// Empareja cada registro del archivo contra db.estudiantes existente (por
+// número) para distinguir "nuevo" de "actualizar" antes de mostrar la vista
+// previa.
+function _prepararImportEstudiantes(registros) {
+  return registros.map(r => {
+    const programaId = _resolverProgramaIdPorCodigoEstudiante(r.codigoPrograma);
+    const existente = db.estudiantes.find(e => e.numero === r.numero);
+    return {
+      ...r,
+      programaId,
+      programaNombre: programaId ? (db.programas.find(p => p.id === programaId)?.nombre || null) : null,
+      esNuevo: !existente,
+      estudianteIdExistente: existente ? existente.id : null,
+      seleccionado: true,
+    };
+  });
+}
+
+let _importEstudiantesData = null;
+
+function handleEstudiantesRosterDrop(event) {
+  event.preventDefault();
+  document.getElementById('estudiantes-dropzone').style.background = '#fef9ee';
+  const file = event.dataTransfer.files[0];
+  if (file) processEstudiantesRosterFile(file);
+}
+function handleEstudiantesRosterFileInput(input) {
+  const file = input.files[0];
+  if (file) processEstudiantesRosterFile(file);
+  input.value = '';
+}
+function processEstudiantesRosterFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const registros = parseRosterEstudiantes(e.target.result);
+    if (!registros.length) {
+      notify('No se pudo leer ningún estudiante de ese archivo — revisa el formato', '⚠️');
+      return;
+    }
+    _importEstudiantesData = _prepararImportEstudiantes(registros);
+    const filtroEl = document.getElementById('import-est-filtro');
+    if (filtroEl) filtroEl.value = '';
+    renderImportEstudiantesPreview();
+    openModal('modal-importar-estudiantes');
+  };
+  reader.readAsText(file, 'windows-1252');
+}
+
+function toggleAllImportEstudiantes(valor) {
+  if (!_importEstudiantesData) return;
+  _importEstudiantesData.forEach(r => { r.seleccionado = valor; });
+  renderImportEstudiantesPreview();
+}
+function _toggleImportEstudianteRow(numero, checked) {
+  const r = _importEstudiantesData?.find(x => x.numero === numero);
+  if (r) r.seleccionado = checked;
+}
+
+function renderImportEstudiantesPreview() {
+  const el = document.getElementById('import-est-preview-body');
+  const resumenEl = document.getElementById('import-est-resumen');
+  if (!_importEstudiantesData) { if (el) el.innerHTML = ''; if (resumenEl) resumenEl.innerHTML = ''; return; }
+
+  const nuevos = _importEstudiantesData.filter(r => r.esNuevo).length;
+  const actualizar = _importEstudiantesData.length - nuevos;
+  const sinPrograma = _importEstudiantesData.filter(r => !r.programaId).length;
+  const sinDatos = _importEstudiantesData.filter(r => !r.anioComienzo || !r.registracion).length;
+  resumenEl.innerHTML = `${_importEstudiantesData.length} estudiante(s) en el archivo — ` +
+    `<strong>${nuevos} nuevo(s)</strong>, <strong>${actualizar} a actualizar</strong>` +
+    (sinPrograma ? `, <span style="color:var(--rust)"><strong>${sinPrograma} con código de programa no reconocido</strong></span> (se importan igual, sin programa — revisar luego)` : '') +
+    (sinDatos ? `, ${sinDatos} con Año Comienzo o Registración en blanco (se importan igual)` : '');
+
+  const filtro = (document.getElementById('import-est-filtro')?.value || '').trim().toLowerCase();
+  const filtrados = _importEstudiantesData.filter(r => !filtro || `${r.numero} ${r.nombre}`.toLowerCase().includes(filtro));
+
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th style="width:30px"></th><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Registración</th><th>Estado</th>
+    </tr></thead>
+    <tbody>${filtrados.map(r => `<tr>
+      <td><input type="checkbox" ${r.seleccionado ? 'checked' : ''} onchange="_toggleImportEstudianteRow('${r.numero}', this.checked)"></td>
+      <td>${r.numero}</td>
+      <td>${r.nombre}</td>
+      <td>${r.programaId ? r.programaNombre : `<span class="badge badge-rust">Sin reconocer: ${r.codigoPrograma || '—'}</span>`}</td>
+      <td>${r.anioComienzo || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${r.registracion || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${r.esNuevo ? '<span class="badge badge-green">Nuevo</span>' : '<span class="badge badge-blue">Actualizar</span>'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// Aplica la importación de los registros seleccionados. Los estudiantes
+// nuevos se crean con Secuencia vacía (no viene en este archivo — se asigna
+// luego manualmente o vía la plantilla de Fase D). Los ya existentes
+// actualizan nombre/programa/año/registración, pero su Secuencia ya
+// asignada NUNCA se sobreescribe con este import, y un código de programa
+// no reconocido en esta fila no borra el programa que el estudiante ya tenía.
+function confirmarImportarEstudiantes() {
+  if (!_importEstudiantesData) return;
+  const seleccionados = _importEstudiantesData.filter(r => r.seleccionado);
+  if (!seleccionados.length) { notify('No hay estudiantes seleccionados', '⚠️'); return; }
+  let creados = 0, actualizados = 0, _seq = 0;
+  seleccionados.forEach(r => {
+    if (r.estudianteIdExistente) {
+      const est = db.estudiantes.find(x => x.id === r.estudianteIdExistente);
+      if (est) {
+        est.nombre = r.nombre;
+        if (r.programaId) est.programaId = r.programaId;
+        est.anioComienzo = r.anioComienzo;
+        est.registracion = r.registracion;
+        est.fechaActualizacion = new Date().toISOString();
+        actualizados++;
+      }
+    } else {
+      db.estudiantes.push({
+        id: 'est_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + (_seq++),
+        numero: r.numero, nombre: r.nombre, programaId: r.programaId,
+        anioComienzo: r.anioComienzo, registracion: r.registracion, secuencia: '',
+        fechaCreacion: new Date().toISOString(), fechaActualizacion: new Date().toISOString(),
+      });
+      creados++;
+    }
+  });
+  saveDB();
+  closeModal('modal-importar-estudiantes');
+  _importEstudiantesData = null;
+  renderEstudiantesTab();
+  notify(`Importación completa: ${creados} nuevo(s), ${actualizados} actualizado(s) ✓`);
 }
 
 function renderCursos() {
