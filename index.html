@@ -1214,6 +1214,28 @@
   </div>
 </div>
 
+<!-- Confirmación de borrado masivo (solo admin) — reutilizado para Estudiantes, Secciones y Avalúos -->
+<div id="modal-bulk-delete-confirm" class="modal-overlay">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div class="modal-title">⚠️ Confirmar borrado masivo</div>
+      <button class="modal-close" onclick="closeModal('modal-bulk-delete-confirm')">✕</button>
+    </div>
+    <div style="padding:4px 0 12px">
+      <p id="bulk-delete-msg" style="font-size:0.9rem;margin-bottom:14px"></p>
+      <div class="auth-error" id="bulk-delete-error" style="display:none"></div>
+      <div class="form-group" style="margin-bottom:20px">
+        <label>Confirma tu contraseña de administrador</label>
+        <input type="password" id="bulk-delete-pwd" placeholder="••••••••" class="form-control" onkeydown="if(event.key==='Enter')confirmarBorradoMasivo()">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="closeModal('modal-bulk-delete-confirm')">Cancelar</button>
+        <button class="btn btn-danger" onclick="confirmarBorradoMasivo()">🗑 Eliminar definitivamente</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- View-As Banner -->
 <div id="view-as-banner" style="display:none;background:var(--egsp-coral);color:#fff;padding:6px 24px;font-size:0.8rem;font-weight:700;align-items:center;justify-content:center;gap:12px;letter-spacing:0.03em">
@@ -3320,6 +3342,9 @@ function renderEstudiantesTab() {
   if (dropWrap) dropWrap.style.display = puedeEditarGlobal ? '' : 'none';
 
   const visibles = db.estudiantes.filter(canSeeEstudiante);
+  _estVisiblesActuales = [];
+  // Depura la selección de ids que ya no existen (ej. se borró uno individualmente)
+  _estSeleccionados = new Set([..._estSeleccionados].filter(id => db.estudiantes.some(e => e.id === id)));
 
   const progSel = document.getElementById('est-filtro-programa');
   if (progSel) {
@@ -3364,11 +3389,25 @@ function renderEstudiantesTab() {
   }
 
   const puedeEditar = puedeEditarGlobal;
-  el.innerHTML = `<div class="table-wrap"><table>
-    <thead><tr><th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Secuencia</th><th>Registración</th>${puedeEditar ? '<th>Acciones</th>' : ''}</tr></thead>
+  const esAdmin = currentUser?.rol === 'admin';
+  _estVisiblesActuales = esAdmin ? filtrados.map(e => e.id) : [];
+  const todosSeleccionados = esAdmin && _estVisiblesActuales.length > 0 && _estVisiblesActuales.every(id => _estSeleccionados.has(id));
+
+  const bulkBar = esAdmin ? `
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" ${todosSeleccionados ? 'checked' : ''} onchange="toggleEstSeleccionTodas(this.checked)">
+        Seleccionar todas (${_estVisiblesActuales.length})
+      </label>
+      <button class="btn btn-danger btn-sm" ${_estSeleccionados.size ? '' : 'disabled'} onclick="eliminarEstudiantesSeleccionados()">🗑 Eliminar seleccionados (${_estSeleccionados.size})</button>
+    </div>` : '';
+
+  el.innerHTML = `${bulkBar}<div class="table-wrap"><table>
+    <thead><tr>${esAdmin ? '<th style="width:28px"></th>' : ''}<th>Número</th><th>Nombre</th><th>Programa</th><th>Año Comienzo</th><th>Secuencia</th><th>Registración</th>${puedeEditar ? '<th>Acciones</th>' : ''}</tr></thead>
     <tbody>${filtrados.map(e => {
       const prog = db.programas.find(p => p.id === e.programaId);
       return `<tr>
+        ${esAdmin ? `<td><input type="checkbox" ${_estSeleccionados.has(e.id) ? 'checked' : ''} onchange="toggleEstSeleccion('${e.id}', this.checked)"></td>` : ''}
         <td>${e.numero}</td>
         <td>${e.nombre}</td>
         <td>${prog ? `<span class="badge badge-blue">${prog.nombre}</span>` : '<span class="badge badge-red">Sin programa</span>'}</td>
@@ -6295,17 +6334,31 @@ function renderSecciones() {
     return true;
   });
   const el = document.getElementById('lista-secciones');
+  const esAdmin = currentUser?.rol === 'admin';
+  _secVisiblesActuales = esAdmin ? secs.map(s => s.id) : [];
+  _secSeleccionadas = new Set([..._secSeleccionadas].filter(id => db.secciones.some(s => s.id === id)));
 
   if (!secs.length) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">🏫</div><p>No hay secciones para este filtro</p></div>';
     return;
   }
 
-  el.innerHTML = secs.map(sec => {
+  const todasSecSeleccionadas = esAdmin && _secVisiblesActuales.length > 0 && _secVisiblesActuales.every(id => _secSeleccionadas.has(id));
+  const bulkBarSec = esAdmin ? `
+    <div class="card" style="padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" ${todasSecSeleccionadas ? 'checked' : ''} onchange="toggleSecSeleccionTodas(this.checked)">
+        Seleccionar todas (${_secVisiblesActuales.length})
+      </label>
+      <button class="btn btn-danger btn-sm" ${_secSeleccionadas.size ? '' : 'disabled'} onclick="eliminarSeccionesSeleccionadas()">🗑 Eliminar seleccionadas (${_secSeleccionadas.size})</button>
+    </div>` : '';
+
+  el.innerHTML = bulkBarSec + secs.map(sec => {
     const curso = db.cursos.find(c => c.id === sec.cursoId);
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-header">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          ${esAdmin ? `<input type="checkbox" ${_secSeleccionadas.has(sec.id) ? 'checked' : ''} onchange="toggleSecSeleccion('${sec.id}', this.checked)">` : ''}
           <div class="card-title">
             <span class="competencia-code">${curso?.codigo || '—'}</span>
             Sec. <strong>${sec.numero}</strong>${sec.semestre ? ` · <span style="font-weight:400;font-size:0.9rem">${sec.semestre}</span>` : ''}
@@ -7058,17 +7111,30 @@ function renderBaseDatos() {
     return true;
   });
   const el = document.getElementById('tabla-base-datos');
+  const esAdmin = currentUser?.rol === 'admin';
+  _avVisiblesActuales = esAdmin ? avaluos.map(a => a.id) : [];
+  _avSeleccionados = new Set([..._avSeleccionados].filter(id => db.avaluos.some(a => a.id === id)));
   if (!avaluos.length) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">🗄️</div><p>No hay avalúos que coincidan con el filtro</p></div>';
     return;
   }
-  el.innerHTML = `<div class="table-wrap"><table>
-    <thead><tr><th>#</th><th>Estudiante</th><th>ID</th><th>Curso</th><th>Sección</th><th>Semestre</th><th>Fecha</th><th>Comp.</th><th>Nota Final</th><th>Acciones</th></tr></thead>
+  const todosAvSeleccionados = esAdmin && _avVisiblesActuales.length > 0 && _avVisiblesActuales.every(id => _avSeleccionados.has(id));
+  const bulkBarAv = esAdmin ? `
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" ${todosAvSeleccionados ? 'checked' : ''} onchange="toggleAvSeleccionTodas(this.checked)">
+        Seleccionar todos (${_avVisiblesActuales.length})
+      </label>
+      <button class="btn btn-danger btn-sm" ${_avSeleccionados.size ? '' : 'disabled'} onclick="eliminarAvaluosSeleccionados()">🗑 Eliminar seleccionados (${_avSeleccionados.size})</button>
+    </div>` : '';
+  el.innerHTML = `${bulkBarAv}<div class="table-wrap"><table>
+    <thead><tr>${esAdmin ? '<th style="width:28px"></th>' : ''}<th>#</th><th>Estudiante</th><th>ID</th><th>Curso</th><th>Sección</th><th>Semestre</th><th>Fecha</th><th>Comp.</th><th>Nota Final</th><th>Acciones</th></tr></thead>
     <tbody>${avaluos.map((a, i) => {
       const nf = a.notaFinal !== '' && a.notaFinal !== undefined ? a.notaFinal : null;
       const nfColor = nf === null ? '' : nf >= 90 ? '#d1fae5' : nf >= 80 ? '#dbeafe' : nf >= 70 ? '#fef3c7' : nf >= 60 ? '#ffedd5' : '#fee2e2';
       const nfText  = nf === null ? '—' : `${nf} <strong>${a.notaFinalLetra||''}</strong>`;
       return `<tr>
+      ${esAdmin ? `<td><input type="checkbox" ${_avSeleccionados.has(a.id) ? 'checked' : ''} onchange="toggleAvSeleccion('${a.id}', this.checked)"></td>` : ''}
       <td style="color:var(--muted)">${i+1}</td>
       <td><strong>${a.estudiante}</strong></td>
       <td>${a.estudianteId||'—'}</td>
@@ -7233,6 +7299,105 @@ function eliminarAvaluo(id) {
   if (!confirm('¿Eliminar este avalúo?')) return;
   db.avaluos = db.avaluos.filter(a => a.id !== id);
   saveDB(); renderBaseDatos(); notify('Avalúo eliminado', '🗑');
+}
+
+// ======================== BORRADO MASIVO (SOLO ADMINISTRADOR) ========================
+// Selección con casillas + "Eliminar seleccionados" para Estudiantes,
+// Secciones y Avalúos. Medida de seguridad explícita: disponible únicamente
+// al rol admin, y toda ejecución exige reconfirmar con la contraseña del
+// administrador logueado (verificada igual que en doLogin(), contra el
+// pwdHash de su propio registro en db.facultad).
+let _estSeleccionados = new Set();
+let _estVisiblesActuales = [];
+let _secSeleccionadas = new Set();
+let _secVisiblesActuales = [];
+let _avSeleccionados = new Set();
+let _avVisiblesActuales = [];
+let _bulkDeleteCtx = null; // { tipo: 'estudiantes'|'secciones'|'avaluos', ids: [...] }
+
+function toggleEstSeleccion(id, checked) {
+  if (checked) _estSeleccionados.add(id); else _estSeleccionados.delete(id);
+  renderEstudiantesTab();
+}
+function toggleEstSeleccionTodas(checked) {
+  _estVisiblesActuales.forEach(id => checked ? _estSeleccionados.add(id) : _estSeleccionados.delete(id));
+  renderEstudiantesTab();
+}
+function eliminarEstudiantesSeleccionados() {
+  abrirConfirmarBorradoMasivo('estudiantes', [..._estSeleccionados]);
+}
+
+function toggleSecSeleccion(id, checked) {
+  if (checked) _secSeleccionadas.add(id); else _secSeleccionadas.delete(id);
+  renderSecciones();
+}
+function toggleSecSeleccionTodas(checked) {
+  _secVisiblesActuales.forEach(id => checked ? _secSeleccionadas.add(id) : _secSeleccionadas.delete(id));
+  renderSecciones();
+}
+function eliminarSeccionesSeleccionadas() {
+  abrirConfirmarBorradoMasivo('secciones', [..._secSeleccionadas]);
+}
+
+function toggleAvSeleccion(id, checked) {
+  if (checked) _avSeleccionados.add(id); else _avSeleccionados.delete(id);
+  renderBaseDatos();
+}
+function toggleAvSeleccionTodas(checked) {
+  _avVisiblesActuales.forEach(id => checked ? _avSeleccionados.add(id) : _avSeleccionados.delete(id));
+  renderBaseDatos();
+}
+function eliminarAvaluosSeleccionados() {
+  abrirConfirmarBorradoMasivo('avaluos', [..._avSeleccionados]);
+}
+
+const BULK_DELETE_ETIQUETAS = { estudiantes: 'estudiante(s)', secciones: 'sección(es) — se borrará también su lista de estudiantes matriculados', avaluos: 'avalúo(s)' };
+
+function abrirConfirmarBorradoMasivo(tipo, ids) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede hacer borrado masivo', '🔒'); return; }
+  if (!ids.length) { notify('No hay elementos seleccionados', '⚠️'); return; }
+  _bulkDeleteCtx = { tipo, ids };
+  document.getElementById('bulk-delete-msg').textContent = `Vas a eliminar ${ids.length} ${BULK_DELETE_ETIQUETAS[tipo] || 'registro(s)'}. Esta acción no se puede deshacer.`;
+  document.getElementById('bulk-delete-pwd').value = '';
+  document.getElementById('bulk-delete-error').style.display = 'none';
+  openModal('modal-bulk-delete-confirm');
+}
+
+async function confirmarBorradoMasivo() {
+  if (!_bulkDeleteCtx || currentUser?.rol !== 'admin') { closeModal('modal-bulk-delete-confirm'); return; }
+  const errEl = document.getElementById('bulk-delete-error');
+  errEl.style.display = 'none';
+  const pwd = document.getElementById('bulk-delete-pwd').value;
+  if (!pwd) { errEl.textContent = 'Ingresa tu contraseña.'; errEl.style.display = 'block'; return; }
+
+  const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase());
+  if (!fac || !fac.pwdHash) { errEl.textContent = 'No se pudo verificar tu cuenta de administrador.'; errEl.style.display = 'block'; return; }
+  const hash = await sha256(pwd);
+  if (hash !== fac.pwdHash) { errEl.textContent = 'Contraseña incorrecta.'; errEl.style.display = 'block'; return; }
+
+  const { tipo, ids } = _bulkDeleteCtx;
+  const idSet = new Set(ids);
+  let n = 0;
+  if (tipo === 'estudiantes') {
+    n = db.estudiantes.filter(e => idSet.has(e.id)).length;
+    db.estudiantes = db.estudiantes.filter(e => !idSet.has(e.id));
+    _estSeleccionados.clear();
+    saveDB(); closeModal('modal-bulk-delete-confirm'); _bulkDeleteCtx = null;
+    renderEstudiantesTab();
+  } else if (tipo === 'secciones') {
+    n = db.secciones.filter(s => idSet.has(s.id)).length;
+    db.secciones = db.secciones.filter(s => !idSet.has(s.id));
+    _secSeleccionadas.clear();
+    saveDB(); closeModal('modal-bulk-delete-confirm'); _bulkDeleteCtx = null;
+    renderSecciones();
+  } else if (tipo === 'avaluos') {
+    n = db.avaluos.filter(a => idSet.has(a.id)).length;
+    db.avaluos = db.avaluos.filter(a => !idSet.has(a.id));
+    _avSeleccionados.clear();
+    saveDB(); closeModal('modal-bulk-delete-confirm'); _bulkDeleteCtx = null;
+    renderBaseDatos();
+  }
+  notify(`${n} eliminado(s) ✓`, '🗑');
 }
 
 // ======================== REPORTES ========================
@@ -12351,28 +12516,28 @@ async function dummyLoadAll() {
   db.departamentos.push(...deptList);
   const deptoIdPor = nombre => deptList.find(d => d.nombre === nombre)?.id || null;
 
-  // ── Programas (ligados al departamento correspondiente por ID) ──
-  const progList = [
-    { id: dummyId('prog'), nombre:'MPH Salud Pública General',  departamentoId: deptoIdPor('Salud Pública'),   tipo:'Maestría',  descripcion:'Programa de maestría en salud pública con concentración general.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('prog'), nombre:'MPH Epidemiología',           departamentoId: deptoIdPor('Epidemiología'),   tipo:'Maestría',  descripcion:'Maestría en salud pública con concentración en epidemiología.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('prog'), nombre:'MPH Bioestadística',          departamentoId: deptoIdPor('Bioestadística'),  tipo:'Maestría',  descripcion:'Maestría en salud pública con concentración en bioestadística.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('prog'), nombre:'DrPH Salud Pública',          departamentoId: deptoIdPor('Salud Pública'),   tipo:'Doctorado', descripcion:'Doctorado en práctica de salud pública.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('prog'), nombre:'MPHE Educación en Salud',     departamentoId: deptoIdPor('Educación Salud'), tipo:'Maestría',  descripcion:'Maestría en educación para la salud.', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+  // ── Programas: se reutiliza el catálogo REAL ya sembrado por
+  // _ensureProgramCatalogSeeded() (Fase A del Sistema de Estudiantes), en vez
+  // de inventar un catálogo paralelo. Así los programas de prueba ya tienen
+  // su configuración de Secuencias y sus códigos en codigosProg, y los
+  // estudiantes/reportes de las Fases B-E tienen datos reales con qué
+  // funcionar. Se listan aquí solo los NOMBRES canónicos a usar.
+  _ensureProgramCatalogSeeded();
+  const PROGRAMAS_DUMMY = [
+    'MPH-General', 'MPH-Epidemiología', 'MPH-Bioestadística',
+    'DrPH-Determinantes Sociales de la Salud', 'MPHE-Educación en Salud Pública',
   ];
-  if (!db.programas) db.programas = [];
-  db.programas.push(...progList);
-  const progIdPor = nombre => progList.find(p => p.nombre === nombre)?.id || null;
 
   // ── Cursos ──
   const cursos = [
-    { id: dummyId('cur'), codigo:'SALP-5010', nombre:'Fundamentos de Salud Pública',           departamento:'Salud Pública',   creditos:'3', descripcion:'Introducción a los conceptos y principios esenciales de salud pública desde una perspectiva ecológica.',    programa:'MPH Salud Pública General', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'SALP-5020', nombre:'Política y Sistemas de Salud',            departamento:'Salud Pública',   creditos:'3', descripcion:'Análisis de políticas de salud, sistemas de financiamiento y gobernanza en Puerto Rico y Latinoamérica.', programa:'MPH Salud Pública General', fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EPID-6010', nombre:'Epidemiología Descriptiva',               departamento:'Epidemiología',   creditos:'3', descripcion:'Distribución y determinantes de enfermedades; medidas de frecuencia y diseños observacionales.',           programa:'MPH Epidemiología',         fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EPID-6020', nombre:'Epidemiología Analítica',                 departamento:'Epidemiología',   creditos:'3', descripcion:'Métodos analíticos, causalidad, sesgo, confusión e interacción en estudios epidemiológicos.',               programa:'MPH Epidemiología',         fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'BIOS-5010', nombre:'Bioestadística I',                        departamento:'Bioestadística',  creditos:'3', descripcion:'Estadística descriptiva, probabilidad, distribuciones e inferencia básica para ciencias de la salud.',      programa:'MPH Bioestadística',        fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'BIOS-5020', nombre:'Bioestadística II',                       departamento:'Bioestadística',  creditos:'3', descripcion:'Regresión lineal y logística, análisis de supervivencia, ANOVA y diseño de estudios.',                      programa:'MPH Bioestadística',        fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'DRPH-7010', nombre:'Liderazgo en Salud Pública',              departamento:'Salud Pública',   creditos:'3', descripcion:'Marcos de liderazgo organizacional y estratégico en organizaciones de salud pública.',                      programa:'DrPH Salud Pública',        fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id: dummyId('cur'), codigo:'EDSA-5010', nombre:'Comunicación en Salud',                   departamento:'Educación Salud', creditos:'3', descripcion:'Estrategias de comunicación efectiva para la promoción de la salud y educación de poblaciones.',             programa:'MPHE Educación en Salud',   fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'SALP-5010', nombre:'Fundamentos de Salud Pública',           departamento:'Salud Pública',   creditos:'3', descripcion:'Introducción a los conceptos y principios esenciales de salud pública desde una perspectiva ecológica.',    programa:PROGRAMAS_DUMMY[0], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'SALP-5020', nombre:'Política y Sistemas de Salud',            departamento:'Salud Pública',   creditos:'3', descripcion:'Análisis de políticas de salud, sistemas de financiamiento y gobernanza en Puerto Rico y Latinoamérica.', programa:PROGRAMAS_DUMMY[0], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'EPID-6010', nombre:'Epidemiología Descriptiva',               departamento:'Epidemiología',   creditos:'3', descripcion:'Distribución y determinantes de enfermedades; medidas de frecuencia y diseños observacionales.',           programa:PROGRAMAS_DUMMY[1], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'EPID-6020', nombre:'Epidemiología Analítica',                 departamento:'Epidemiología',   creditos:'3', descripcion:'Métodos analíticos, causalidad, sesgo, confusión e interacción en estudios epidemiológicos.',               programa:PROGRAMAS_DUMMY[1], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'BIOS-5010', nombre:'Bioestadística I',                        departamento:'Bioestadística',  creditos:'3', descripcion:'Estadística descriptiva, probabilidad, distribuciones e inferencia básica para ciencias de la salud.',      programa:PROGRAMAS_DUMMY[2], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'BIOS-5020', nombre:'Bioestadística II',                       departamento:'Bioestadística',  creditos:'3', descripcion:'Regresión lineal y logística, análisis de supervivencia, ANOVA y diseño de estudios.',                      programa:PROGRAMAS_DUMMY[2], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'DRPH-7010', nombre:'Liderazgo en Salud Pública',              departamento:'Salud Pública',   creditos:'3', descripcion:'Marcos de liderazgo organizacional y estratégico en organizaciones de salud pública.',                      programa:PROGRAMAS_DUMMY[3], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id: dummyId('cur'), codigo:'EDSA-5010', nombre:'Comunicación en Salud',                   departamento:'Educación Salud', creditos:'3', descripcion:'Estrategias de comunicación efectiva para la promoción de la salud y educación de poblaciones.',             programa:PROGRAMAS_DUMMY[4], fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
   ];
   db.cursos.push(...cursos);
 
@@ -12472,6 +12637,32 @@ async function dummyLoadAll() {
   ];
   db.secciones.push(...secciones);
 
+  // ── Estudiantes (Fase B del Sistema de Estudiantes) — un registro real en
+  // db.estudiantes por cada nombre del studentPool, para que la pestaña
+  // Estudiantes, los importadores (Fase C/D) y el reporte R9 · Cohortes
+  // tengan datos con qué funcionar (antes, los estudiantes de prueba solo
+  // existían embebidos dentro de sec.estudiantes y nunca llegaban aquí).
+  const SECUENCIAS_DUMMY = ['Regular','Regular','Regular','Regular','Regular','Regular','Plan de Estudio','Regular','Regular','','Regular','Regular','Regular','Regular','Regular','Regular'];
+  const ANIOS_DUMMY = ['2022-23','2023-24','2024-25'];
+  const estudiantesDummy = studentPool.map((s, i) => {
+    const progNombre = PROGRAMAS_DUMMY[i % PROGRAMAS_DUMMY.length];
+    const prog = (db.programas || []).find(p => p.nombre === progNombre);
+    const codReg = (db.codigosProg || []).find(c => c.programa === progNombre);
+    return {
+      id: s.id,
+      numero: String(900000 + i),
+      nombre: s.nombre.toUpperCase(),
+      programaId: prog ? prog.id : null,
+      anioComienzo: ANIOS_DUMMY[i % ANIOS_DUMMY.length],
+      secuencia: SECUENCIAS_DUMMY[i % SECUENCIAS_DUMMY.length],
+      registracion: codReg ? codReg.codigo : '',
+      fechaCreacion: new Date().toISOString(),
+      [DUMMY_TAG]: true,
+    };
+  });
+  if (!db.estudiantes) db.estudiantes = [];
+  db.estudiantes.push(...estudiantesDummy);
+
   // ── Avalúos ──
   const letraMap = n => n>=93?'A':n>=85?'B+':n>=80?'B':n>=75?'C+':n>=70?'C':n>=60?'D':'F';
   // Actualizado a la escala de 5 niveles (0-4) — antes solo llegaba a 3.
@@ -12567,32 +12758,20 @@ async function dummyLoadAll() {
 
   // ── Facultad ──
   const facultadDummy = [
-    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',      email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',   telefono:'787-555-0101', programas:'MPH Salud Pública General|MPH Epidemiología', coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',        email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',   telefono:'787-555-0102', programas:'MPH Salud Pública General|DrPH Salud Pública', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Prof. Ana Villanueva',   email:'avillanueva.dummy@rcm.upr.edu', departamento:'Bioestadística',  telefono:'787-555-0103', programas:'MPH Bioestadística',                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Dr. Luis Fontánez',      email:'lfontanez.dummy@rcm.upr.edu',   departamento:'Educación Salud', telefono:'787-555-0104', programas:'MPHE Educación en Salud',                      coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',      email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',   telefono:'787-555-0101', programas:'MPH-General|MPH-Epidemiología', coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',        email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',   telefono:'787-555-0102', programas:'MPH-General|DrPH-Determinantes Sociales de la Salud', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Prof. Ana Villanueva',   email:'avillanueva.dummy@rcm.upr.edu', departamento:'Bioestadística',  telefono:'787-555-0103', programas:'MPH-Bioestadística',                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Luis Fontánez',      email:'lfontanez.dummy@rcm.upr.edu',   departamento:'Educación Salud', telefono:'787-555-0104', programas:'MPHE-Educación en Salud Pública',                      coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
   ];
   db.facultad.push(...facultadDummy);
 
-  // ── Códigos de programa de estudiantes (codigosProg) ──
-  if (!db.codigosProg) db.codigosProg = [];
-  const codigosProg = [
-    { id:'cod_dummy_mph1',    codigo:'MPH-SG',  programa:'MPH Salud Pública General'  },
-    { id:'cod_dummy_mph2',    codigo:'MPH-EP',  programa:'MPH Epidemiología'           },
-    { id:'cod_dummy_mph3',    codigo:'MPH-BS',  programa:'MPH Bioestadística'          },
-    { id:'cod_dummy_drph1',   codigo:'DRPH',    programa:'DrPH Salud Pública'          },
-    { id:'cod_dummy_mphe1',   codigo:'MPHE',    programa:'MPHE Educación en Salud'     },
-  ];
-  codigosProg.forEach(cp => {
-    if (!db.codigosProg.find(x=>x.codigo===cp.codigo)) {
-      db.codigosProg.push({...cp, [DUMMY_TAG]:true});
-    }
-  });
-
   // ── Asesorías (student → advisor email) ──
+  // studentId debe ser el NÚMERO del estudiante (no su id interno): así lo
+  // compara canSeeEstudiante()/enrichCurrentUserPermissions() contra
+  // db.estudiantes, igual que en una importación real de asesorías por CSV.
   if (!db.asesorias) db.asesorias = [];
-  const asesoriasDummy = studentPool.map((est,i) => ({
-    studentId: est.id,
+  const asesoriasDummy = estudiantesDummy.map((est,i) => ({
+    studentId: est.numero,
     profesorEmail: i < 6
       ? 'ereyes.dummy@rcm.upr.edu'
       : i < 11
@@ -12619,7 +12798,15 @@ async function dummyLoadAll() {
   newFacultad.forEach(nf => {
     const idx = db.facultad.findIndex(f => (f.email||'').toLowerCase() === nf.email);
     if (idx === -1) db.facultad.push({ id: 'fac_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), ...nf });
-    else if (!db.facultad[idx].rolBase && !db.facultad[idx].esAdmin) db.facultad[idx] = { ...db.facultad[idx], ...nf }; // ya existía como directorio, ahora gana acceso
+    // Ya existía como registro de directorio (con departamento/programas ya
+    // asignados, ej. director/coordinador) — solo se le añaden las
+    // credenciales de acceso, SIN pisar departamento/programas/coordinator/
+    // director ya asignados (antes esto los borraba con los valores en
+    // blanco de newFacultad, dejando a coordinadores de prueba sin
+    // programas asignados y por ende sin poder ver a sus estudiantes).
+    else if (!db.facultad[idx].rolBase && !db.facultad[idx].esAdmin) {
+      db.facultad[idx] = { ...db.facultad[idx], rolBase: nf.rolBase, esAdmin: nf.esAdmin, pwdHash: nf.pwdHash, createdAt: nf.createdAt, mustChangePwd: nf.mustChangePwd, [DUMMY_TAG]: true };
+    }
   });
   saveDB();
 
@@ -12675,7 +12862,7 @@ async function dummyLoadAll() {
   await adiesSaveData();
 
   // ── Update modal UI ──
-  dummyShowStatus(`✅ <strong>${avaluoEntries.length} avalúos</strong> cargados en <strong>${secciones.length} secciones</strong> para <strong>${cursos.length} cursos</strong> a lo largo de 5 trimestres (2023T2 → 2025T1).<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, 'success');
+  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong>, <strong>${avaluoEntries.length} avalúos</strong> cargados en <strong>${secciones.length} secciones</strong> para <strong>${cursos.length} cursos</strong> a lo largo de 5 trimestres (2023T2 → 2025T1).<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, 'success');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
@@ -12691,6 +12878,7 @@ async function dummyDeleteAll() {
   db.secciones    = db.secciones.filter(x => !x[DUMMY_TAG]);
   db.avaluos      = db.avaluos.filter(x => !x[DUMMY_TAG]);
   db.facultad     = db.facultad.filter(x => !x[DUMMY_TAG]);
+  if (db.estudiantes) db.estudiantes = db.estudiantes.filter(x => !x[DUMMY_TAG]);
   if (db.laos) {
     db.laos = db.laos.filter(x => !x[DUMMY_TAG]);
     // limpia también cualquier rúbrica huérfana (de un LAO que ya no existe)
