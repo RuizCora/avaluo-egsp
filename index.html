@@ -243,7 +243,7 @@
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .form-row.three { grid-template-columns: 1fr 1fr 1fr; }
   .form-row.one { grid-template-columns: 1fr; }
-  .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; min-width: 0; }
   label { font-size: 0.82rem; font-weight: 600; color: var(--ink); letter-spacing: 0.02em; }
   input, select, textarea {
     padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px;
@@ -2658,7 +2658,7 @@
 <!-- Modal Estudiante (Fase B — roster de estudiantes, no confundir con
      modal-add-estudiante que añade un nombre suelto a una sección) -->
 <div id="modal-estudiante" class="modal-overlay">
-  <div class="modal">
+  <div class="modal" style="max-width:760px">
     <div class="modal-header">
       <div class="modal-title" id="modal-estudiante-title">🎓 Nuevo Estudiante</div>
       <button class="modal-close" onclick="closeModal('modal-estudiante')">✕</button>
@@ -2675,19 +2675,17 @@
         <input type="text" id="est-nombre" placeholder="ej. ALICEA LUNA, SARA I">
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Programa *</label>
-        <select id="est-programa" onchange="_populateEstudianteSecuenciaSelect()">
-          <option value="">— Seleccionar —</option>
-        </select>
-      </div>
+    <div class="form-group">
+      <label>Programa *</label>
+      <select id="est-programa" onchange="_populateEstudianteSecuenciaSelect()" style="width:100%">
+        <option value="">— Seleccionar —</option>
+      </select>
+    </div>
+    <div class="form-row three">
       <div class="form-group">
         <label>Año Comienzo</label>
         <input type="text" id="est-anio-comienzo" placeholder="ej. 2025-26" pattern="\d{4}-\d{2}">
       </div>
-    </div>
-    <div class="form-row">
       <div class="form-group">
         <label>Secuencia</label>
         <select id="est-secuencia">
@@ -2697,7 +2695,7 @@
       <div class="form-group">
         <label>Registración</label>
         <input type="text" id="est-registracion" placeholder="ej. AP" maxlength="10">
-        <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Código tal y cual aparece en el informe del Registrador.</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Código del informe.</div>
       </div>
     </div>
     <div class="modal-footer">
