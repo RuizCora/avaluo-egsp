@@ -7313,7 +7313,9 @@ let _secSeleccionadas = new Set();
 let _secVisiblesActuales = [];
 let _avSeleccionados = new Set();
 let _avVisiblesActuales = [];
-let _bulkDeleteCtx = null; // { tipo: 'estudiantes'|'secciones'|'avaluos', ids: [...] }
+let _facSeleccionados = new Set();
+let _facVisiblesActuales = [];
+let _bulkDeleteCtx = null; // { tipo: 'estudiantes'|'secciones'|'avaluos'|'facultad', ids: [...] }
 
 function toggleEstSeleccion(id, checked) {
   if (checked) _estSeleccionados.add(id); else _estSeleccionados.delete(id);
@@ -7351,11 +7353,45 @@ function eliminarAvaluosSeleccionados() {
   abrirConfirmarBorradoMasivo('avaluos', [..._avSeleccionados]);
 }
 
-const BULK_DELETE_ETIQUETAS = { estudiantes: 'estudiante(s)', secciones: 'sección(es) — se borrará también su lista de estudiantes matriculados', avaluos: 'avalúo(s)' };
+function toggleFacSeleccion(id, checked) {
+  if (checked) _facSeleccionados.add(id); else _facSeleccionados.delete(id);
+  renderFacultadList();
+}
+function toggleFacSeleccionTodas(checked) {
+  _facVisiblesActuales.forEach(id => checked ? _facSeleccionados.add(id) : _facSeleccionados.delete(id));
+  renderFacultadList();
+}
+function eliminarFacultadSeleccionados() {
+  abrirConfirmarBorradoMasivo('facultad', [..._facSeleccionados]);
+}
+
+const BULK_DELETE_ETIQUETAS = { estudiantes: 'estudiante(s)', secciones: 'sección(es) — se borrará también su lista de estudiantes matriculados', avaluos: 'avalúo(s)', facultad: 'profesor(es) de la lista maestra — quien tenga acceso al sistema también lo perderá' };
+
+// Reglas de seguridad del borrado masivo de Facultad, además de ser
+// solo-admin: nunca puede incluirse la propia cuenta logueada (para no
+// bloquearse el acceso a sí mismo), y nunca puede quedar el sistema sin
+// NINGÚN administrador. Se valida en dos momentos — al abrir el modal
+// (para no dejar ni siquiera pedir la contraseña con una selección
+// inválida) y de nuevo justo antes de borrar (por si la selección cambió
+// mientras el modal estaba abierto en otra pestaña) — mismo patrón de
+// doble verificación que ya usa el resto del borrado masivo.
+function _validarSeleccionFacultad(ids) {
+  const idSet = new Set(ids);
+  const misId = (db.facultad || []).find(f => (f.email || '').toLowerCase() === (currentUser?.username || '').toLowerCase())?.id;
+  if (misId && idSet.has(misId)) return 'No puedes incluir tu propia cuenta en un borrado masivo — deselecciónala primero.';
+  const totalAdmins = (db.facultad || []).filter(f => f.esAdmin).length;
+  const adminsSeleccionados = (db.facultad || []).filter(f => idSet.has(f.id) && f.esAdmin).length;
+  if (totalAdmins > 0 && adminsSeleccionados >= totalAdmins) return 'Debe quedar al menos un administrador en el sistema — deselecciona al menos uno.';
+  return null;
+}
 
 function abrirConfirmarBorradoMasivo(tipo, ids) {
   if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede hacer borrado masivo', '🔒'); return; }
   if (!ids.length) { notify('No hay elementos seleccionados', '⚠️'); return; }
+  if (tipo === 'facultad') {
+    const err = _validarSeleccionFacultad(ids);
+    if (err) { notify(err, '🔒'); return; }
+  }
   _bulkDeleteCtx = { tipo, ids };
   document.getElementById('bulk-delete-msg').textContent = `Vas a eliminar ${ids.length} ${BULK_DELETE_ETIQUETAS[tipo] || 'registro(s)'}. Esta acción no se puede deshacer.`;
   document.getElementById('bulk-delete-pwd').value = '';
@@ -7396,6 +7432,15 @@ async function confirmarBorradoMasivo() {
     _avSeleccionados.clear();
     saveDB(); closeModal('modal-bulk-delete-confirm'); _bulkDeleteCtx = null;
     renderBaseDatos();
+  } else if (tipo === 'facultad') {
+    const errFac = _validarSeleccionFacultad(ids);
+    if (errFac) { errEl.textContent = errFac; errEl.style.display = 'block'; return; }
+    n = db.facultad.filter(f => idSet.has(f.id)).length;
+    db.facultad = db.facultad.filter(f => !idSet.has(f.id));
+    _facSeleccionados.clear();
+    saveDB(); closeModal('modal-bulk-delete-confirm'); _bulkDeleteCtx = null;
+    renderFacultadList();
+    enrichCurrentUserPermissions();
   }
   notify(`${n} eliminado(s) ✓`, '🗑');
 }
@@ -11041,16 +11086,44 @@ function renderFacultadList() {
   if (!el) return;
   _ensureFacultadRolMigrado();
   const list = db.facultad || [];
+  // Depura la selección de ids que ya no existan (ej. se borró uno individualmente)
+  _facSeleccionados = new Set([..._facSeleccionados].filter(id => list.some(f => f.id === id)));
   if (!list.length) {
+    _facVisiblesActuales = [];
     el.innerHTML = '<div class="empty-state"><p>No hay profesores en la lista maestra. Añade uno o importa un CSV.</p></div>';
     return;
   }
   const isAdmin = currentUser?.rol === 'admin';
+  const misId = isAdmin ? (list.find(f => (f.email||'').toLowerCase() === (currentUser.username||'').toLowerCase())?.id) : null;
   const rolLabelMap = { decano:'Decano/a', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
-  el.innerHTML = list.map(f => {
+
+  // Borrado masivo (solo administrador) — mismo patrón que Estudiantes/
+  // Secciones/Avalúos: casillas por tarjeta + "Seleccionar todas" sobre la
+  // lista completa (esta pestaña no tiene filtros activos, así que
+  // "visibles" es toda la lista) + modal de confirmación con contraseña.
+  // La propia cuenta logueada nunca es seleccionable, para no poder
+  // quitarse el propio acceso por accidente en un borrado masivo.
+  _facVisiblesActuales = isAdmin ? list.filter(f => f.id !== misId).map(f => f.id) : [];
+  const todosSeleccionados = isAdmin && _facVisiblesActuales.length > 0 && _facVisiblesActuales.every(id => _facSeleccionados.has(id));
+  const bulkBar = isAdmin ? `
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca">
+      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" ${todosSeleccionados ? 'checked' : ''} onchange="toggleFacSeleccionTodas(this.checked)">
+        Seleccionar todas (${_facVisiblesActuales.length})
+      </label>
+      <button class="btn btn-danger btn-sm" ${_facSeleccionados.size ? '' : 'disabled'} onclick="eliminarFacultadSeleccionados()">🗑 Eliminar seleccionados (${_facSeleccionados.size})</button>
+      <span style="font-size:0.76rem;color:var(--muted)">Tu propia cuenta y, si eres el único administrador, tu acceso de administrador nunca se pueden incluir.</span>
+    </div>` : '';
+
+  el.innerHTML = bulkBar + list.map(f => {
     const initials = (f.nombre||'?').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
     const progs = f.programas ? f.programas.split('|').map(p=>p.trim()) : [];
-    return `<div class="fac-card">
+    const esUnoMismo = f.id === misId;
+    const checkbox = isAdmin
+      ? `<input type="checkbox" ${_facSeleccionados.has(f.id) ? 'checked' : ''} ${esUnoMismo ? 'disabled title="No puedes seleccionar tu propia cuenta"' : ''} onchange="toggleFacSeleccion('${f.id}', this.checked)">`
+      : '';
+    return `<div class="fac-card" ${isAdmin ? 'style="grid-template-columns:24px 40px 1fr auto"' : ''}>
+      ${isAdmin ? `<div style="align-self:start;padding-top:2px">${checkbox}</div>` : ''}
       <div class="fac-avatar">${initials}</div>
       <div>
         <div class="fac-name">${f.nombre}</div>
@@ -12542,42 +12615,75 @@ async function dummyLoadAll() {
     .filter(c => !c[DUMMY_TAG] && (compByCurso[c.id] || []).length > 0)
     .slice(0, 8);
 
-  // ── Helper for student IDs and names ──
-  const studentPool = [
-    {id:`E${ts}00`,nombre:'Ana M. López Pérez'},   {id:`E${ts}01`,nombre:'Carlos R. Rivera Santos'},
-    {id:`E${ts}02`,nombre:'María T. Torres Cruz'}, {id:`E${ts}03`,nombre:'José A. Pérez Morales'},
-    {id:`E${ts}04`,nombre:'Luisa E. Díaz Vargas'}, {id:`E${ts}05`,nombre:'Pedro L. Morales Ortiz'},
-    {id:`E${ts}06`,nombre:'Carmen I. Vega Reyes'}, {id:`E${ts}07`,nombre:'Miguel A. Ramos Flores'},
-    {id:`E${ts}08`,nombre:'Sofía C. Cruz Delgado'},{id:`E${ts}09`,nombre:'Roberto E. Colón Nieves'},
-    {id:`E${ts}10`,nombre:'Isabel G. Martínez Rosa'},{id:`E${ts}11`,nombre:'Fernando J. Guzmán Soto'},
-    {id:`E${ts}12`,nombre:'Patricia B. Hernández Leal'},{id:`E${ts}13`,nombre:'Andrés M. Castillo Vélez'},
-    {id:`E${ts}14`,nombre:'Natalia V. Serrano Pagán'},{id:`E${ts}15`,nombre:'Diego F. Rosario Medina'},
-  ];
+  // ── Estudiantes de prueba — generado programáticamente (en vez de una
+  // lista fija de 16 nombres) para poder escalar el volumen de datos de
+  // prueba sin escribir cada nombre a mano. Edgardo pidió más datos de
+  // prueba de estudiantes y facultad para poder medir mejor la
+  // funcionalidad del sistema.
+  const NOMBRES_DUMMY = ['Ana','Carlos','María','José','Luisa','Pedro','Carmen','Miguel','Sofía','Roberto','Isabel','Fernando','Patricia','Andrés','Natalia','Diego','Gabriela','Javier','Camila','Eduardo','Valeria','Ricardo','Daniela','Alejandro','Paola','Manuel','Verónica','Sergio','Adriana','Rafael'];
+  const INICIALES_DUMMY = ['M','R','T','A','E','L','I','C','B','J','V','F','G','D','N','P','S','O','Y','Q'];
+  const APELLIDOS_DUMMY = ['López Pérez','Rivera Santos','Torres Cruz','Pérez Morales','Díaz Vargas','Morales Ortiz','Vega Reyes','Ramos Flores','Cruz Delgado','Colón Nieves','Martínez Rosa','Guzmán Soto','Hernández Leal','Castillo Vélez','Serrano Pagán','Rosario Medina','Aponte Class','Figueroa Nazario','Ortiz Correa','Sánchez Bermúdez','Medina Alicea','Rodríguez Marrero','Class Rivera','Cintrón Padilla','Nieves Cordero','Miranda Torres','Delgado Soto','Vélez Ramos','Cordero Vázquez','Padilla Class'];
+  const N_ESTUDIANTES_DUMMY = 90;
+  const studentPool = [];
+  for (let i = 0; i < N_ESTUDIANTES_DUMMY; i++) {
+    const nombre = NOMBRES_DUMMY[i % NOMBRES_DUMMY.length];
+    const inicial = INICIALES_DUMMY[i % INICIALES_DUMMY.length];
+    const apellido = APELLIDOS_DUMMY[(i * 7 + 3) % APELLIDOS_DUMMY.length]; // stride evita pares repetidos seguidos
+    studentPool.push({ id: `E${ts}${String(i).padStart(3,'0')}`, nombre: `${nombre} ${inicial}. ${apellido}` });
+  }
   function makeStudents(n, offset) {
-    return studentPool.slice(offset||0, (offset||0)+n);
+    // Indexado con módulo (en vez de slice) para garantizar siempre n
+    // estudiantes distintos por sección, incluso cuando offset+n excede el
+    // final del pool — con slice, una sección cerca del final del pool
+    // podía quedar con menos estudiantes de los que debía.
+    const out = [];
+    for (let k = 0; k < n; k++) out.push(studentPool[(offset + k) % studentPool.length]);
+    return out;
   }
 
-  // ── Secciones — una o más secciones por CADA curso real seleccionado
-  // arriba, repartidas en los mismos 5 trimestres de prueba (2023T2 →
-  // 2025T1) y rotando entre los 3 profesores de prueba. Generalizado para
-  // adaptarse a cuántos cursos reales con competencias existan (antes
-  // asumía siempre exactamente 8 cursos fijos).
-  const SEMESTRES_DUMMY = ['2023T2', '2024T1', '2024T2', '2024T3', '2025T1'];
-  const PROFESORES_DUMMY = [
-    { nombre: 'Dra. Elena Reyes',     email: 'ereyes.dummy@rcm.upr.edu' },
-    { nombre: 'Dr. Marcos Soto',      email: 'msoto.dummy@rcm.upr.edu' },
-    { nombre: 'Prof. Ana Villanueva', email: 'avillanueva.dummy@rcm.upr.edu' },
+  // ── Facultad de prueba — lista maestra ampliada (15 profesores/as,
+  // repartidos entre los programas y departamentos reales) para tener
+  // suficiente variedad al probar Gestión de Facultad, Secciones y
+  // Asesorías. Los primeros 4 conservan los correos de siempre (3 con
+  // cuenta de acceso más abajo, uno de directorio solamente).
+  const facultadDummy = [
+    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',       email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',                      telefono:'787-555-0101', programas:'MPH-General|MPH-Epidemiología',                        coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',         email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',                      telefono:'787-555-0102', programas:'MPH-General|DrPH-Determinantes Sociales de la Salud', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Prof. Ana Villanueva',    email:'avillanueva.dummy@rcm.upr.edu', departamento:'Bioestadística',                     telefono:'787-555-0103', programas:'MPH-Bioestadística',                                    coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Luis Fontánez',       email:'lfontanez.dummy@rcm.upr.edu',   departamento:'Educación en Salud',                 telefono:'787-555-0104', programas:'MPHE-Educación en Salud Pública',                       coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dra. Carmen Ayala',       email:'cayala.dummy@rcm.upr.edu',      departamento:'Determinantes Sociales de la Salud', telefono:'787-555-0105', programas:'DrPH-Determinantes Sociales de la Salud',              coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Rafael Cordero',      email:'rcordero.dummy@rcm.upr.edu',    departamento:'Epidemiología',                      telefono:'787-555-0106', programas:'MPH-Epidemiología',                                     coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Profa. Ivelisse Marrero', email:'imarrero.dummy@rcm.upr.edu',    departamento:'Bioestadística',                     telefono:'787-555-0107', programas:'MPH-Bioestadística',                                    coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Héctor Belén',        email:'hbelen.dummy@rcm.upr.edu',      departamento:'Salud Pública',                      telefono:'787-555-0108', programas:'MPH-General',                                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dra. Wanda Class',        email:'wclass.dummy@rcm.upr.edu',      departamento:'Educación en Salud',                 telefono:'787-555-0109', programas:'MPHE-Educación en Salud Pública',                       coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Ángel Rosado',        email:'arosado.dummy@rcm.upr.edu',     departamento:'Determinantes Sociales de la Salud', telefono:'787-555-0110', programas:'DrPH-Determinantes Sociales de la Salud',              coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Profa. Migdalia Ortiz',   email:'mortiz.dummy@rcm.upr.edu',      departamento:'Epidemiología',                      telefono:'787-555-0111', programas:'MPH-Epidemiología',                                     coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Raúl Sepúlveda',      email:'rsepulveda.dummy@rcm.upr.edu',  departamento:'Salud Pública',                      telefono:'787-555-0112', programas:'MPH-General',                                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dra. Nydia Cabán',        email:'ncaban.dummy@rcm.upr.edu',      departamento:'Bioestadística',                     telefono:'787-555-0113', programas:'MPH-Bioestadística',                                    coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Dr. Osvaldo Meléndez',    email:'omelendez.dummy@rcm.upr.edu',   departamento:'Educación en Salud',                 telefono:'787-555-0114', programas:'MPHE-Educación en Salud Pública',                       coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
+    { id:dummyId('fac'), nombre:'Profa. Lourdes Padín',    email:'lpadin.dummy@rcm.upr.edu',      departamento:'Determinantes Sociales de la Salud', telefono:'787-555-0115', programas:'DrPH-Determinantes Sociales de la Salud',              coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
   ];
+  // Rotación de "profesor de sección" y de asesor — se reutiliza toda la
+  // lista de facultad de prueba (antes solo 3 nombres fijos), para que
+  // Secciones y Asesorías muestren más variedad de profesores.
+  const PROFESORES_DUMMY = facultadDummy.map(f => ({ nombre: f.nombre, email: f.email }));
+
+  // ── Secciones — 3 o 4 secciones por CADA curso real seleccionado arriba,
+  // repartidas en los mismos 5 trimestres de prueba (2023T2 → 2025T1) y
+  // rotando entre los profesores de prueba. Generalizado para adaptarse a
+  // cuántos cursos reales con competencias existan (antes asumía siempre
+  // exactamente 8 cursos fijos).
+  const SEMESTRES_DUMMY = ['2023T2', '2024T1', '2024T2', '2024T3', '2025T1'];
   const secciones = [];
   cursos.forEach((curso, ci) => {
-    const nSecciones = 2 + (ci % 2); // 2 o 3 secciones por curso, con variedad
+    const nSecciones = 3 + (ci % 2); // 3 o 4 secciones por curso, con variedad
     for (let s = 0; s < nSecciones; s++) {
       const semestre = SEMESTRES_DUMMY[(ci + s) % SEMESTRES_DUMMY.length];
-      const prof = PROFESORES_DUMMY[(ci + s) % PROFESORES_DUMMY.length];
-      const n = 6 + ((ci + s) % 4); // 6 a 9 estudiantes por sección
-      const offset = (ci * 3 + s * 2) % studentPool.length;
+      const prof = PROFESORES_DUMMY[(ci * 4 + s) % PROFESORES_DUMMY.length];
+      const n = 10 + ((ci + s) % 8); // 10 a 17 estudiantes por sección
+      const offset = (ci * 11 + s * 7) % studentPool.length;
       secciones.push({
-        id: dummyId('sec'), cursoId: curso.id, numero: s === 0 ? '001' : (s === 1 ? '002' : '003'),
+        id: dummyId('sec'), cursoId: curso.id, numero: String(s + 1).padStart(3, '0'),
         profesor: prof.nombre, profesorEmail: prof.email, semestre,
         estudiantes: makeStudents(n, offset),
         fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
@@ -12591,8 +12697,8 @@ async function dummyLoadAll() {
   // Estudiantes, los importadores (Fase C/D) y el reporte R9 · Cohortes
   // tengan datos con qué funcionar (antes, los estudiantes de prueba solo
   // existían embebidos dentro de sec.estudiantes y nunca llegaban aquí).
-  const SECUENCIAS_DUMMY = ['Regular','Regular','Regular','Regular','Regular','Regular','Plan de Estudio','Regular','Regular','','Regular','Regular','Regular','Regular','Regular','Regular'];
-  const ANIOS_DUMMY = ['2022-23','2023-24','2024-25'];
+  const SECUENCIAS_DUMMY = ['Regular','Regular','Regular','Desacelerada','Regular','Acelerada','Plan de Estudio','Regular','Vespertina','','Regular','Regular','Desacelerada','Regular','Regular','Acelerada','Vespertina','Regular','Regular',''];
+  const ANIOS_DUMMY = ['2021-22','2022-23','2023-24','2024-25'];
   const estudiantesDummy = studentPool.map((s, i) => {
     const progNombre = PROGRAMAS_DUMMY[i % PROGRAMAS_DUMMY.length];
     const prog = (db.programas || []).find(p => p.nombre === progNombre);
@@ -12726,27 +12832,20 @@ async function dummyLoadAll() {
   });
   db.avaluos.push(...avaluoEntries);
 
-  // ── Facultad ──
-  const facultadDummy = [
-    { id:dummyId('fac'), nombre:'Dra. Elena Reyes',      email:'ereyes.dummy@rcm.upr.edu',      departamento:'Epidemiología',   telefono:'787-555-0101', programas:'MPH-General|MPH-Epidemiología', coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Dr. Marcos Soto',        email:'msoto.dummy@rcm.upr.edu',       departamento:'Salud Pública',   telefono:'787-555-0102', programas:'MPH-General|DrPH-Determinantes Sociales de la Salud', coordinator:false, director:true,  fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Prof. Ana Villanueva',   email:'avillanueva.dummy@rcm.upr.edu', departamento:'Bioestadística',  telefono:'787-555-0103', programas:'MPH-Bioestadística',                           coordinator:false, director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-    { id:dummyId('fac'), nombre:'Dr. Luis Fontánez',      email:'lfontanez.dummy@rcm.upr.edu',   departamento:'Educación Salud', telefono:'787-555-0104', programas:'MPHE-Educación en Salud Pública',                      coordinator:true,  director:false, fechaCreacion:new Date().toISOString(), [DUMMY_TAG]:true },
-  ];
+  // ── Facultad ── (facultadDummy ya se definió más arriba, antes de
+  // Secciones, para poder derivar de ahí la rotación PROFESORES_DUMMY).
   db.facultad.push(...facultadDummy);
 
   // ── Asesorías (student → advisor email) ──
   // studentId debe ser el NÚMERO del estudiante (no su id interno): así lo
   // compara canSeeEstudiante()/enrichCurrentUserPermissions() contra
   // db.estudiantes, igual que en una importación real de asesorías por CSV.
+  // Se reparte entre TODA la facultad de prueba (antes solo 3 profesores
+  // fijos), para que la pestaña Asesorías muestre más variedad.
   if (!db.asesorias) db.asesorias = [];
   const asesoriasDummy = estudiantesDummy.map((est,i) => ({
     studentId: est.numero,
-    profesorEmail: i < 6
-      ? 'ereyes.dummy@rcm.upr.edu'
-      : i < 11
-        ? 'msoto.dummy@rcm.upr.edu'
-        : 'avillanueva.dummy@rcm.upr.edu',
+    profesorEmail: PROFESORES_DUMMY[i % PROFESORES_DUMMY.length].email,
     [DUMMY_TAG]: true
   }));
   asesoriasDummy.forEach(a => {
@@ -12835,7 +12934,7 @@ async function dummyLoadAll() {
   const resumenCursos = cursos.length
     ? `<strong>${avaluoEntries.length} avalúos</strong> en <strong>${secciones.length} secciones</strong> de tus cursos reales (<strong>${cursos.map(c => c.codigo).join(', ')}</strong>) a lo largo de 5 trimestres (2023T2 → 2025T1).`
     : `⚠ No se generaron secciones ni avalúos de prueba: no encontré ningún curso real con al menos una competencia definida. Crea un curso en la pestaña "Cursos" y sus competencias en "Competencias", y vuelve a cargar los datos de prueba.`;
-  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> de prueba cargados. ${resumenCursos}<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
+  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> y <strong>${facultadDummy.length} profesores/as</strong> de prueba cargados. ${resumenCursos}<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
