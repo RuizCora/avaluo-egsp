@@ -2714,6 +2714,14 @@
         <textarea id="c-desc" placeholder="Breve descripción del curso..."></textarea>
       </div>
     </div>
+    <div class="form-row" id="c-directa-row" style="display:none">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+          <input type="checkbox" id="c-directa-curso" style="width:auto">
+          Permitir evaluación directa a nivel de curso (anula el nivel calculado de los LAOs individuales) — solo administrador
+        </label>
+      </div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-curso')">Cancelar</button>
       <button class="btn btn-primary" id="btn-guardar-curso" onclick="guardarCurso()">💾 Guardar Curso</button>
@@ -2820,8 +2828,9 @@
       <textarea id="comp-desc" placeholder="Describe la competencia que se evaluará..."></textarea>
     </div>
     <div class="form-group">
-      <label>Criterios de Evaluación</label>
-      <textarea id="comp-criterios" placeholder="Describe los criterios para evaluar esta competencia..."></textarea>
+      <label>LAOs (Learning Assessment Opportunities) — uno por línea</label>
+      <textarea id="comp-criterios" placeholder="ej.&#10;Examen I&#10;Examen II&#10;Proyecto Final"></textarea>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:2px">Cada línea crea o vincula un LAO real, editable después desde la pestaña LAOs.</div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -3061,7 +3070,7 @@ function showTab(tabId, btn) {
 
 function openModal(id) {
   populateCursoSelects();
-  if (id === 'modal-curso') _populateCursoProgramaSelect();
+  if (id === 'modal-curso') { _populateCursoProgramaSelect(); _actualizarVisibilidadDirectaCurso(); }
   // Para profesores (no-admin), auto-completa y bloquea el campo "Profesor" con
   // su propio nombre de cuenta, para que la sección quede correctamente
   // identificada como suya (canSeeSeccion la reconoce por nombre/email) y no
@@ -3074,6 +3083,14 @@ function openModal(id) {
   document.getElementById(id).classList.add('open');
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// El interruptor "evaluación directa a nivel de curso" solo lo puede activar
+// un administrador (Rediseño LAOs, Ronda 2b) — se oculta para el resto de
+// los roles aunque puedan editar el curso.
+function _actualizarVisibilidadDirectaCurso() {
+  const row = document.getElementById('c-directa-row');
+  if (row) row.style.display = currentUser?.rol === 'admin' ? '' : 'none';
+}
 
 // ======================== NOTIFY ========================
 function notify(msg, icon = '✅') {
@@ -3107,6 +3124,7 @@ function guardarCurso() {
         descripcion: document.getElementById('c-desc').value.trim(),
         programaId,
         programa: programaObj ? programaObj.nombre : '',
+        permiteDirectaCurso: !!document.getElementById('c-directa-curso')?.checked,
       };
     }
     notify('Curso actualizado correctamente ✏️');
@@ -3120,6 +3138,7 @@ function guardarCurso() {
       descripcion: document.getElementById('c-desc').value.trim(),
       programaId,
       programa: programaObj ? programaObj.nombre : '',
+      permiteDirectaCurso: !!document.getElementById('c-directa-curso')?.checked,
       fechaCreacion: new Date().toISOString()
     };
     db.cursos.push(curso);
@@ -3130,6 +3149,7 @@ function guardarCurso() {
   renderCursos();
   populateCursoSelects();
   ['c-codigo','c-nombre','c-dept','c-creditos','c-desc','c-edit-id'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  const chkDirecta = document.getElementById('c-directa-curso'); if (chkDirecta) chkDirecta.checked = false;
   const t = document.getElementById('modal-curso-title'); if(t) t.textContent = '📚 Registrar Curso';
 }
 
@@ -3142,6 +3162,7 @@ function abrirEditarCurso(id) {
   document.getElementById('c-dept').value = cur.departamento || '';
   document.getElementById('c-creditos').value = cur.creditos || '';
   document.getElementById('c-desc').value = cur.descripcion || '';
+  const chkDirecta = document.getElementById('c-directa-curso'); if (chkDirecta) chkDirecta.checked = !!cur.permiteDirectaCurso;
   _populateCursoProgramaSelect();
   const prog = document.getElementById('c-programa');
   if (prog) prog.value = cur.programaId || '';
@@ -4072,30 +4093,33 @@ function guardarCompetencia() {
   const codigo = document.getElementById('comp-codigo').value.trim();
   const desc = document.getElementById('comp-desc').value.trim();
   if (!cursoId || !codigo || !desc) { notify('Complete los campos requeridos', '⚠️'); return; }
+  const laosTexto = document.getElementById('comp-criterios').value;
   const editId = document.getElementById('comp-edit-id')?.value || '';
+  let dc = null;
   if (editId) {
     const idx = db.competencias.findIndex(x => x.id === editId);
     if (idx !== -1) {
       db.competencias[idx] = { ...db.competencias[idx],
         cursoId, codigo, descripcion: desc,
-        criterios: document.getElementById('comp-criterios').value.trim(),
         tipo: document.getElementById('comp-tipo').value,
         peso: document.getElementById('comp-peso').value,
       };
+      dc = db.competencias[idx];
     }
     notify('Competencia actualizada correctamente ✏️');
   } else {
     const comp = {
       id: Date.now().toString(),
       cursoId, codigo, descripcion: desc,
-      criterios: document.getElementById('comp-criterios').value.trim(),
       tipo: document.getElementById('comp-tipo').value,
       peso: document.getElementById('comp-peso').value,
       fechaCreacion: new Date().toISOString()
     };
     db.competencias.push(comp);
+    dc = comp;
     notify('Competencia "' + codigo + '" registrada correctamente');
   }
+  if (dc) _sincronizarLaosDesdeTexto(dc, laosTexto);
   saveDB(); closeModal('modal-competencia'); renderCompetencias(); populateCursoSelects();
   ['comp-codigo','comp-desc','comp-criterios','comp-peso','comp-edit-id'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   const t = document.getElementById('modal-comp-title'); if(t) t.textContent='🎯 Registrar Competencia';
@@ -4109,7 +4133,7 @@ function abrirEditarCompetencia(id) {
   document.getElementById('comp-edit-id').value = id;
   document.getElementById('comp-codigo').value = comp.codigo || '';
   document.getElementById('comp-desc').value = comp.descripcion || '';
-  document.getElementById('comp-criterios').value = comp.criterios || '';
+  document.getElementById('comp-criterios').value = laosDeCompetencia(comp).join('\n');
   document.getElementById('comp-tipo').value = comp.tipo || 'rubrica';
   document.getElementById('comp-peso').value = comp.peso || '';
   // Set curso after selects are populated
@@ -4141,7 +4165,7 @@ function renderCompetencias() {
             ${curso ? `<span style="font-size:0.78rem;color:var(--muted)">${curso.codigo} · ${curso.nombre}</span>` : ''}
           </div>
           <div class="competencia-desc">${c.descripcion}</div>
-          ${c.criterios ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px">📋 ${c.criterios}</div>` : ''}
+          ${(() => { const ln = laosDeCompetencia(c); return ln.length ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px">📋 ${ln.join(' | ')}</div>` : ''; })()}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCompetencia('${c.id}')">✏️</button>` : ''}
@@ -5046,7 +5070,7 @@ function _ensureCompetenciasSinDuplicados() {
   const aEliminar = new Set();
   Object.values(grupos).forEach(group => {
     if (group.length <= 1) return;
-    const conCriterios = group.filter(x => x.criterios);
+    const conCriterios = group.filter(x => laosDeCompetencia(x).length || x.criterios);
     const candidatos = conCriterios.length ? conCriterios : group;
     const ganador = candidatos.slice().sort((a,b) =>
       new Date(b.fechaCreacion||0) - new Date(a.fechaCreacion||0))[0];
@@ -5448,6 +5472,103 @@ function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, aval
   return Math.round((pctFinal / 100) * maxValor);
 }
 
+// Reparte 100% entre los vínculos LAO→competencia que sigan en modo
+// automático (pesoAuto !== false), dejando intactos los que el admin fijó
+// a mano. Se llama cada vez que se crea, edita o elimina un LAO que mide
+// una competencia, para que el peso por defecto entre varios LAOs de una
+// misma competencia sea siempre partes iguales, a menos que se edite
+// manualmente (Rediseño LAOs, Ronda 2a).
+function _recalcularPesosAutoParaCompetencia(cursoId, competenciaId) {
+  const links = (db.laos || [])
+    .filter(l => l.cursoId === cursoId)
+    .map(l => ({ lao: l, cc: l.competencias?.find(cc => cc.competenciaId === competenciaId) }))
+    .filter(x => x.cc);
+  if (!links.length) return;
+  const manuales = links.filter(x => x.cc.pesoAuto === false);
+  const autos    = links.filter(x => x.cc.pesoAuto !== false);
+  if (!autos.length) return;
+  const sumaManual = manuales.reduce((s, x) => s + (parseFloat(x.cc.peso) || 0), 0);
+  const restante = Math.max(0, 100 - sumaManual);
+  // Redondea a 2 decimales pero deja que el último absorba el residuo, para
+  // que la suma de los automáticos cuadre exacto con "restante" (evita que
+  // 100/3 redondeado tres veces se quede en 99.99 en vez de 100).
+  const base = Math.floor((restante / autos.length) * 100) / 100;
+  autos.forEach((x, i) => {
+    x.cc.peso = (i === autos.length - 1)
+      ? Math.round((restante - base * (autos.length - 1)) * 100) / 100
+      : base;
+    x.cc.pesoAuto = true;
+  });
+}
+
+// Conveniencia: recalcula todas las competencias que toca un LAO a la vez
+// (para cuando se crea/edita/elimina un LAO con varias competencias).
+function _recalcularPesosAutoParaLao(cursoId, competenciaIds) {
+  (competenciaIds || []).forEach(compId => _recalcularPesosAutoParaCompetencia(cursoId, compId));
+}
+
+// Nombres de los LAOs reales que miden esta competencia-curso (dc = registro
+// de db.competencias). Reemplaza el antiguo campo de texto libre
+// dc.criterios — la Matriz de Pareo, Alineación Curricular, el Wizard y la
+// pestaña Competencias ahora leen directamente de db.laos (Rediseño LAOs,
+// Ronda 1).
+function laosDeCompetencia(dc) {
+  if (!dc) return [];
+  return (db.laos || [])
+    .filter(l => l.cursoId === dc.cursoId && l.competencias?.some(cc => cc.competenciaId === dc.id))
+    .map(l => l.nombre);
+}
+
+// Convierte el texto (una línea por LAO) que se escribe en la Matriz de
+// Pareo / Alineación Curricular / Wizard / pestaña Competencias en LAOs
+// reales (db.laos) ligados a esta competencia-curso, en vez de guardarlo
+// como texto suelto. Une por nombre exacto con LAOs que el curso ya tenga
+// (para que un mismo LAO pueda cubrir varias competencias, ej. un LAO que
+// mida 3 competencias a la vez); crea uno nuevo si no hay coincidencia;
+// desvincula (y borra si queda huérfano, sin rúbrica y sin avalúos) los que
+// ya no aparecen en el texto.
+function _sincronizarLaosDesdeTexto(dc, rawText) {
+  if (!dc) return;
+  if (!db.laos) db.laos = [];
+  const lineas = (rawText || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const nombresNuevos = new Set(lineas.map(l => nombreLao(dc.cursoId, l)));
+  const laosDelCurso = (db.laos || []).filter(l => l.cursoId === dc.cursoId);
+
+  lineas.forEach(linea => {
+    const nombre = nombreLao(dc.cursoId, linea);
+    let lao = laosDelCurso.find(l => l.nombre === nombre);
+    if (!lao) {
+      lao = {
+        id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        cursoId: dc.cursoId, nombre, descripcion: '',
+        competencias: [], modoEvaluacion: 'libre',
+        esOficial: true, compartido: true, profesorEmail: null,
+        creadoPor: currentUser?.username || 'admin', isGenerico: false,
+        fechaCreacion: new Date().toISOString(),
+      };
+      db.laos.push(lao);
+      laosDelCurso.push(lao);
+    }
+    if (!lao.competencias) lao.competencias = [];
+    if (!lao.competencias.some(cc => cc.competenciaId === dc.id)) {
+      lao.competencias.push({ competenciaId: dc.id, peso: 100, pesoAuto: true });
+    }
+  });
+
+  laosDelCurso.forEach(lao => {
+    if (nombresNuevos.has(lao.nombre)) return;
+    if (!lao.competencias?.some(cc => cc.competenciaId === dc.id)) return;
+    lao.competencias = lao.competencias.filter(cc => cc.competenciaId !== dc.id);
+    if (!lao.competencias.length &&
+        !(db.rubricas || []).some(r => r.laoId === lao.id) &&
+        !(db.avaluos  || []).some(a => a.laoId === lao.id)) {
+      db.laos = db.laos.filter(l => l.id !== lao.id);
+    }
+  });
+
+  _recalcularPesosAutoParaCompetencia(dc.cursoId, dc.id);
+}
+
 // ======================== LAOs — pestaña ========================
 function renderLaos() {
   const el = document.getElementById('lista-laos');
@@ -5532,8 +5653,12 @@ function compartirLao(id) {
 
 function eliminarLao(id) {
   if (!confirm('¿Eliminar este LAO? También se eliminará su rúbrica asociada, si tiene.')) return;
+  const lao = db.laos.find(l => l.id === id);
+  const cursoId = lao?.cursoId;
+  const compIds = (lao?.competencias || []).map(cc => cc.competenciaId);
   db.laos = db.laos.filter(l => l.id !== id);
   db.rubricas = db.rubricas.filter(r => r.laoId !== id);
+  if (cursoId) _recalcularPesosAutoParaLao(cursoId, compIds);
   saveDB(); renderLaos();
   notify('LAO eliminado', '🗑');
 }
@@ -5581,13 +5706,41 @@ function laoOnCursoChange(preseleccion) {
   const comps = db.competencias.filter(c => c.cursoId === cursoId);
   if (!comps.length) { wrap.innerHTML = '<div style="font-size:0.8rem;color:var(--muted)">Este curso no tiene competencias registradas todavía</div>'; return; }
   const preMap = {};
-  (preseleccion || []).forEach(cc => { preMap[cc.competenciaId] = cc.peso; });
-  wrap.innerHTML = comps.map(c => `
+  (preseleccion || []).forEach(cc => { preMap[cc.competenciaId] = { peso: cc.peso, pesoAuto: cc.pesoAuto !== false }; });
+  wrap.innerHTML = comps.map(c => {
+    const pre = preMap[c.id];
+    const checked = pre !== undefined;
+    const pesoAuto = pre ? pre.pesoAuto : true;
+    const pesoVal = pre ? pre.peso : 100;
+    return `
     <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.82rem">
-      <input type="checkbox" class="lao-comp-check" value="${c.id}" ${preMap[c.id] !== undefined ? 'checked' : ''} onchange="this.nextElementSibling.nextElementSibling.style.display=this.checked?'inline-block':'none'">
+      <input type="checkbox" class="lao-comp-check" value="${c.id}" ${checked ? 'checked' : ''} onchange="_onLaoCompCheckToggle('${c.id}', this.checked)">
       <span style="flex:1">${c.codigo} — ${(c.descripcion || '').slice(0, 60)}</span>
-      <input type="number" class="lao-comp-peso" data-comp="${c.id}" value="${preMap[c.id] ?? 100}" min="1" max="100" style="width:64px;padding:2px 4px;display:${preMap[c.id] !== undefined ? 'inline-block' : 'none'}" title="% que aporta este LAO a esta competencia">
-    </label>`).join('');
+      <label id="lao-fijo-wrap-${c.id}" style="display:${checked ? 'inline-flex' : 'none'};align-items:center;gap:3px;font-size:0.68rem;color:var(--muted)" title="Marca para fijar el peso a mano; si no, se reparte automático en partes iguales entre los LAOs que compartan esta competencia">
+        <input type="checkbox" class="lao-comp-fijo" data-comp="${c.id}" ${!pesoAuto ? 'checked' : ''} onchange="_toggleLaoPesoFijo('${c.id}', this.checked)"> fijo
+      </label>
+      <input type="number" class="lao-comp-peso" data-comp="${c.id}" data-auto="${pesoAuto ? '1' : '0'}" value="${pesoVal}" min="0" max="100" step="0.01"
+        style="width:64px;padding:2px 4px;display:${checked ? 'inline-block' : 'none'}" ${pesoAuto ? 'disabled' : ''}
+        title="${pesoAuto ? '% automático — se reparte en partes iguales con otros LAOs de esta competencia' : '% fijo, editado a mano'}">
+    </label>`;
+  }).join('');
+}
+
+// Muestra/oculta los controles de peso al marcar/desmarcar una competencia.
+function _onLaoCompCheckToggle(compId, isChecked) {
+  const fijoWrap = document.getElementById(`lao-fijo-wrap-${compId}`);
+  const pesoInput = document.querySelector(`.lao-comp-peso[data-comp="${compId}"]`);
+  if (fijoWrap) fijoWrap.style.display = isChecked ? 'inline-flex' : 'none';
+  if (pesoInput) pesoInput.style.display = isChecked ? 'inline-block' : 'none';
+}
+
+// Alterna el peso de una competencia entre automático (deshabilitado, se
+// recalcula solo) y fijo (editable a mano) — Rediseño LAOs, Ronda 2a.
+function _toggleLaoPesoFijo(compId, esFijo) {
+  const pesoInput = document.querySelector(`.lao-comp-peso[data-comp="${compId}"]`);
+  if (!pesoInput) return;
+  pesoInput.disabled = !esFijo;
+  pesoInput.dataset.auto = esFijo ? '0' : '1';
 }
 
 function _actualizarLaoPreview() {
@@ -5607,7 +5760,8 @@ function guardarLao() {
   if (!checks.length) { notify('Selecciona al menos una competencia', '⚠️'); return; }
   const competencias = checks.map(chk => {
     const pesoInput = document.querySelector(`.lao-comp-peso[data-comp="${chk.value}"]`);
-    return { competenciaId: chk.value, peso: parseFloat(pesoInput.value) || 100 };
+    const pesoAuto = pesoInput?.dataset.auto !== '0';
+    return { competenciaId: chk.value, peso: parseFloat(pesoInput?.value) || 100, pesoAuto };
   });
   const editId = document.getElementById('lao-edit-id').value;
   const record = {
@@ -5616,15 +5770,26 @@ function guardarLao() {
     esOficial: document.getElementById('lao-oficial').checked,
     modoEvaluacion: document.getElementById('lao-modo-eval').value || 'libre',
   };
+  let laoGuardado = null, viejasCompIds = [];
   if (editId) {
     const l = db.laos.find(x => x.id === editId);
-    if (l) Object.assign(l, record);
+    if (l) {
+      viejasCompIds = (l.competencias || []).map(cc => cc.competenciaId);
+      Object.assign(l, record);
+      laoGuardado = l;
+    }
   } else {
-    db.laos.push({
+    laoGuardado = {
       id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       ...record, compartido: false, profesorEmail: null, creadoPor: currentUser?.username || 'admin',
       isGenerico: false, origenSolicitudId: null, fechaCreacion: new Date().toISOString(),
-    });
+    };
+    db.laos.push(laoGuardado);
+  }
+  if (laoGuardado) {
+    const nuevasCompIds = (laoGuardado.competencias || []).map(cc => cc.competenciaId);
+    const afectadas = [...new Set([...viejasCompIds, ...nuevasCompIds])];
+    _recalcularPesosAutoParaLao(cursoId, afectadas);
   }
   saveDB();
   closeModal('modal-lao');
@@ -9724,15 +9889,14 @@ function renderMatriz() {
   function laosPara(compNum, cursoId) {
     // Si por algún motivo hay más de un registro para el mismo curso+código
     // (ej. residuo de una migración anterior con formato de código distinto),
-    // se prefiere el que sí tenga criterios/LAOs en vez de tomar el primero
-    // que aparezca en el arreglo.
+    // se prefiere el que sí tenga LAOs reales vinculados en vez de tomar el
+    // primero que aparezca en el arreglo.
     const matches = db.competencias.filter(x =>
       x.cursoId === cursoId && (x.codigo === 'C'+compNum || x.codigo === compNum)
     );
     if (!matches.length) return [];
-    const dc = matches.find(x => x.criterios) || matches[0];
-    if (!dc.criterios) return [];
-    return dc.criterios.split(' | ').map(l => l.trim()).filter(Boolean);
+    const dc = matches.find(x => laosDeCompetencia(x).length) || matches[0];
+    return laosDeCompetencia(dc);
   }
 
   let totalLinks = 0;
@@ -9871,7 +10035,7 @@ function showAssessmentDetail(compNum, cursoId, assessmentName) {
   const dc = db.competencias.find(x =>
     x.cursoId === cursoId && (x.codigo === 'C'+compNum || x.codigo === compNum)
   );
-  const allLaos = dc?.criterios ? dc.criterios.split(' | ').map(l=>l.trim()).filter(Boolean) : [];
+  const allLaos = laosDeCompetencia(dc);
   document.getElementById('modal-avaluo-content').innerHTML = `
     <div style="background:var(--cream);border-radius:10px;padding:14px;margin-bottom:14px">
       <div style="font-size:0.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Competencia Fundacional C${comp.num}</div>
@@ -10483,8 +10647,8 @@ function renderAlBank(filterProg, isAdmin) {
             <div class="al-comp-courses">
               ${linkedCourses.map(cu => {
                 const dc = linkedComps.find(x => x.cursoId === cu.id);
-                const laoText = dc?.criterios ? dc.criterios.split(' | ').map(l =>
-                  `<span class="al-lao-tag">${l}</span>`).join('') : '';
+                const laoText = laosDeCompetencia(dc).map(l =>
+                  `<span class="al-lao-tag">${l}</span>`).join('');
                 return `<div>
                   <div class="al-course-chip">
                     ${cu.codigo}
@@ -10544,8 +10708,8 @@ function renderAlMatrix(filterProg, isAdmin) {
               </td>
               ${cursos.map(cu => {
                 const linked = linkedComps.find(dc => dc.cursoId === cu.id);
-                const laoText = linked?.criterios ? linked.criterios.split(' | ').map(l =>
-                  `<span class="al-lao-tag">${l}</span>`).join('') : '';
+                const laoText = laosDeCompetencia(linked).map(l =>
+                  `<span class="al-lao-tag">${l}</span>`).join('');
                 if (isAdmin) {
                   return `<td class="al-check-cell">
                     <button class="al-toggle ${linked ? 'active' : ''}"
@@ -10592,7 +10756,6 @@ function toggleAlignment(compNum, cursoId, prog) {
       cursoId,
       codigo: 'C'+compNum,
       descripcion: comp.texto,
-      criterios: '',
       tipo: 'rubrica',
       peso: '',
       fechaCreacion: new Date().toISOString()
@@ -10624,8 +10787,7 @@ function abrirVincularCurso(compNum, prog) {
 function guardarVinculacion() {
   const compNum = document.getElementById('vc-comp-num').value;
   const cursoId = document.getElementById('vc-curso-sel').value;
-  const laosRaw = document.getElementById('vc-laos').value.trim();
-  const laos    = laosRaw.split('\n').map(l=>l.trim()).filter(Boolean).join(' | ');
+  const laosRaw = document.getElementById('vc-laos').value;
   if (!cursoId) { notify('Selecciona un curso', '⚠️'); return; }
   const comp = db.bancoCompetencias.find(c => c.num === compNum);
   if (!comp) return;
@@ -10633,16 +10795,17 @@ function guardarVinculacion() {
     (dc.codigo === 'C'+compNum || dc.codigo === compNum) && dc.cursoId === cursoId
   );
   if (exists) { notify('Ya está vinculada', 'ℹ️'); closeModal('modal-vincular-curso'); return; }
-  db.competencias.push({
+  const dc = {
     id: `${cursoId}_C${compNum}_${Date.now()}`,
     cursoId,
     codigo: 'C'+compNum,
     descripcion: comp.texto,
-    criterios: laos,
     tipo: 'rubrica',
     peso: '',
     fechaCreacion: new Date().toISOString()
-  });
+  };
+  db.competencias.push(dc);
+  _sincronizarLaosDesdeTexto(dc, laosRaw);
   saveDB();
   closeModal('modal-vincular-curso');
   renderAlineacion();
@@ -10671,7 +10834,7 @@ function editarLAOs(compNum, cursoId) {
   document.getElementById('el-comp-id').value = dc.id;
   document.getElementById('el-title').textContent = `LAOs — C${compNum} en ${curso?.codigo || ''}`;
   document.getElementById('el-hint').textContent = comp?.texto?.substring(0,80)+'…' || '';
-  document.getElementById('el-laos').value = (dc.criterios || '').split(' | ').join('\n');
+  document.getElementById('el-laos').value = laosDeCompetencia(dc).join('\n');
   openModal('modal-editar-laos');
 }
 
@@ -10679,8 +10842,8 @@ function guardarLAOs() {
   const id  = document.getElementById('el-comp-id').value;
   const dc  = db.competencias.find(x => x.id === id);
   if (!dc) return;
-  const raw = document.getElementById('el-laos').value.trim();
-  dc.criterios = raw.split('\n').map(l=>l.trim()).filter(Boolean).join(' | ');
+  const raw = document.getElementById('el-laos').value;
+  _sincronizarLaosDesdeTexto(dc, raw);
   saveDB();
   closeModal('modal-editar-laos');
   renderAlineacion();
@@ -11006,17 +11169,17 @@ function wizGuardar() {
     cursoIds.forEach((cu, ci) => {
       const btn = document.getElementById(`wiz-tog-${pi}-${ci}`);
       if (!btn?.classList.contains('on')) return; // not linked
-      const laoRaw = document.getElementById(`wiz-lao-${pi}-${ci}`)?.value.trim() || '';
-      const laos = laoRaw.split('\n').map(l=>l.trim()).filter(Boolean).join(' | ');
-      db.competencias.push({
+      const laoRaw = document.getElementById(`wiz-lao-${pi}-${ci}`)?.value || '';
+      const dc = {
         id: `${cu.id}_${comp.codigo}_${Date.now()}`,
         cursoId: cu.id,
         codigo: comp.codigo,
         descripcion: comp.texto,
-        criterios: laos,
         tipo: 'rubrica', peso: '',
         fechaCreacion: new Date().toISOString()
-      });
+      };
+      db.competencias.push(dc);
+      _sincronizarLaosDesdeTexto(dc, laoRaw);
     });
   });
 
