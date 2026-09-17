@@ -5464,7 +5464,21 @@ function laosDisponiblesPara(cursoId, userEmail, esAdmin) {
 // la escala Likert vigente del curso, redondeado. Con varios, primero se
 // promedia ponderado en % (por el peso configurado en cada LAO para esa
 // competencia) y luego se convierte una sola vez.
+//
+// Excepción (Fase 3b): si el curso tiene `permiteDirectaCurso` y el
+// profesor llenó la "Evaluación Directa del Curso" para esta competencia
+// (guardada con laoId = laoDirectaCursoId(cursoId)), ese nivel REEMPLAZA
+// por completo el cálculo de arriba — no se promedia con los LAOs.
 function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, avaluosCurso) {
+  const avs = avaluosCurso || db.avaluos;
+  const avDirecta = avs.find(a => a.estudianteId === estudianteId && a.laoId === laoDirectaCursoId(cursoId));
+  if (avDirecta) {
+    const evDirecta = avDirecta.evaluaciones?.find(e => e.competenciaId === competenciaId);
+    if (evDirecta && evDirecta.nivel !== '' && evDirecta.nivel !== undefined && evDirecta.nivel !== null) {
+      return Math.round(parseFloat(evDirecta.nivel));
+    }
+  }
+
   const laosDelCurso = (db.laos || []).filter(l => l.cursoId === cursoId &&
     l.competencias?.some(cc => cc.competenciaId === competenciaId));
   const contribuciones = [];
@@ -6886,6 +6900,28 @@ function onSeccionChange() {
     return { lao, rubrica, modo, comps };
   });
 
+  // Evaluación Directa del Curso (Fase 3b) — el administrador la habilita
+  // por curso (`permiteDirectaCurso`). Se modela como un LAO "virtual" (no
+  // vive en db.laos, no se puede editar/borrar desde la pestaña LAOs) que
+  // cubre TODAS las competencias del curso, para reutilizar tal cual toda
+  // la maquinaria del grid combinado (render, guardado en db.avaluos por
+  // laoId, prellenado). Su nivel por competencia REEMPLAZA — no promedia
+  // con — el nivel calculado por los LAOs normales (ver computeNivelCompetenciaFinal).
+  const curso = db.cursos.find(c => c.id === cursoId);
+  if (curso?.permiteDirectaCurso) {
+    resueltos.push({
+      lao: {
+        id: laoDirectaCursoId(cursoId), cursoId,
+        nombre: 'Evaluación Directa del Curso',
+        descripcion: 'Nivel asignado directamente por competencia — reemplaza el nivel calculado por los LAOs cuando se llena.',
+        modoEvaluacion: 'solo_directa', esOficial: true, compartido: true,
+        isGenerico: false, esDirectaCurso: true,
+      },
+      rubrica: null, modo: 'directa',
+      comps: db.competencias.filter(c => c.cursoId === cursoId),
+    });
+  }
+
   infoEl.style.display = '';
   infoEl.innerHTML = resueltos.map(r => {
     let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
@@ -6900,6 +6936,12 @@ function onSeccionChange() {
   if (!avLaosGrid.length) return;
 
   buildGridCombinado(cursoId);
+}
+
+// Id determinístico del LAO virtual "Evaluación Directa del Curso" — nunca
+// choca con un id real de db.laos (esos se generan con Date.now()+random).
+function laoDirectaCursoId(cursoId) {
+  return 'directa_' + cursoId;
 }
 
 function buildGridCombinado(cursoId) {
@@ -6968,10 +7010,11 @@ function buildGridCombinado(cursoId) {
   // Comentario son columnas compartidas con rowspan=2.
   const thead = document.getElementById('av-grid-thead');
   const grupoHtml = avLaosGrid.map(({ lao, rubrica, modo, comps }) => {
-    const ncols = modo === 'rubrica' ? rubrica.criterios.length + 1 : comps.length + 1;
-    return `<th colspan="${ncols}" style="background:#3a3a5c;color:#fff">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}</th>`;
+    const ncols = modo === 'rubrica' ? rubrica.criterios.length + 1 : comps.length + (lao.esDirectaCurso ? 0 : 1);
+    const estilo = lao.esDirectaCurso ? 'background:var(--gold);color:#2a2a4a' : 'background:#3a3a5c;color:#fff';
+    return `<th colspan="${ncols}" style="${estilo}">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}${lao.esDirectaCurso ? ' 🎯' : ''}</th>`;
   }).join('');
-  const detalleHtml = avLaosGrid.map(({ rubrica, modo, comps }) => {
+  const detalleHtml = avLaosGrid.map(({ lao, rubrica, modo, comps }) => {
     if (modo === 'rubrica') {
       const critCols = rubrica.criterios.map(c =>
         `<th title="${c.nombre || ''}" style="min-width:190px">${c.nombre || '(sin nombre)'}<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">peso ${c.peso}%</span></th>`
@@ -6981,6 +7024,9 @@ function buildGridCombinado(cursoId) {
     const compCols = comps.map(c =>
       `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`
     ).join('');
+    // La Evaluación Directa del Curso no tiene "Nota LAO" propia — ya existe
+    // la Nota Final del Curso compartida, y esta columna sería redundante.
+    if (lao.esDirectaCurso) return compCols;
     return `${compCols}<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
   }).join('');
   thead.innerHTML = `<tr>
@@ -7073,6 +7119,9 @@ function renderGridCombinado() {
           <div id="gl-label-${est.id}-${lao.id}-${c.id}" style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
         </td>`;
       }).join('');
+      // La Evaluación Directa del Curso no tiene "Nota LAO" propia (ver
+      // thead) — solo las pastillas de nivel por competencia.
+      if (lao.esDirectaCurso) return compCells;
       const notaLao = avClaseData[est.id]?.porLao?.[lao.id]?._notaLao ?? '';
       return `${compCells}<td class="grid-cell">
         <input type="number" min="0" max="100" step="0.1" value="${notaLao}"
@@ -7290,6 +7339,7 @@ function guardarTodaLaClase() {
         laoId:         lao.id,
         laoNombre:     lao.nombre,
         modoEvaluacion: modo,
+        esDirectaCurso: !!lao.esDirectaCurso,
         criteriosResp: modo === 'rubrica' ? { ...resp._criterios } : undefined,
         notaLao,
         comentarioGeneral: comentario,
