@@ -2151,6 +2151,7 @@
       </div>
       <span id="al-admin-hint" style="font-size:0.78rem;color:var(--egsp-coral);display:none">✏️ Modo edición activo — eres administrador</span>
       <span id="al-wizard-btn" style="display:none"><button class="btn btn-primary btn-sm" onclick="abrirWizard()">➕ Nuevo Programa</button></span>
+      <span id="al-migracion-btn" style="display:none"><button class="btn btn-outline btn-sm" onclick="abrirMigracionLaos()">🔄 Migración de LAOs pendientes (<span id="migracion-laos-count">0</span>)</button></span>
     </div>
 
     <!-- BANK VIEW: competency cards per program -->
@@ -5527,6 +5528,29 @@ function laosDeCompetencia(dc) {
 // mida 3 competencias a la vez); crea uno nuevo si no hay coincidencia;
 // desvincula (y borra si queda huérfano, sin rúbrica y sin avalúos) los que
 // ya no aparecen en el texto.
+// Crea un registro de db.laos nuevo (sin guardarlo todavía en db.laos — eso
+// lo hace quien llame a esta función) con los valores por defecto de un LAO
+// creado desde el mapeo curricular (Rediseño LAOs).
+function _crearLaoNuevo(cursoId, nombre) {
+  return {
+    id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    cursoId, nombre, descripcion: '',
+    competencias: [], modoEvaluacion: 'libre',
+    esOficial: true, compartido: true, profesorEmail: null,
+    creadoPor: currentUser?.username || 'admin', isGenerico: false,
+    fechaCreacion: new Date().toISOString(),
+  };
+}
+
+// Liga un LAO a una competencia-curso (dc) si todavía no lo estaba, con peso
+// automático por defecto. Idempotente — no duplica el vínculo si ya existe.
+function _vincularLaoAOCompetencia(lao, dc) {
+  if (!lao.competencias) lao.competencias = [];
+  if (!lao.competencias.some(cc => cc.competenciaId === dc.id)) {
+    lao.competencias.push({ competenciaId: dc.id, peso: 100, pesoAuto: true });
+  }
+}
+
 function _sincronizarLaosDesdeTexto(dc, rawText) {
   if (!dc) return;
   if (!db.laos) db.laos = [];
@@ -5538,21 +5562,11 @@ function _sincronizarLaosDesdeTexto(dc, rawText) {
     const nombre = nombreLao(dc.cursoId, linea);
     let lao = laosDelCurso.find(l => l.nombre === nombre);
     if (!lao) {
-      lao = {
-        id: 'lao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        cursoId: dc.cursoId, nombre, descripcion: '',
-        competencias: [], modoEvaluacion: 'libre',
-        esOficial: true, compartido: true, profesorEmail: null,
-        creadoPor: currentUser?.username || 'admin', isGenerico: false,
-        fechaCreacion: new Date().toISOString(),
-      };
+      lao = _crearLaoNuevo(dc.cursoId, nombre);
       db.laos.push(lao);
       laosDelCurso.push(lao);
     }
-    if (!lao.competencias) lao.competencias = [];
-    if (!lao.competencias.some(cc => cc.competenciaId === dc.id)) {
-      lao.competencias.push({ competenciaId: dc.id, peso: 100, pesoAuto: true });
-    }
+    _vincularLaoAOCompetencia(lao, dc);
   });
 
   laosDelCurso.forEach(lao => {
@@ -5567,6 +5581,102 @@ function _sincronizarLaosDesdeTexto(dc, rawText) {
   });
 
   _recalcularPesosAutoParaCompetencia(dc.cursoId, dc.id);
+}
+
+// ======================== Migración de LAOs (Fase 2) ========================
+// Competencias-curso que todavía tienen el texto viejo de LAOs (de antes del
+// rediseño) sin convertir a LAOs reales. Se dejan pendientes intencionalmente
+// — no se migran solas — para que Edgardo revise curso por curso antes de
+// crear registros que alimentan datos de acreditación.
+function _pendientesMigracionLaos() {
+  return (db.competencias || []).filter(dc => dc.criterios && dc.criterios.trim());
+}
+
+function _contarMigracionesPendientes() {
+  return _pendientesMigracionLaos().length;
+}
+
+function abrirMigracionLaos() {
+  renderMigracionLaos();
+  openModal('modal-migracion-laos');
+}
+
+function renderMigracionLaos() {
+  const el = document.getElementById('migracion-laos-body');
+  if (!el) return;
+  const pendientes = _pendientesMigracionLaos();
+  const badge = document.getElementById('migracion-laos-count');
+  if (badge) badge.textContent = pendientes.length;
+
+  if (!pendientes.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No hay LAOs pendientes de migrar — el mapeo curricular ya está al día.</p></div>';
+    return;
+  }
+
+  const porCurso = {};
+  pendientes.forEach(dc => { (porCurso[dc.cursoId] = porCurso[dc.cursoId] || []).push(dc); });
+
+  el.innerHTML = Object.entries(porCurso).map(([cursoId, dcs]) => {
+    const curso = db.cursos.find(c => c.id === cursoId);
+    return `<div class="card" style="margin-bottom:16px">
+      <div class="card-header"><div class="card-title">${curso ? curso.codigo + ' · ' + curso.nombre : cursoId}</div></div>
+      ${dcs.map(dc => _renderMigracionCompetencia(dc)).join('')}
+    </div>`;
+  }).join('');
+}
+
+function _renderMigracionCompetencia(dc) {
+  const lineas = (dc.criterios || '').split(' | ').map(l => l.trim()).filter(Boolean);
+  const laosDelCurso = (db.laos || []).filter(l => l.cursoId === dc.cursoId);
+  const yaReales = laosDeCompetencia(dc);
+  return `<div class="migracion-comp" style="border-top:1px solid var(--border);padding:12px 0" data-dc="${dc.id}">
+    <div style="font-weight:700;font-size:0.85rem">${dc.codigo} — ${(dc.descripcion || '').slice(0, 90)}</div>
+    ${yaReales.length ? `<div style="font-size:0.75rem;color:var(--muted);margin:4px 0">Ya tiene LAOs reales vinculados: ${yaReales.join(', ')}</div>` : ''}
+    <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px">Texto anterior sin migrar:</div>
+    ${lineas.map((linea, i) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:0.8rem">
+        <span style="flex:1">"${linea}"</span>
+        <select class="migracion-destino" data-dc="${dc.id}" data-idx="${i}" style="font-size:0.75rem;max-width:280px">
+          <option value="nuevo" selected>➕ Crear LAO nuevo "${linea}"</option>
+          ${laosDelCurso.map(l => `<option value="${l.id}">🔗 Vincular a "${l.nombre}"</option>`).join('')}
+          <option value="descartar">🗑 Descartar (no crear nada)</option>
+        </select>
+      </div>`).join('')}
+    <button class="btn btn-primary btn-sm" onclick="aplicarMigracionCompetencia('${dc.id}')" style="margin-top:6px">✅ Aplicar y marcar como migrada</button>
+  </div>`;
+}
+
+// Aplica las decisiones elegidas para cada línea de texto de una competencia
+// (crear LAO nuevo / vincular a uno real existente / descartar), recalcula
+// los pesos automáticos afectados, y limpia el texto viejo para que esta
+// competencia salga de la lista de pendientes.
+function aplicarMigracionCompetencia(dcId) {
+  const dc = db.competencias.find(x => x.id === dcId);
+  if (!dc) return;
+  const lineas = (dc.criterios || '').split(' | ').map(l => l.trim()).filter(Boolean);
+  const selects = [...document.querySelectorAll(`.migracion-destino[data-dc="${dcId}"]`)];
+
+  lineas.forEach((linea, i) => {
+    const sel = selects.find(s => s.dataset.idx === String(i));
+    const destino = sel ? sel.value : 'nuevo';
+    if (destino === 'descartar') return;
+    if (destino === 'nuevo') {
+      const nombre = nombreLao(dc.cursoId, linea);
+      let lao = (db.laos || []).find(l => l.cursoId === dc.cursoId && l.nombre === nombre);
+      if (!lao) { lao = _crearLaoNuevo(dc.cursoId, nombre); db.laos.push(lao); }
+      _vincularLaoAOCompetencia(lao, dc);
+    } else {
+      const lao = (db.laos || []).find(l => l.id === destino);
+      if (lao) _vincularLaoAOCompetencia(lao, dc);
+    }
+  });
+
+  _recalcularPesosAutoParaCompetencia(dc.cursoId, dc.id);
+  dc.criterios = ''; // se marca como migrada — ya no aparece en pendientes
+  saveDB();
+  renderMigracionLaos();
+  renderAlineacion();
+  notify('Competencia migrada ✓');
 }
 
 // ======================== LAOs — pestaña ========================
@@ -10160,7 +10270,11 @@ function preloadExcelData() {
       db.cursos.push({ ...c, fechaCreacion: new Date().toISOString() });
     }
   });
-  // Add competencias per course with LAOs as criterios
+  // Add competencias per course, y sus LAOs como LAOs reales (db.laos) desde
+  // el arranque — no como texto libre en criterios. La siembra inicial usa el
+  // mismo camino que la Matriz de Pareo / Alineación Curricular, así una
+  // cuenta nueva (ej. la institucional) nace ya con LAOs reales y no requiere
+  // pasar por la migración guiada para estos datos (Rediseño LAOs).
   Object.entries(COURSE_DATA).forEach(([cursoId, data]) => {
     const cursoInDb = db.cursos.find(x => x.id === cursoId);
     if (!cursoInDb) return;
@@ -10169,16 +10283,17 @@ function preloadExcelData() {
       if (!comp) return;
       const exists = db.competencias.find(x => x.codigo === `C${comp.num}` && x.cursoId === cursoId);
       if (!exists) {
-        db.competencias.push({
+        const nuevaComp = {
           id: `${cursoId}_C${comp.num}`,
           cursoId,
           codigo: `C${comp.num}`,
           descripcion: comp.texto,
-          criterios: data.laos.join(' | '),
           tipo: 'rubrica',
           peso: '',
           fechaCreacion: new Date().toISOString()
-        });
+        };
+        db.competencias.push(nuevaComp);
+        _sincronizarLaosDesdeTexto(nuevaComp, data.laos.join('\n'));
       }
     });
   });
@@ -10584,6 +10699,10 @@ function renderAlineacion() {
   if (hint) hint.style.display = isAdmin ? '' : 'none';
   const wizBtn = document.getElementById('al-wizard-btn');
   if (wizBtn) wizBtn.style.display = isAdmin ? '' : 'none';
+  const migBtn = document.getElementById('al-migracion-btn');
+  if (migBtn) migBtn.style.display = isAdmin ? '' : 'none';
+  const migCount = document.getElementById('migracion-laos-count');
+  if (migCount) migCount.textContent = _contarMigracionesPendientes();
 
   // Populate program filter
   const filterSel = document.getElementById('al-prog-filter');
@@ -13321,6 +13440,25 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-editar-laos')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarLAOs()">💾 Guardar LAOs</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Migración de LAOs (Rediseño LAOs, Fase 2) -->
+<div id="modal-migracion-laos" class="modal-overlay">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-header">
+      <div class="modal-title">🔄 Migración de LAOs pendientes</div>
+      <button class="modal-close" onclick="closeModal('modal-migracion-laos')">✕</button>
+    </div>
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:14px">
+      Estas competencias todavía tienen el texto de LAOs de antes del rediseño (sin convertir a LAOs reales).
+      Por cada línea, decide si crear un LAO nuevo, vincularla a un LAO real que ya exista en ese curso, o descartarla.
+      Se hace curso por curso, a tu propio ritmo.
+    </div>
+    <div id="migracion-laos-body" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-migracion-laos')">Cerrar</button>
     </div>
   </div>
 </div>
