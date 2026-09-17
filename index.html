@@ -1809,7 +1809,7 @@
   <!-- Step 1: Course + Section selector -->
   <div class="card" id="av-selector-card">
     <div class="card-header"><div class="card-title">📋 Seleccionar Clase</div></div>
-    <div class="form-row three">
+    <div class="form-row">
       <div class="form-group">
         <label>Curso *</label>
         <select id="av-curso" onchange="onCursoChange()">
@@ -1822,18 +1822,8 @@
           <option value="">— Primero selecciona curso —</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>LAO (Oportunidad de Avalúo) *</label>
-        <select id="av-lao-sel" onchange="onLaoSelChange()" disabled>
-          <option value="">— Primero selecciona sección —</option>
-        </select>
-      </div>
     </div>
     <div id="av-lao-info" style="display:none;margin-top:-6px;margin-bottom:14px;padding:10px 14px;background:var(--cream);border-radius:8px;font-size:0.82rem"></div>
-    <div id="av-modo-toggle" style="display:none;margin-top:-8px;margin-bottom:14px">
-      <button class="btn btn-outline btn-sm" id="av-modo-btn-rubrica" onclick="avSetModo('rubrica')">📊 Usar Rúbrica</button>
-      <button class="btn btn-outline btn-sm" id="av-modo-btn-directa" onclick="avSetModo('directa')">✏️ Evaluación Directa</button>
-    </div>
     <div class="form-row three" id="av-meta-row" style="display:none">
       <div class="form-group">
         <label>Período</label>
@@ -6796,10 +6786,11 @@ function eliminarSeccion(id) {
 
 // ======================== AVALÚO (CLASS GRID) ========================
 let avSeccionActual = null;
-let avClaseData = {};      // estId -> { compId -> { nivel, observacion } }
-let avCompsActuales = [];  // competencias for selected course
+let avClaseData = {};      // estId -> { porLao: { laoId -> {_criterios|_nivelesDirectos/_notaLao} }, _finalGrade, _comentario }
 let avEstudiantesActuales = []; // students in selected section
 let avGuardados = new Set(); // estIds already saved this session
+let avLaosGrid = [];       // [{lao, rubrica, modo, comps}] — LAOs listos para evaluar, combinados en un solo grid
+let avEscalaActual = null; // Escala de Niveles resuelta para el curso — usada por las pastillas del modo directa
 
 function setDefaultDate() {
   const f = document.getElementById('av-fecha');
@@ -6821,13 +6812,10 @@ function onCursoChange() {
   const selSec  = document.getElementById('av-seccion-sel');
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
-  avLaoActual = null; avRubricaActual = null;
+  avLaosGrid = [];
   document.getElementById('av-grid-container').style.display = 'none';
   document.getElementById('av-meta-row').style.display = 'none';
-  const selLao = document.getElementById('av-lao-sel');
-  if (selLao) { selLao.innerHTML = '<option value="">— Primero selecciona sección —</option>'; selLao.disabled = true; }
   document.getElementById('av-lao-info').style.display = 'none';
-  document.getElementById('av-modo-toggle').style.display = 'none';
 
   selSec.innerHTML = '<option value="">— Seleccionar sección —</option>';
   selSec.disabled  = true;
@@ -6848,21 +6836,27 @@ function onCursoChange() {
   selSec.disabled = false;
 }
 
-let avLaoActual = null;
-let avRubricaActual = null;
+function _modosDisponiblesLao(lao, rubrica) {
+  const tieneRubrica = !!rubrica;
+  if (lao.modoEvaluacion === 'requiere_rubrica') return tieneRubrica ? ['rubrica'] : [];
+  if (lao.modoEvaluacion === 'solo_directa') return ['directa'];
+  return tieneRubrica ? ['rubrica', 'directa'] : ['directa']; // 'libre' (default)
+}
 
+// Al seleccionar sección, se resuelven TODOS los LAOs del curso que el
+// usuario puede evaluar y se combinan en un solo grid — ya no se elige un
+// LAO a la vez. Cada LAO usa su modo por defecto (rúbrica si está
+// configurada, si no, calificación directa); los que exigen rúbrica y
+// todavía no la tienen quedan listados pero bloqueados (no entran al grid).
 function onSeccionChange() {
   const secId   = document.getElementById('av-seccion-sel').value;
   const cursoId = document.getElementById('av-curso').value;
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
-  avLaoActual = null; avRubricaActual = null;
+  avLaosGrid = [];
   document.getElementById('av-grid-container').style.display = 'none';
-  document.getElementById('av-lao-info').style.display = 'none';
-  document.getElementById('av-modo-toggle').style.display = 'none';
-  const laoSel = document.getElementById('av-lao-sel');
-  laoSel.innerHTML = '<option value="">— Seleccionar LAO —</option>';
-  laoSel.disabled = true;
+  const infoEl = document.getElementById('av-lao-info');
+  infoEl.style.display = 'none';
 
   if (!secId) return;
 
@@ -6879,153 +6873,125 @@ function onSeccionChange() {
   const isAdmin = currentUser?.rol === 'admin';
   const laos = laosDisponiblesPara(cursoId, currentUser?.username, isAdmin);
   if (!laos.length) {
-    laoSel.innerHTML = '<option value="">⚠️ No hay LAOs disponibles para ti en este curso</option>';
+    infoEl.style.display = '';
+    infoEl.innerHTML = '⚠️ No hay LAOs disponibles para ti en este curso';
     return;
   }
-  laos.forEach(l => {
-    const tieneRubrica = db.rubricas.some(r => r.laoId === l.id);
-    const o = document.createElement('option');
-    o.value = l.id;
-    o.textContent = l.nombre + (tieneRubrica ? ' — con rúbrica' : ' — calificación directa');
-    laoSel.appendChild(o);
+
+  const resueltos = laos.map(lao => {
+    const rubrica = db.rubricas.find(r => r.laoId === lao.id) || null;
+    const modos = _modosDisponiblesLao(lao, rubrica);
+    const modo = modos.includes('rubrica') ? 'rubrica' : (modos.includes('directa') ? 'directa' : null);
+    const comps = db.competencias.filter(c => (lao.competencias || []).some(cc => cc.competenciaId === c.id));
+    return { lao, rubrica, modo, comps };
   });
-  laoSel.disabled = false;
-  if (laos.length === 1) { laoSel.value = laos[0].id; onLaoSelChange(); }
-}
 
-let avModoActual = 'directa'; // 'rubrica' | 'directa'
-let avEscalaActual = null;    // Escala de Niveles resuelta para el curso — usada por las pastillas del modo directa
-
-function _modosDisponiblesLao(lao, rubrica) {
-  const tieneRubrica = !!rubrica;
-  if (lao.modoEvaluacion === 'requiere_rubrica') return tieneRubrica ? ['rubrica'] : [];
-  if (lao.modoEvaluacion === 'solo_directa') return ['directa'];
-  return tieneRubrica ? ['rubrica', 'directa'] : ['directa']; // 'libre' (default)
-}
-
-function onLaoSelChange() {
-  const laoId = document.getElementById('av-lao-sel').value;
-  const cursoId = document.getElementById('av-curso').value;
-  avClaseData = {}; avGuardados = new Set();
-  document.getElementById('av-grid-container').style.display = 'none';
-  document.getElementById('av-modo-toggle').style.display = 'none';
-  const infoEl = document.getElementById('av-lao-info');
-  if (!laoId) { infoEl.style.display = 'none'; avLaoActual = null; avRubricaActual = null; return; }
-
-  avLaoActual = db.laos.find(l => l.id === laoId);
-  avRubricaActual = db.rubricas.find(r => r.laoId === laoId) || null;
-  if (!avLaoActual) return;
-
-  const modos = _modosDisponiblesLao(avLaoActual, avRubricaActual);
   infoEl.style.display = '';
-  infoEl.innerHTML = `<strong>${avLaoActual.nombre}</strong>${avLaoActual.descripcion ? ' — ' + avLaoActual.descripcion : ''}
-    ${avLaoActual.isGenerico ? '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.' : ''}`;
+  infoEl.innerHTML = resueltos.map(r => {
+    let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
+    if (r.lao.isGenerico) linea += '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.';
+    if (!r.modo) linea += '<br>🔒 Este LAO requiere rúbrica, pero todavía no tiene una configurada. Pide a un administrador que la configure antes de evaluar.';
+    else if (!r.comps.length) linea += '<br>⚠️ Este LAO no tiene competencias asignadas.';
+    linea += '</div>';
+    return linea;
+  }).join('');
 
-  if (!modos.length) {
-    infoEl.innerHTML += '<br>🔒 Este LAO requiere rúbrica, pero todavía no tiene una configurada. Pide a un administrador que la configure antes de evaluar.';
-    return;
-  }
+  avLaosGrid = resueltos.filter(r => r.modo && r.comps.length);
+  if (!avLaosGrid.length) return;
 
-  avModoActual = modos.includes('rubrica') ? 'rubrica' : 'directa';
-  if (modos.length > 1) {
-    document.getElementById('av-modo-toggle').style.display = '';
-  }
-  _actualizarModoBtns();
-  buildGrid(cursoId);
+  buildGridCombinado(cursoId);
 }
 
-function avSetModo(modo) {
-  avModoActual = modo;
-  _actualizarModoBtns();
-  avClaseData = {}; avGuardados = new Set();
-  buildGrid(document.getElementById('av-curso').value);
-}
-
-function _actualizarModoBtns() {
-  const bR = document.getElementById('av-modo-btn-rubrica');
-  const bD = document.getElementById('av-modo-btn-directa');
-  if (!bR || !bD) return;
-  bR.classList.toggle('btn-primary', avModoActual === 'rubrica');
-  bR.classList.toggle('btn-outline', avModoActual !== 'rubrica');
-  bD.classList.toggle('btn-primary', avModoActual === 'directa');
-  bD.classList.toggle('btn-outline', avModoActual !== 'directa');
-}
-
-function buildGrid(cursoId) {
-  const compIds = (avLaoActual.competencias || []).map(cc => cc.competenciaId);
-  avCompsActuales = db.competencias.filter(c => compIds.includes(c.id));
+function buildGridCombinado(cursoId) {
   avEstudiantesActuales = avSeccionActual?.estudiantes || [];
   avEscalaActual = resolverEscalaParaCurso(cursoId);
 
-  if (!avCompsActuales.length) {
-    notify('Este LAO no tiene competencias asignadas', '⚠️'); return;
-  }
   if (!avEstudiantesActuales.length) {
     notify('Esta sección no tiene estudiantes', '⚠️'); return;
   }
 
-  // Pre-fill avClaseData: check if student already has un avalúo guardado para ESTE LAO (y modo)
+  // Pre-fill avClaseData: por estudiante, por cada LAO del grid, revisa si
+  // ya hay un avalúo guardado. Nota Final y Comentario son un solo valor
+  // por estudiante (compartido entre sus LAOs), así que se toma del primer
+  // avalúo del estudiante que lo traiga.
   avClaseData = {};
   avGuardados = new Set();
   avEstudiantesActuales.forEach(est => {
-    avClaseData[est.id] = avModoActual === 'rubrica' ? { _criterios: {} } : { _nivelesDirectos: {}, _notaLao: '' };
-    const existing = db.avaluos.find(a =>
-      a.cursoId === cursoId && a.seccionId === avSeccionActual.id && a.laoId === avLaoActual.id &&
-      (a.estudianteId === est.id || a.estudiante === est.nombre)
-    );
-    if (existing) {
-      avGuardados.add(est.id);
-      if (avModoActual === 'rubrica' && existing.criteriosResp) avClaseData[est.id]._criterios = { ...existing.criteriosResp };
-      if (avModoActual === 'directa') {
-        if (existing.notaLao !== undefined) avClaseData[est.id]._notaLao = existing.notaLao;
+    const porLao = {};
+    let tieneAlgunAvaluo = false;
+    avLaosGrid.forEach(({ lao, modo }) => {
+      porLao[lao.id] = modo === 'rubrica' ? { _criterios: {} } : { _nivelesDirectos: {}, _notaLao: '' };
+      const existing = db.avaluos.find(a =>
+        a.cursoId === cursoId && a.seccionId === avSeccionActual.id && a.laoId === lao.id &&
+        (a.estudianteId === est.id || a.estudiante === est.nombre)
+      );
+      if (!existing) return;
+      tieneAlgunAvaluo = true;
+      if (modo === 'rubrica' && existing.criteriosResp) porLao[lao.id]._criterios = { ...existing.criteriosResp };
+      if (modo === 'directa') {
+        if (existing.notaLao !== undefined) porLao[lao.id]._notaLao = existing.notaLao;
         (existing.evaluaciones || []).forEach(ev => {
           if (ev.nivel !== '' && ev.nivel !== undefined && ev.nivel !== null) {
-            avClaseData[est.id]._nivelesDirectos[ev.competenciaId] = String(ev.nivel);
+            porLao[lao.id]._nivelesDirectos[ev.competenciaId] = String(ev.nivel);
           }
         });
       }
-      if (existing.notaFinal !== undefined) avClaseData[est.id]._finalGrade = existing.notaFinal;
-      if (existing.comentarioGeneral) avClaseData[est.id]._comentario = existing.comentarioGeneral;
-    }
+      if (avClaseData[est.id]?._finalGrade === undefined && existing.notaFinal !== undefined && existing.notaFinal !== '') {
+        if (!avClaseData[est.id]) avClaseData[est.id] = {};
+        avClaseData[est.id]._finalGrade = existing.notaFinal;
+      }
+      if (avClaseData[est.id]?._comentario === undefined && existing.comentarioGeneral) {
+        if (!avClaseData[est.id]) avClaseData[est.id] = {};
+        avClaseData[est.id]._comentario = existing.comentarioGeneral;
+      }
+    });
+    if (!avClaseData[est.id]) avClaseData[est.id] = {};
+    avClaseData[est.id].porLao = porLao;
+    if (tieneAlgunAvaluo) avGuardados.add(est.id);
   });
 
-  // Build legend
+  // Build legend — unión de las competencias de todos los LAOs del grid
+  const compsUnion = [];
+  avLaosGrid.forEach(({ comps }) => comps.forEach(c => { if (!compsUnion.some(x => x.id === c.id)) compsUnion.push(c); }));
   const legendList = document.getElementById('av-comp-legend-list');
   legendList.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:4px">
-    ${avCompsActuales.map(c => `
+    ${compsUnion.map(c => `
       <div style="background:var(--cream);border-radius:7px;padding:8px 10px;font-size:0.78rem">
         <span style="font-family:'Montserrat',sans-serif;font-weight:700;color:var(--rust)">${c.codigo}</span>
         <span style="margin-left:6px;color:var(--ink)">${c.descripcion}</span>
       </div>`).join('')}
   </div>`;
 
-  // Build thead — distinto según el modo: rúbrica (por criterio) o directa (por competencia + nota del LAO)
+  // Build thead — dos filas: la primera agrupa las columnas de cada LAO
+  // (colspan), la segunda trae su detalle (criterios de rúbrica, o
+  // competencias + Nota del LAO en modo directa). Estudiante / Nota Final /
+  // Comentario son columnas compartidas con rowspan=2.
   const thead = document.getElementById('av-grid-thead');
-  if (avModoActual === 'rubrica') {
-    const critCols = avRubricaActual.criterios.map(c =>
-      `<th title="${c.nombre || ''}" style="min-width:190px">${c.nombre || '(sin nombre)'}<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">peso ${c.peso}%</span></th>`
-    ).join('');
-    thead.innerHTML = `<tr>
-      <th class="col-estudiante">Estudiante</th>
-      ${critCols}
-      <th class="col-nota" style="min-width:150px">Nivel por<br>Competencia</th>
-      <th class="col-nota col-grade" style="min-width:90px;background:#2a2a4a">Nota Final<br>del Curso</th>
-      <th class="col-nota" style="min-width:90px">Comentario</th>
-    </tr>`;
-  } else {
-    const compCols = avCompsActuales.map(c =>
+  const grupoHtml = avLaosGrid.map(({ lao, rubrica, modo, comps }) => {
+    const ncols = modo === 'rubrica' ? rubrica.criterios.length + 1 : comps.length + 1;
+    return `<th colspan="${ncols}" style="background:#3a3a5c;color:#fff">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}</th>`;
+  }).join('');
+  const detalleHtml = avLaosGrid.map(({ rubrica, modo, comps }) => {
+    if (modo === 'rubrica') {
+      const critCols = rubrica.criterios.map(c =>
+        `<th title="${c.nombre || ''}" style="min-width:190px">${c.nombre || '(sin nombre)'}<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">peso ${c.peso}%</span></th>`
+      ).join('');
+      return `${critCols}<th class="col-nota" style="min-width:150px">Nivel por<br>Competencia</th>`;
+    }
+    const compCols = comps.map(c =>
       `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`
     ).join('');
-    thead.innerHTML = `<tr>
-      <th class="col-estudiante">Estudiante</th>
-      ${compCols}
-      <th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>
-      <th class="col-nota col-grade" style="min-width:90px;background:#2a2a4a">Nota Final<br>del Curso</th>
-      <th class="col-nota" style="min-width:90px">Comentario</th>
-    </tr>`;
-  }
+    return `${compCols}<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
+  }).join('');
+  thead.innerHTML = `<tr>
+      <th class="col-estudiante" rowspan="2">Estudiante</th>
+      ${grupoHtml}
+      <th class="col-nota col-grade" rowspan="2" style="min-width:90px;background:#2a2a4a">Nota Final<br>del Curso</th>
+      <th class="col-nota" rowspan="2" style="min-width:90px">Comentario</th>
+    </tr>
+    <tr>${detalleHtml}</tr>`;
 
-  renderGrid();
+  renderGridCombinado();
 
   // Restore saved comentarios into textareas (post-render)
   avEstudiantesActuales.forEach(est => {
@@ -7039,82 +7005,80 @@ function buildGrid(cursoId) {
   updateGridProgress();
 }
 
-// Nivel (0-3) EN VIVO de una competencia para un estudiante, dentro de la
-// cuadrícula que se está llenando ahora mismo — combina los criterios de la
-// rúbrica que alimentan esa competencia (o usa la nota directa), y convierte
-// con los umbrales propios de este LAO.
+// Nivel (0-3) EN VIVO de una competencia para un estudiante y un LAO
+// específico, dentro de la cuadrícula que se está llenando ahora mismo —
+// combina los criterios de la rúbrica de ESE LAO que alimentan esa
+// competencia, y convierte con los umbrales propios de ese LAO.
 function _rbPesoParaCompetencia(criterio, compId) {
   return criterio.competencias?.find(cc => cc.competenciaId === compId)?.peso;
 }
 
-function _calcNivelCompGrid(estId, compId) {
-  if (avModoActual === 'rubrica') {
-    const critsComp = avRubricaActual.criterios.filter(c => _rbPesoParaCompetencia(c, compId) !== undefined);
-    if (!critsComp.length) return null;
-    let sumPeso = 0, sumPuntos = 0;
-    critsComp.forEach(c => {
-      const nivelId = avClaseData[estId]?._criterios?.[c.id];
-      if (!nivelId) return;
-      const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
-      if (!nivel) return;
-      const pesoComp = _rbPesoParaCompetencia(c, compId) || 0;
-      sumPuntos += nivel.puntos * pesoComp;
-      sumPeso += pesoComp;
-    });
-    if (!sumPeso) return null;
-    // Promedio ponderado directamente en los puntos de la escala Likert (ej.
-    // 0-4), redondeado al entero más cercano — ya no se usan umbrales.
-    return Math.round(sumPuntos / sumPeso);
-  }
-  return null; // modo directa: el nivel es la elección directa del profesor, sin cálculo
+function _calcNivelCompGrid(estId, laoId, compId) {
+  const entry = avLaosGrid.find(x => x.lao.id === laoId);
+  if (!entry || entry.modo !== 'rubrica') return null; // modo directa: elección directa del profesor, sin cálculo
+  const critsComp = entry.rubrica.criterios.filter(c => _rbPesoParaCompetencia(c, compId) !== undefined);
+  if (!critsComp.length) return null;
+  let sumPeso = 0, sumPuntos = 0;
+  critsComp.forEach(c => {
+    const nivelId = avClaseData[estId]?.porLao?.[laoId]?._criterios?.[c.id];
+    if (!nivelId) return;
+    const nivel = entry.rubrica.niveles.find(n => n.id === nivelId);
+    if (!nivel) return;
+    const pesoComp = _rbPesoParaCompetencia(c, compId) || 0;
+    sumPuntos += nivel.puntos * pesoComp;
+    sumPeso += pesoComp;
+  });
+  if (!sumPeso) return null;
+  // Promedio ponderado directamente en los puntos de la escala Likert (ej.
+  // 0-4), redondeado al entero más cercano — ya no se usan umbrales.
+  return Math.round(sumPuntos / sumPeso);
 }
 
-function renderGrid() {
+function renderGridCombinado() {
   const tbody = document.getElementById('av-grid-tbody');
   tbody.innerHTML = avEstudiantesActuales.map(est => {
     const saved = avGuardados.has(est.id);
-    let inputCells = '';
-    let previewCell = '';
 
-    if (avModoActual === 'rubrica') {
-      inputCells = avRubricaActual.criterios.map(c => {
-        const sel = avClaseData[est.id]?._criterios?.[c.id] || '';
-        return `<td class="grid-cell">
-          <select onchange="gridSetCriterioNivel('${est.id}','${c.id}',this.value)" style="width:100%;font-size:0.76rem;padding:4px">
-            <option value="">— Sin calificar —</option>
-            ${avRubricaActual.niveles.map(n => `<option value="${n.id}" ${sel === n.id ? 'selected' : ''}>${n.label} (${n.puntos})</option>`).join('')}
-          </select>
-        </td>`;
-      }).join('');
-      const nivelesPreview = avCompsActuales.map(c => {
-        const n = _calcNivelCompGrid(est.id, c.id);
-        return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + n}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : n}</span>`;
-      }).join(' ');
-      previewCell = `<td class="td-nota" id="prevcomp-${est.id}" style="line-height:1.7">${nivelesPreview}</td>`;
-    } else {
+    const laoCellsHtml = avLaosGrid.map(({ lao, rubrica, modo, comps }) => {
+      if (modo === 'rubrica') {
+        const critCells = rubrica.criterios.map(c => {
+          const sel = avClaseData[est.id]?.porLao?.[lao.id]?._criterios?.[c.id] || '';
+          return `<td class="grid-cell">
+            <select onchange="gridSetCriterioNivel('${est.id}','${lao.id}','${c.id}',this.value)" style="width:100%;font-size:0.76rem;padding:4px">
+              <option value="">— Sin calificar —</option>
+              ${rubrica.niveles.map(n => `<option value="${n.id}" ${sel === n.id ? 'selected' : ''}>${n.label} (${n.puntos})</option>`).join('')}
+            </select>
+          </td>`;
+        }).join('');
+        const nivelesPreview = comps.map(c => {
+          const n = _calcNivelCompGrid(est.id, lao.id, c.id);
+          return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + n}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : n}</span>`;
+        }).join(' ');
+        return `${critCells}<td class="td-nota" id="prevcomp-${est.id}-${lao.id}" style="line-height:1.7">${nivelesPreview}</td>`;
+      }
       // Modo directa: una pastilla por nivel de la Escala vigente por
       // competencia (juicio del profesor, sin ninguna fórmula de por medio)
       // + una Nota del LAO aparte. Sin selección = N/A (no es lo mismo que
       // elegir el nivel más bajo, que sí es una evaluación real).
       const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
-      inputCells = avCompsActuales.map(c => {
-        const sel = avClaseData[est.id]?._nivelesDirectos?.[c.id] || '';
+      const compCells = comps.map(c => {
+        const sel = avClaseData[est.id]?.porLao?.[lao.id]?._nivelesDirectos?.[c.id] || '';
         return `<td class="grid-cell">
           <div class="grid-level-btns">
             ${nivelesEscala.map(n => { const v = String(n.valor); return `
-              <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${est.id}-${c.id}-${v}"
-                onclick="gridSetNivelDirecto('${est.id}','${c.id}','${v}')"
+              <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${est.id}-${lao.id}-${c.id}-${v}"
+                onclick="gridSetNivelDirecto('${est.id}','${lao.id}','${c.id}','${v}')"
                 title="${n.valor} · ${n.titulo}">${v}</div>`; }).join('')}
           </div>
-          <div style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
+          <div id="gl-label-${est.id}-${lao.id}-${c.id}" style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
         </td>`;
       }).join('');
-      const notaLao = avClaseData[est.id]?._notaLao ?? '';
-      previewCell = `<td class="grid-cell">
+      const notaLao = avClaseData[est.id]?.porLao?.[lao.id]?._notaLao ?? '';
+      return `${compCells}<td class="grid-cell">
         <input type="number" min="0" max="100" step="0.1" value="${notaLao}"
-          oninput="gridSetNotaLao('${est.id}',this.value)" style="width:90px" placeholder="0–100" title="Nota del LAO en % (independiente del nivel por competencia)">
+          oninput="gridSetNotaLao('${est.id}','${lao.id}',this.value)" style="width:90px" placeholder="0–100" title="Nota del LAO en % (independiente del nivel por competencia)">
       </td>`;
-    }
+    }).join('');
 
     const finalGrade = avClaseData[est.id]?._finalGrade !== undefined ? avClaseData[est.id]._finalGrade : '';
 
@@ -7124,8 +7088,7 @@ function renderGrid() {
         <div class="grid-est-id">${est.id || '—'}</div>
         ${saved ? '<div class="grid-est-badge">✓ guardado</div>' : ''}
       </td>
-      ${inputCells}
-      ${previewCell}
+      ${laoCellsHtml}
       <td class="td-nota td-final-grade">
         <input type="number" min="0" max="100" step="0.1"
           id="fg-${est.id}"
@@ -7144,39 +7107,47 @@ function renderGrid() {
   }).join('');
 }
 
-function gridSetNivelDirecto(estId, compId, valor) {
-  if (!avClaseData[estId]) avClaseData[estId] = { _nivelesDirectos: {} };
-  if (!avClaseData[estId]._nivelesDirectos) avClaseData[estId]._nivelesDirectos = {};
-  avClaseData[estId]._nivelesDirectos[compId] = valor;
+function gridSetNivelDirecto(estId, laoId, compId, valor) {
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  if (!avClaseData[estId].porLao) avClaseData[estId].porLao = {};
+  if (!avClaseData[estId].porLao[laoId]) avClaseData[estId].porLao[laoId] = { _nivelesDirectos: {} };
+  if (!avClaseData[estId].porLao[laoId]._nivelesDirectos) avClaseData[estId].porLao[laoId]._nivelesDirectos = {};
+  avClaseData[estId].porLao[laoId]._nivelesDirectos[compId] = valor;
   const valores = (avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => String(n.valor));
   valores.forEach(v => {
-    const btn = document.getElementById(`gl-${estId}-${compId}-${v}`);
+    const btn = document.getElementById(`gl-${estId}-${laoId}-${compId}-${v}`);
     if (btn) btn.className = 'grid-lvl' + (v === valor ? ' sel-' + v : '');
   });
-  const label = document.getElementById(`gl-${estId}-${compId}-${valores[0]}`)?.closest('td')?.querySelector('div:last-child');
+  const label = document.getElementById(`gl-label-${estId}-${laoId}-${compId}`);
   if (label) label.textContent = valor === '' ? 'N/A' : nivelInfo(valor, avEscalaActual).titulo;
   updateGridProgress();
 }
 
-function gridSetNotaLao(estId, val) {
-  if (!avClaseData[estId]) avClaseData[estId] = {};
-  avClaseData[estId]._notaLao = val === '' ? '' : parseFloat(val);
+function gridSetNotaLao(estId, laoId, val) {
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  if (!avClaseData[estId].porLao) avClaseData[estId].porLao = {};
+  if (!avClaseData[estId].porLao[laoId]) avClaseData[estId].porLao[laoId] = {};
+  avClaseData[estId].porLao[laoId]._notaLao = val === '' ? '' : parseFloat(val);
 }
 
-function _refrescarPreviewNivel(estId) {
-  const el = document.getElementById(`prevcomp-${estId}`);
+function _refrescarPreviewNivel(estId, laoId) {
+  const el = document.getElementById(`prevcomp-${estId}-${laoId}`);
   if (!el) return;
-  el.innerHTML = avCompsActuales.map(c => {
-    const n = _calcNivelCompGrid(estId, c.id);
+  const entry = avLaosGrid.find(x => x.lao.id === laoId);
+  if (!entry) return;
+  el.innerHTML = entry.comps.map(c => {
+    const n = _calcNivelCompGrid(estId, laoId, c.id);
     return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + n}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : n}</span>`;
   }).join(' ');
 }
 
-function gridSetCriterioNivel(estId, critId, nivelId) {
-  if (!avClaseData[estId]) avClaseData[estId] = { _criterios: {} };
-  if (!avClaseData[estId]._criterios) avClaseData[estId]._criterios = {};
-  avClaseData[estId]._criterios[critId] = nivelId;
-  _refrescarPreviewNivel(estId);
+function gridSetCriterioNivel(estId, laoId, critId, nivelId) {
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  if (!avClaseData[estId].porLao) avClaseData[estId].porLao = {};
+  if (!avClaseData[estId].porLao[laoId]) avClaseData[estId].porLao[laoId] = { _criterios: {} };
+  if (!avClaseData[estId].porLao[laoId]._criterios) avClaseData[estId].porLao[laoId]._criterios = {};
+  avClaseData[estId].porLao[laoId]._criterios[critId] = nivelId;
+  _refrescarPreviewNivel(estId, laoId);
   updateGridProgress();
 }
 
@@ -7213,9 +7184,12 @@ function toggleObs(estId, compId) {
 function updateGridProgress() {
   const total = avEstudiantesActuales.length;
   const done  = avEstudiantesActuales.filter(est => {
-    const resp = avClaseData[est.id] || {};
-    if (avModoActual === 'rubrica') return Object.values(resp._criterios || {}).some(v => v);
-    return Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
+    const porLao = avClaseData[est.id]?.porLao || {};
+    return avLaosGrid.some(({ lao, modo }) => {
+      const resp = porLao[lao.id] || {};
+      if (modo === 'rubrica') return Object.values(resp._criterios || {}).some(v => v);
+      return Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
+    });
   }).length;
   document.getElementById('av-progress-done').textContent = done;
   document.getElementById('av-progress-total').textContent = total;
@@ -7223,9 +7197,14 @@ function updateGridProgress() {
   document.getElementById('av-progress-fill').style.width = pct + '%';
 }
 
+// Guarda un registro en db.avaluos por (estudiante, LAO con datos) — igual
+// que antes de combinar el grid — pero la Nota Final del Curso y el
+// Comentario son un solo valor por estudiante que se copia dentro de CADA
+// registro de LAO, para no romper los reportes existentes que ya leen esos
+// campos por avalúo individual.
 function guardarTodaLaClase() {
   const cursoId = document.getElementById('av-curso').value;
-  if (!cursoId || !avSeccionActual || !avLaoActual) { notify('Selecciona curso, sección y LAO', '⚠️'); return; }
+  if (!cursoId || !avSeccionActual || !avLaosGrid.length) { notify('Selecciona curso y sección', '⚠️'); return; }
 
   const semestre  = document.getElementById('av-semestre').value.trim();
   const fecha     = document.getElementById('av-fecha').value;
@@ -7234,89 +7213,95 @@ function guardarTodaLaClase() {
   let guardados = 0, saltados = 0;
 
   avEstudiantesActuales.forEach(est => {
-    const resp = avClaseData[est.id] || {};
-    const tieneAlgo = avModoActual === 'rubrica'
-      ? Object.values(resp._criterios || {}).some(v => v)
-      : Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
-    if (!tieneAlgo) { saltados++; return; }
-
-    // Remove old avaluo for same student+course+seccion+LAO if exists (re-evaluar sobrescribe)
-    const oldIdx = db.avaluos.findIndex(a =>
-      a.cursoId === cursoId && a.seccionId === avSeccionActual.id && a.laoId === avLaoActual.id &&
-      (a.estudianteId === est.id || a.estudiante === est.nombre)
-    );
-    if (oldIdx >= 0) db.avaluos.splice(oldIdx, 1);
-
-    let evaluaciones, notaLao;
-    if (avModoActual === 'rubrica') {
-      // Por cada competencia que mide este LAO: promedio ponderado
-      // DIRECTAMENTE en los puntos de la escala Likert de este LAO (ej.
-      // 0-4), redondeado al entero más cercano para obtener el Nivel final
-      // — ya no se usan umbrales. También se guarda un % normalizado
-      // (0-100) en puntajeLao, únicamente para cuando dos LAOs distintos
-      // midan la misma competencia y haya que combinarlos (Fase 1).
-      const maxValorEscala = Math.max(...avRubricaActual.niveles.map(n => n.puntos), 1);
-      evaluaciones = avCompsActuales.map(c => {
-        const critsComp = avRubricaActual.criterios.filter(cr => _rbPesoParaCompetencia(cr, c.id) !== undefined);
-        let sumPeso = 0, sumPuntos = 0;
-        critsComp.forEach(cr => {
-          const nivelId = resp._criterios?.[cr.id];
-          if (!nivelId) return;
-          const nivel = avRubricaActual.niveles.find(n => n.id === nivelId);
-          if (!nivel) return;
-          const pesoComp = _rbPesoParaCompetencia(cr, c.id) || 0;
-          sumPuntos += nivel.puntos * pesoComp;
-          sumPeso += pesoComp;
-        });
-        const puntosPromedio = sumPeso ? sumPuntos / sumPeso : null;
-        const puntajeLao = puntosPromedio !== null ? (puntosPromedio / maxValorEscala) * 100 : null;
-        return {
-          competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
-          puntajeLao, nivel: puntosPromedio !== null ? Math.round(puntosPromedio) : '',
-          lao: avLaoActual.nombre,
-        };
-      });
-    } else {
-      // Modo directa: el nivel por competencia es el juicio directo del
-      // profesor (sin fórmula) — no hay puntajeLao derivado por competencia,
-      // ya que no viene de un puntaje. La "Nota del LAO" es un campo aparte,
-      // independiente de estos niveles.
-      evaluaciones = avCompsActuales.map(c => ({
-        competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
-        puntajeLao: null,
-        nivel: resp._nivelesDirectos?.[c.id] !== undefined ? resp._nivelesDirectos[c.id] : '',
-        lao: avLaoActual.nombre,
-      }));
-      notaLao = resp._notaLao !== undefined && resp._notaLao !== '' ? parseFloat(resp._notaLao) : '';
-    }
-
     const comentario  = document.getElementById(`comentario-${est.id}`)?.value?.trim() || '';
     const finalGradeV = document.getElementById(`fg-${est.id}`)?.value;
     const notaFinal   = finalGradeV !== '' && finalGradeV !== undefined ? parseFloat(finalGradeV) : '';
-    db.avaluos.push({
-      id: Date.now().toString() + Math.random().toString(36).slice(2,5),
-      cursoId,
-      cursoNombre:   curso.nombre || '',
-      cursoCodigo:   curso.codigo || '',
-      estudiante:    est.nombre,
-      estudianteId:  est.id || '',
-      seccionId:     avSeccionActual.id,
-      seccion:       avSeccionActual.numero,
-      semestre:      avSeccionActual.semestre || '',
-      semestre, fecha, profesor,
-      laoId:         avLaoActual.id,
-      laoNombre:     avLaoActual.nombre,
-      modoEvaluacion: avModoActual,
-      criteriosResp: avModoActual === 'rubrica' ? { ...resp._criterios } : undefined,
-      notaLao,
-      comentarioGeneral: comentario,
-      notaFinal,
-      notaFinalLetra: notaFinal !== '' ? gradeToLetter(parseFloat(notaFinal)) : '',
-      evaluaciones,
-      fechaRegistro: new Date().toISOString()
+    let estTuvoAlgo = false;
+
+    avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
+      const resp = avClaseData[est.id]?.porLao?.[lao.id] || {};
+      const tieneAlgo = modo === 'rubrica'
+        ? Object.values(resp._criterios || {}).some(v => v)
+        : Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
+      if (!tieneAlgo) return;
+      estTuvoAlgo = true;
+
+      // Remove old avaluo for same student+course+seccion+LAO if exists (re-evaluar sobrescribe)
+      const oldIdx = db.avaluos.findIndex(a =>
+        a.cursoId === cursoId && a.seccionId === avSeccionActual.id && a.laoId === lao.id &&
+        (a.estudianteId === est.id || a.estudiante === est.nombre)
+      );
+      if (oldIdx >= 0) db.avaluos.splice(oldIdx, 1);
+
+      let evaluaciones, notaLao;
+      if (modo === 'rubrica') {
+        // Por cada competencia que mide este LAO: promedio ponderado
+        // DIRECTAMENTE en los puntos de la escala Likert de este LAO (ej.
+        // 0-4), redondeado al entero más cercano para obtener el Nivel final
+        // — ya no se usan umbrales. También se guarda un % normalizado
+        // (0-100) en puntajeLao, únicamente para cuando dos LAOs distintos
+        // midan la misma competencia y haya que combinarlos (Fase 1).
+        const maxValorEscala = Math.max(...rubrica.niveles.map(n => n.puntos), 1);
+        evaluaciones = comps.map(c => {
+          const critsComp = rubrica.criterios.filter(cr => _rbPesoParaCompetencia(cr, c.id) !== undefined);
+          let sumPeso = 0, sumPuntos = 0;
+          critsComp.forEach(cr => {
+            const nivelId = resp._criterios?.[cr.id];
+            if (!nivelId) return;
+            const nivel = rubrica.niveles.find(n => n.id === nivelId);
+            if (!nivel) return;
+            const pesoComp = _rbPesoParaCompetencia(cr, c.id) || 0;
+            sumPuntos += nivel.puntos * pesoComp;
+            sumPeso += pesoComp;
+          });
+          const puntosPromedio = sumPeso ? sumPuntos / sumPeso : null;
+          const puntajeLao = puntosPromedio !== null ? (puntosPromedio / maxValorEscala) * 100 : null;
+          return {
+            competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
+            puntajeLao, nivel: puntosPromedio !== null ? Math.round(puntosPromedio) : '',
+            lao: lao.nombre,
+          };
+        });
+      } else {
+        // Modo directa: el nivel por competencia es el juicio directo del
+        // profesor (sin fórmula) — no hay puntajeLao derivado por competencia,
+        // ya que no viene de un puntaje. La "Nota del LAO" es un campo aparte,
+        // independiente de estos niveles.
+        evaluaciones = comps.map(c => ({
+          competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
+          puntajeLao: null,
+          nivel: resp._nivelesDirectos?.[c.id] !== undefined ? resp._nivelesDirectos[c.id] : '',
+          lao: lao.nombre,
+        }));
+        notaLao = resp._notaLao !== undefined && resp._notaLao !== '' ? parseFloat(resp._notaLao) : '';
+      }
+
+      db.avaluos.push({
+        id: Date.now().toString() + Math.random().toString(36).slice(2,5),
+        cursoId,
+        cursoNombre:   curso.nombre || '',
+        cursoCodigo:   curso.codigo || '',
+        estudiante:    est.nombre,
+        estudianteId:  est.id || '',
+        seccionId:     avSeccionActual.id,
+        seccion:       avSeccionActual.numero,
+        semestre:      avSeccionActual.semestre || '',
+        semestre, fecha, profesor,
+        laoId:         lao.id,
+        laoNombre:     lao.nombre,
+        modoEvaluacion: modo,
+        criteriosResp: modo === 'rubrica' ? { ...resp._criterios } : undefined,
+        notaLao,
+        comentarioGeneral: comentario,
+        notaFinal,
+        notaFinalLetra: notaFinal !== '' ? gradeToLetter(parseFloat(notaFinal)) : '',
+        evaluaciones,
+        fechaRegistro: new Date().toISOString()
+      });
     });
-    avGuardados.add(est.id);
-    guardados++;
+
+    if (estTuvoAlgo) { avGuardados.add(est.id); guardados++; }
+    else saltados++;
   });
 
   saveDB();
@@ -7341,17 +7326,13 @@ function guardarTodaLaClase() {
 
 function limpiarAvaluo() {
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
-  avLaoActual = null; avRubricaActual = null;
-  avCompsActuales = []; avEstudiantesActuales = [];
+  avLaosGrid = []; avEstudiantesActuales = [];
   ['av-curso','av-semestre','av-profesor'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   const selSec = document.getElementById('av-seccion-sel');
   if (selSec) { selSec.innerHTML = '<option value="">— Primero selecciona curso —</option>'; selSec.disabled = true; }
-  const selLao = document.getElementById('av-lao-sel');
-  if (selLao) { selLao.innerHTML = '<option value="">— Primero selecciona sección —</option>'; selLao.disabled = true; }
   document.getElementById('av-lao-info').style.display = 'none';
-  document.getElementById('av-modo-toggle').style.display = 'none';
 
   document.getElementById('av-grid-container').style.display = 'none';
   document.getElementById('av-meta-row').style.display = 'none';
