@@ -4917,23 +4917,28 @@ function _ensureProgramCatalogSeeded() {
     if (p.departamentoId === undefined) { p.departamentoId = null; changed = true; }
   });
   // Agrega como registros reales los 10 programas que hoy solo existen
-  // hardcodeados en PROG_ORDER, si todavía no están en el catálogo por nombre
-  const nombresExistentes = new Set(db.programas.map(p => p.nombre));
+  // hardcodeados en PROG_ORDER, si todavía no están en el catálogo por nombre.
+  // Comparación insensible a mayúsculas/minúsculas: un programa ya renombrado
+  // o editado a mano con distinta capitalización (ej. "MPH CORE" en vez de
+  // "MPH Core") debe contar como que ya existe — si no, cada carga crea un
+  // "fantasma" duplicado con la capitalización exacta de la constante.
+  const nombresExistentes = new Set(db.programas.map(p => p.nombre.toLowerCase()));
   // Los nombres ya renombrados por Fase A (a su nombre canónico del
   // Registrador) no deben volver a sembrarse con su nombre viejo solo porque
   // ese nombre viejo ya no existe tal cual — si no, cada carga resucitaría un
   // programa "fantasma" con el nombre anterior.
   Object.entries(PROG_RENAME_MAP_FASE_A).forEach(([nombreViejo, nombreNuevo]) => {
-    if (nombresExistentes.has(nombreNuevo)) nombresExistentes.add(nombreViejo);
+    if (nombresExistentes.has(nombreNuevo.toLowerCase())) nombresExistentes.add(nombreViejo.toLowerCase());
   });
   PROG_ORDER_DEFAULT.forEach(nombre => {
-    if (!nombresExistentes.has(nombre)) {
+    if (!nombresExistentes.has(nombre.toLowerCase())) {
       db.programas.push({
         id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         nombre, tipo: '', descripcion: '', departamentoId: null,
         fechaCreacion: new Date().toISOString(),
       });
       changed = true;
+      nombresExistentes.add(nombre.toLowerCase());
     }
   });
   if (changed) saveDB();
@@ -5021,21 +5026,24 @@ function _ensureFaseA_ProgramasEstudiantes() {
   let changed = false;
 
   // 1) Renombrar programas existentes a los nombres canónicos del Registrador
+  // (comparación insensible a mayúsculas/minúsculas — ver nota en
+  // _ensureProgramCatalogSeeded sobre por qué esto evita duplicados fantasma)
   Object.entries(PROG_RENAME_MAP_FASE_A).forEach(([nombreViejo, nombreNuevo]) => {
-    const prog = db.programas.find(p => p.nombre === nombreViejo);
+    const prog = db.programas.find(p => p.nombre.toLowerCase() === nombreViejo.toLowerCase());
     if (prog) { _renombrarProgramaCascada(prog, nombreNuevo); changed = true; }
   });
 
   // 2) Crear programas nuevos que todavía no existan en el catálogo
-  const nombresExistentes = new Set(db.programas.map(p => p.nombre));
+  const nombresExistentes = new Set(db.programas.map(p => p.nombre.toLowerCase()));
   PROGRAMAS_NUEVOS_FASE_A.forEach(nombre => {
-    if (!nombresExistentes.has(nombre)) {
+    if (!nombresExistentes.has(nombre.toLowerCase())) {
       db.programas.push({
         id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         nombre, tipo: '', descripcion: '', departamentoId: null, secuencias: _secuenciasVacias(),
         fechaCreacion: new Date().toISOString(),
       });
       changed = true;
+      nombresExistentes.add(nombre.toLowerCase());
     }
   });
 
