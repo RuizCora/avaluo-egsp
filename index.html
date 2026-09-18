@@ -353,6 +353,7 @@
   #av-grid-table tr:hover td { background: #f0eade !important; }
   #av-grid-table tr.row-saved td { opacity: 0.65; }
   #av-grid-table tr.row-saved td.td-estudiante { opacity: 1; }
+  #av-grid-table tr.fila-no-aplica > td:not(.td-estudiante) { opacity: 0.4; pointer-events: none; }
 
   .grid-est-name { font-weight: 600; font-size: 0.82rem; line-height: 1.3; }
   .grid-est-id   { font-size: 0.7rem; color: var(--muted); margin-top:2px; }
@@ -398,6 +399,7 @@
     display:inline-block; padding:3px 8px; border-radius:6px;
     font-size:0.78rem; font-weight:700;
   }
+  .nota-chip.nc-4 { background:#a7f3d0; color:#064e3b; }
   .nota-chip.nc-3 { background:#d1fae5; color:#065f46; }
   .nota-chip.nc-2 { background:#fef3c7; color:#92400e; }
   .nota-chip.nc-1 { background:#ffedd5; color:#7c2d12; }
@@ -697,6 +699,7 @@
   .grid-lvl.sel-0 { background: #1a1a1a !important; color: #fff !important; }
 
   /* ── NOTA CHIP colors ───────────────────────────────────── */
+  .nota-chip.nc-4 { background: #059669; color: #fff; }
   .nota-chip.nc-3 { background: var(--egsp-coral); color: #fff; }
   .nota-chip.nc-2 { background: var(--egsp-gray);  color: #fff; }
 
@@ -5177,6 +5180,29 @@ function nivelInfo(valor, escala) {
   return n || { titulo: 'Nivel ' + valor, descripcion: '' };
 }
 
+// Redondeo a 2 decimales para cálculos combinados (promedios ponderados entre
+// LAOs, entre criterios de una rúbrica, etc.) — a petición de Edgardo, estos
+// valores calculados ya NO se redondean al entero más cercano, para dar más
+// granularidad de dónde está el estudiante (ej. 2.67 en vez de 3). Los
+// valores elegidos a mano (pastillas) siguen siendo enteros, a menos que el
+// profesor use la entrada numérica manual (ver toggleModoManualNivel).
+function _round2(n) {
+  return Math.round(n * 100) / 100;
+}
+// Formatea un nivel calculado para mostrar: sin ceros de más (3 en vez de
+// 3.00), pero con hasta 2 decimales cuando el cálculo no da un entero exacto.
+function _fmtNivel(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const r = _round2(n);
+  return Number.isInteger(r) ? String(r) : r.toFixed(2);
+}
+// Bucket entero (0-4) usado SOLO para el color de la pastilla/chip — el
+// texto que se muestra siempre es el valor exacto vía _fmtNivel().
+function _nivelBucket(n) {
+  if (n === null || n === undefined || isNaN(n)) return '';
+  return Math.min(4, Math.max(0, Math.round(n)));
+}
+
 // Etiqueta agrupada de un nivel para reportes (ej. "Competent" y "Proficient"
 // mostrados juntos como "Logrado" si esa agrupación está activa en la escala).
 // Si el valor no cae en ninguna agrupación, se usa su propio título.
@@ -5471,11 +5497,14 @@ function laosDisponiblesPara(cursoId, userEmail, esAdmin) {
 // por completo el cálculo de arriba — no se promedia con los LAOs.
 function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, avaluosCurso) {
   const avs = avaluosCurso || db.avaluos;
+  const escala = resolverEscalaParaCurso(cursoId);
+  const maxValor = escala?.niveles?.length ? Math.max(...escala.niveles.map(n => n.valor)) : 4;
+
   const avDirecta = avs.find(a => a.estudianteId === estudianteId && a.laoId === laoDirectaCursoId(cursoId));
   if (avDirecta) {
     const evDirecta = avDirecta.evaluaciones?.find(e => e.competenciaId === competenciaId);
     if (evDirecta && evDirecta.nivel !== '' && evDirecta.nivel !== undefined && evDirecta.nivel !== null) {
-      return Math.round(parseFloat(evDirecta.nivel));
+      return _round2(parseFloat(evDirecta.nivel));
     }
   }
 
@@ -5484,19 +5513,30 @@ function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, aval
   const contribuciones = [];
   laosDelCurso.forEach(lao => {
     const compCfg = lao.competencias.find(cc => cc.competenciaId === competenciaId);
-    const av = (avaluosCurso || db.avaluos).find(a =>
-      a.estudianteId === estudianteId && a.laoId === lao.id);
+    const av = avs.find(a => a.estudianteId === estudianteId && a.laoId === lao.id);
     if (!av) return;
     const ev = av.evaluaciones?.find(e => e.competenciaId === competenciaId);
-    if (!ev || ev.puntajeLao === undefined || ev.puntajeLao === null) return;
-    contribuciones.push({ pct: ev.puntajeLao, peso: compCfg?.peso ?? 100 });
+    if (!ev) return;
+    let pct;
+    if (ev.puntajeLao !== undefined && ev.puntajeLao !== null) {
+      // LAO con rúbrica: puntajeLao ya viene normalizado a % (0-100).
+      pct = ev.puntajeLao;
+    } else if (ev.nivel !== '' && ev.nivel !== undefined && ev.nivel !== null) {
+      // LAO en modo directa: no hay puntajeLao (no sale de una fórmula), así
+      // que el nivel elegido a mano se normaliza contra la escala del curso
+      // — mismo criterio que usa el cálculo en vivo
+      // _calcNivelFinalCompetenciaGrid(). Antes este caso se ignoraba por
+      // completo (un LAO en modo directa nunca contribuía aquí).
+      pct = (parseFloat(ev.nivel) / maxValor) * 100;
+    } else {
+      return;
+    }
+    contribuciones.push({ pct, peso: compCfg?.peso ?? 100 });
   });
   if (!contribuciones.length) return null;
   const totalPeso = contribuciones.reduce((s, c) => s + c.peso, 0) || 1;
   const pctFinal = contribuciones.reduce((s, c) => s + (c.pct * c.peso), 0) / totalPeso;
-  const escala = resolverEscalaParaCurso(cursoId);
-  const maxValor = escala?.niveles?.length ? Math.max(...escala.niveles.map(n => n.valor)) : 4;
-  return Math.round((pctFinal / 100) * maxValor);
+  return _round2((pctFinal / 100) * maxValor);
 }
 
 // Reparte 100% entre los vínculos LAO→competencia que sigan en modo
@@ -6807,6 +6847,7 @@ let avLaosGrid = [];       // [{lao, rubrica, modo, comps}] — LAOs REALES list
 let avEscalaActual = null; // Escala de Niveles resuelta para el curso — usada por las pastillas del modo directa
 let avDirectaCursoEntry = null; // {lao, comps} si el curso tiene permiteDirectaCurso — controla la columna compartida "Nivel Final por Competencia"
 let avCompsFinal = [];    // competencias mostradas en la columna compartida "Nivel Final por Competencia" (unión de las de avLaosGrid + avDirectaCursoEntry)
+let avModoManualNivel = {}; // { "laoId::compId": true } — columnas de nivel directo donde el profesor decidió usar entrada numérica exacta en vez de pastillas (decisión por columna, aplica a toda la sección)
 
 function setDefaultDate() {
   const f = document.getElementById('av-fecha');
@@ -6828,7 +6869,7 @@ function onCursoChange() {
   const selSec  = document.getElementById('av-seccion-sel');
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
-  avLaosGrid = []; avDirectaCursoEntry = null;
+  avLaosGrid = []; avDirectaCursoEntry = null; avModoManualNivel = {};
   document.getElementById('av-grid-container').style.display = 'none';
   document.getElementById('av-meta-row').style.display = 'none';
   document.getElementById('av-lao-info').style.display = 'none';
@@ -6869,7 +6910,7 @@ function onSeccionChange() {
   const cursoId = document.getElementById('av-curso').value;
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
-  avLaosGrid = []; avDirectaCursoEntry = null;
+  avLaosGrid = []; avDirectaCursoEntry = null; avModoManualNivel = {};
   document.getElementById('av-grid-container').style.display = 'none';
   const infoEl = document.getElementById('av-lao-info');
   infoEl.style.display = 'none';
@@ -7032,13 +7073,37 @@ function buildGridCombinado(cursoId) {
   // exclusivamente en la columna compartida, ahora editable a mano. Es un
   // "o lo uno o lo otro": nunca se ven a la vez el nivel que darían los LAOs
   // y el nivel directo de curso para la misma competencia.
+  _renderTheadCombinado();
+  // renderGridCombinado() ya escribe el Comentario prellenado de cada
+  // estudiante directamente en el <textarea> (lee avClaseData[].{_comentario}),
+  // así que no hace falta un segundo paso para restaurarlo después.
+  renderGridCombinado();
+
+  document.getElementById('av-grid-container').style.display = '';
+  updateGridProgress();
+}
+
+// Arma el <thead> del grid combinado — separado de buildGridCombinado() para
+// poder reconstruirlo solo (sin volver a prellenar desde db.avaluos, lo que
+// perdería cambios sin guardar) cuando el profesor cambia el modo de entrada
+// de una columna de nivel directo (ver toggleModoManualNivel).
+//
+// Cuando el curso tiene Evaluación Directa activa, cada LAO real deja de
+// mostrar su desglose POR COMPETENCIA (la rúbrica ya no muestra su "Nivel
+// por Competencia", el modo directo ya no muestra sus pastillas) — sigue
+// pidiéndose la calificación propia del LAO (los criterios de su rúbrica,
+// o su Nota LAO), pero la evaluación de la competencia en sí vive
+// exclusivamente en la columna compartida, ahora editable a mano. Es un
+// "o lo uno o lo otro": nunca se ven a la vez el nivel que darían los LAOs
+// y el nivel directo de curso para la misma competencia.
+function _renderTheadCombinado() {
   const soloScore = !!avDirectaCursoEntry;
   const thead = document.getElementById('av-grid-thead');
   const grupoHtml = avLaosGrid.map(({ rubrica, modo, comps, lao }) => {
     const ncols = modo === 'rubrica' ? rubrica.criterios.length + (soloScore ? 0 : 1) : (soloScore ? 1 : comps.length + 1);
     return `<th colspan="${ncols}" style="background:#3a3a5c;color:#fff">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}</th>`;
   }).join('') + `<th colspan="${avCompsFinal.length}" style="background:var(--gold);color:#2a2a4a">🎯 Nivel Final por Competencia</th>`;
-  const detalleHtml = avLaosGrid.map(({ rubrica, modo, comps }) => {
+  const detalleHtml = avLaosGrid.map(({ rubrica, modo, comps, lao }) => {
     if (modo === 'rubrica') {
       const critCols = rubrica.criterios.map(c =>
         `<th title="${c.nombre || ''}" style="min-width:190px">${c.nombre || '(sin nombre)'}<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">peso ${c.peso}%</span></th>`
@@ -7048,10 +7113,15 @@ function buildGridCombinado(cursoId) {
     }
     if (soloScore) return `<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
     const compCols = comps.map(c =>
-      `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`
+      `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}${_btnToggleModoManual(lao.id, c.id)}</th>`
     ).join('');
     return `${compCols}<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
-  }).join('') + avCompsFinal.map(c => `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`).join('');
+  }).join('') + avCompsFinal.map(c => {
+    if (avDirectaCursoEntry) {
+      return `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}${_btnToggleModoManual(avDirectaCursoEntry.lao.id, c.id)}</th>`;
+    }
+    return `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`;
+  }).join('');
   thead.innerHTML = `<tr>
       <th class="col-estudiante" rowspan="2">Estudiante</th>
       ${grupoHtml}
@@ -7059,19 +7129,35 @@ function buildGridCombinado(cursoId) {
       <th class="col-nota" rowspan="2" style="min-width:90px">Comentario</th>
     </tr>
     <tr>${detalleHtml}</tr>`;
+}
 
+// Modo de entrada de una columna de nivel directo (LAO real en modo directa,
+// o la columna compartida cuando el curso está en Evaluación Directa):
+// pastillas (default) o número exacto con hasta 2 decimales. Es una
+// decisión del profesor para TODA la columna (todos los estudiantes de la
+// sección a la vez) — a petición de Edgardo, porque normalmente el nivel de
+// esa columna sale del mismo instrumento externo (rúbrica/gradebook) para
+// toda la clase.
+function _keyModoManual(laoId, compId) {
+  return laoId + '::' + compId;
+}
+function esModoManualNivel(laoId, compId) {
+  return !!avModoManualNivel[_keyModoManual(laoId, compId)];
+}
+function toggleModoManualNivel(laoId, compId) {
+  const k = _keyModoManual(laoId, compId);
+  avModoManualNivel[k] = !avModoManualNivel[k];
+  // Solo se reconstruye el thead (etiqueta del botón) y el tbody (tipo de
+  // celda) — NUNCA se vuelve a prellenar desde db.avaluos, para no perder
+  // cambios sin guardar que el profesor ya haya entrado en esta sesión.
+  _renderTheadCombinado();
   renderGridCombinado();
-
-  // Restore saved comentarios into textareas (post-render)
-  avEstudiantesActuales.forEach(est => {
-    if (avClaseData[est.id]?._comentario) {
-      const el = document.getElementById(`comentario-${est.id}`);
-      if (el) el.value = avClaseData[est.id]._comentario;
-    }
-  });
-
-  document.getElementById('av-grid-container').style.display = '';
-  updateGridProgress();
+}
+function _btnToggleModoManual(laoId, compId) {
+  const manual = esModoManualNivel(laoId, compId);
+  return `<br><button type="button" onclick="toggleModoManualNivel('${laoId}','${compId}')"
+    style="font-size:0.58rem;font-weight:400;background:rgba(120,120,120,0.18);border:1px solid rgba(120,120,120,0.4);border-radius:4px;color:inherit;padding:1px 4px;cursor:pointer;margin-top:2px"
+    title="Decisión para toda la sección: usar pastillas o entrar el número exacto (hasta 2 decimales) en esta columna">${manual ? '🔢 Número' : '🎯 Pastillas'}</button>`;
 }
 
 // Nivel (0-3) EN VIVO de una competencia para un estudiante y un LAO
@@ -7099,8 +7185,9 @@ function _calcNivelCompGrid(estId, laoId, compId) {
   });
   if (!sumPeso) return null;
   // Promedio ponderado directamente en los puntos de la escala Likert (ej.
-  // 0-4), redondeado al entero más cercano — ya no se usan umbrales.
-  return Math.round(sumPuntos / sumPeso);
+  // 0-4) — ya no se usan umbrales, y ya no se redondea al entero más cercano
+  // (a petición de Edgardo, para mostrar la granularidad real del cálculo).
+  return _round2(sumPuntos / sumPeso);
 }
 
 // Nivel Final EN VIVO de una competencia, combinando TODOS los LAOs reales
@@ -7135,11 +7222,12 @@ function _calcNivelFinalCompetenciaGrid(estId, compId) {
   const totalPeso = contribuciones.reduce((s, c) => s + c.peso, 0) || 1;
   const pctFinal = contribuciones.reduce((s, c) => s + c.pct * c.peso, 0) / totalPeso;
   const maxValorEscala = Math.max(...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => n.valor), 1);
-  return Math.round((pctFinal / 100) * maxValorEscala);
+  return _round2((pctFinal / 100) * maxValorEscala);
 }
 
 function _chipNivelFinal(n) {
-  return n === null ? '<span class="nota-chip nc-">—</span>' : `<span class="nota-chip nc-${n}">${n}</span>`;
+  if (n === null) return '<span class="nota-chip nc-">—</span>';
+  return `<span class="nota-chip nc-${_nivelBucket(n)}" title="Cálculo exacto: ${_fmtNivel(n)}">${_fmtNivel(n)}</span>`;
 }
 
 // Refresca la celda "Nivel Final por Competencia" de un estudiante/competencia
@@ -7174,7 +7262,7 @@ function renderGridCombinado() {
         if (soloScore) return critCells;
         const nivelesPreview = comps.map(c => {
           const n = _calcNivelCompGrid(est.id, lao.id, c.id);
-          return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + n}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : n}</span>`;
+          return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + _nivelBucket(n)}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : _fmtNivel(n)}</span>`;
         }).join(' ');
         return `${critCells}<td class="td-nota" id="prevcomp-${est.id}-${lao.id}" style="line-height:1.7">${nivelesPreview}</td>`;
       }
@@ -7189,50 +7277,50 @@ function renderGridCombinado() {
       </td>`;
       if (soloScore) return notaLaoCell;
       const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
+      const maxValorEscala = Math.max(...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => n.valor), 1);
       const compCells = comps.map(c => {
         const sel = avClaseData[est.id]?.porLao?.[lao.id]?._nivelesDirectos?.[c.id] || '';
-        return `<td class="grid-cell">
-          <div class="grid-level-btns">
-            ${nivelesEscala.map(n => { const v = String(n.valor); return `
-              <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${est.id}-${lao.id}-${c.id}-${v}"
-                onclick="gridSetNivelDirecto('${est.id}','${lao.id}','${c.id}','${v}')"
-                title="${n.valor} · ${n.titulo}">${v}</div>`; }).join('')}
-          </div>
-          <div id="gl-label-${est.id}-${lao.id}-${c.id}" style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
-        </td>`;
+        return esModoManualNivel(lao.id, c.id)
+          ? _celdaNivelManual(est.id, lao.id, c.id, sel, maxValorEscala)
+          : _celdaNivelPastillas(est.id, lao.id, c.id, sel, nivelesEscala);
       }).join('');
       return `${compCells}${notaLaoCell}`;
     }).join('');
 
     // Columna compartida "🎯 Nivel Final por Competencia" — una celda por
     // competencia en avCompsFinal. Si el curso está en Evaluación Directa,
-    // son pastillas editables (el juicio del profesor); si no, son chips de
-    // solo lectura calculados en vivo combinando los LAOs reales.
+    // son pastillas (o número exacto, si el profesor eligió esa columna en
+    // modo manual) editables por el profesor; si no, son chips de solo
+    // lectura calculados en vivo combinando los LAOs reales.
     const finalCellsHtml = avCompsFinal.map(c => {
       if (avDirectaCursoEntry) {
         const laoId = avDirectaCursoEntry.lao.id;
         const sel = avClaseData[est.id]?.porLao?.[laoId]?._nivelesDirectos?.[c.id] || '';
         const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
-        return `<td class="grid-cell">
-          <div class="grid-level-btns">
-            ${nivelesEscala.map(n => { const v = String(n.valor); return `
-              <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${est.id}-${laoId}-${c.id}-${v}"
-                onclick="gridSetNivelDirecto('${est.id}','${laoId}','${c.id}','${v}')"
-                title="${n.valor} · ${n.titulo}">${v}</div>`; }).join('')}
-          </div>
-          <div id="gl-label-${est.id}-${laoId}-${c.id}" style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
-        </td>`;
+        const maxValorEscala = Math.max(...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => n.valor), 1);
+        return esModoManualNivel(laoId, c.id)
+          ? _celdaNivelManual(est.id, laoId, c.id, sel, maxValorEscala)
+          : _celdaNivelPastillas(est.id, laoId, c.id, sel, nivelesEscala);
       }
       return `<td class="td-nota" id="nfcomp-${est.id}-${c.id}" title="${c.codigo}">${_chipNivelFinal(_calcNivelFinalCompetenciaGrid(est.id, c.id))}</td>`;
     }).join('');
 
     const finalGrade = avClaseData[est.id]?._finalGrade !== undefined ? avClaseData[est.id]._finalGrade : '';
+    const noAplica = !!avClaseData[est.id]?._noAplica;
+    const filaClases = [saved ? 'row-saved' : '', noAplica ? 'fila-no-aplica' : ''].filter(Boolean).join(' ');
 
-    return `<tr id="row-${est.id}"${saved ? ' class="row-saved"' : ''}>
+    return `<tr id="row-${est.id}"${filaClases ? ` class="${filaClases}"` : ''}>
       <td class="td-estudiante">
         <div class="grid-est-name">${est.nombre}</div>
         <div class="grid-est-id">${est.id || '—'}</div>
         ${saved ? '<div class="grid-est-badge">✓ guardado</div>' : ''}
+        <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px;font-size:0.66rem">
+          <button type="button" class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.66rem;align-self:flex-start" onclick="gridLimpiarFila('${est.id}')" title="Borra lo que hayas entrado para este estudiante en esta sesión — no afecta evaluaciones que ya hayas guardado antes de ahora">🗑 Borrar</button>
+          <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="Marca que este estudiante no se va a evaluar (ej. dado de baja) — se excluye de Guardar toda la clase">
+            <input type="checkbox" ${noAplica ? 'checked' : ''} onchange="gridToggleNoAplica('${est.id}', this.checked)">
+            Sin evaluación
+          </label>
+        </div>
       </td>
       ${laoCellsHtml}
       ${finalCellsHtml}
@@ -7248,7 +7336,8 @@ function renderGridCombinado() {
       </td>
       <td class="td-nota">
         <textarea id="comentario-${est.id}" placeholder="Comentario..."
-          style="width:90px;font-size:0.72rem;border:1px solid var(--border);border-radius:5px;padding:3px;resize:vertical;min-height:34px"></textarea>
+          oninput="gridSetComentario('${est.id}',this.value)"
+          style="width:90px;font-size:0.72rem;border:1px solid var(--border);border-radius:5px;padding:3px;resize:vertical;min-height:34px">${avClaseData[est.id]?._comentario || ''}</textarea>
       </td>
     </tr>`;
   }).join('');
@@ -7282,6 +7371,86 @@ function gridSetNotaLao(estId, laoId, val) {
   avClaseData[estId].porLao[laoId]._notaLao = val === '' ? '' : parseFloat(val);
 }
 
+// Celda de nivel directo en modo PASTILLAS (default) — un botón por cada
+// valor de la escala vigente.
+function _celdaNivelPastillas(estId, laoId, compId, sel, nivelesEscala) {
+  return `<td class="grid-cell">
+    <div class="grid-level-btns">
+      ${nivelesEscala.map(n => { const v = String(n.valor); return `
+        <div class="grid-lvl${sel===v?' sel-'+v:''}" id="gl-${estId}-${laoId}-${compId}-${v}"
+          onclick="gridSetNivelDirecto('${estId}','${laoId}','${compId}','${v}')"
+          title="${n.valor} · ${n.titulo}">${v}</div>`; }).join('')}
+    </div>
+    <div id="gl-label-${estId}-${laoId}-${compId}" style="font-size:0.62rem;color:var(--muted);text-align:center;margin-top:2px">${sel === '' ? 'N/A' : nivelInfo(sel, avEscalaActual).titulo}</div>
+  </td>`;
+}
+
+// Celda de nivel directo en modo NÚMERO EXACTO — a petición de Edgardo, para
+// cuando el nivel de una competencia en un LAO sale de un cálculo o rúbrica
+// externa al sistema y no es necesariamente un entero (ej. 3.2). Acepta de 0
+// hasta el máximo de la escala vigente, con hasta 2 decimales.
+function _celdaNivelManual(estId, laoId, compId, sel, maxValorEscala) {
+  return `<td class="grid-cell">
+    <input type="number" min="0" max="${maxValorEscala}" step="0.01" value="${sel}"
+      oninput="gridSetNivelDirectoManual('${estId}','${laoId}','${compId}',this.value,${maxValorEscala})"
+      onchange="gridReformatNivelManual('${estId}','${laoId}','${compId}',this)"
+      style="width:74px" placeholder="0–${maxValorEscala}" title="Valor exacto (hasta 2 decimales, máximo ${maxValorEscala})">
+  </td>`;
+}
+
+// Guarda el valor de la celda de número exacto, recortando al rango válido
+// (0 hasta el máximo de la escala) y a 2 decimales — el input no se reescribe
+// mientras se escribe (para no interrumpir al profesor a media escritura);
+// eso lo hace gridReformatNivelManual() al salir del campo.
+function gridSetNivelDirectoManual(estId, laoId, compId, valorCrudo, maxValor) {
+  let v = valorCrudo === '' ? '' : parseFloat(valorCrudo);
+  if (v !== '' && !isNaN(v)) v = _round2(Math.min(maxValor, Math.max(0, v)));
+  const guardado = (v === '' || isNaN(v)) ? '' : String(v);
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  if (!avClaseData[estId].porLao) avClaseData[estId].porLao = {};
+  if (!avClaseData[estId].porLao[laoId]) avClaseData[estId].porLao[laoId] = { _nivelesDirectos: {} };
+  if (!avClaseData[estId].porLao[laoId]._nivelesDirectos) avClaseData[estId].porLao[laoId]._nivelesDirectos = {};
+  avClaseData[estId].porLao[laoId]._nivelesDirectos[compId] = guardado;
+  updateGridProgress();
+  _refrescarNivelFinalCompetencia(estId, compId);
+}
+
+// Al salir del campo, resincroniza lo que se ve con el valor recortado que
+// realmente quedó guardado (ej. si escribió "10" en una escala 0-4, al salir
+// del campo se ve "4").
+function gridReformatNivelManual(estId, laoId, compId, inputEl) {
+  const v = avClaseData[estId]?.porLao?.[laoId]?._nivelesDirectos?.[compId];
+  inputEl.value = (v === undefined || v === '') ? '' : v;
+}
+
+// Borra todo lo que el profesor haya entrado para un estudiante en ESTA
+// sesión (rúbricas, pastillas, Nota LAO, Nota Final, Comentario) — es un
+// "deshacer" antes de Guardar toda la clase, no toca evaluaciones que ya
+// estén guardadas en la base de datos (para corregir algo ya sometido hace
+// falta un flujo de solicitud de cambio al administrador, que todavía no
+// existe en el sistema).
+function gridLimpiarFila(estId) {
+  avClaseData[estId] = { porLao: {}, _finalGrade: '', _comentario: '', _noAplica: false };
+  renderGridCombinado();
+  updateGridProgress();
+  notify('Fila limpiada', '🧹');
+}
+
+// Marca (o desmarca) a un estudiante como "sin evaluación" (ej. dado de
+// baja) — al marcarlo se limpia cualquier dato entrado en esta sesión y se
+// excluye a ese estudiante de Guardar toda la clase, sin necesidad de que el
+// profesor primero borre nada a mano.
+function gridToggleNoAplica(estId, checked) {
+  if (checked) {
+    avClaseData[estId] = { porLao: {}, _finalGrade: '', _comentario: '', _noAplica: true };
+  } else {
+    if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+    avClaseData[estId]._noAplica = false;
+  }
+  renderGridCombinado();
+  updateGridProgress();
+}
+
 function _refrescarPreviewNivel(estId, laoId) {
   const el = document.getElementById(`prevcomp-${estId}-${laoId}`);
   if (!el) return;
@@ -7289,7 +7458,7 @@ function _refrescarPreviewNivel(estId, laoId) {
   if (!entry) return;
   el.innerHTML = entry.comps.map(c => {
     const n = _calcNivelCompGrid(estId, laoId, c.id);
-    return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + n}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : n}</span>`;
+    return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + _nivelBucket(n)}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : _fmtNivel(n)}</span>`;
   }).join(' ');
 }
 
@@ -7322,6 +7491,15 @@ function gridSetFinalGrade(estId, val) {
   if (letter) letter.textContent = val !== '' ? gradeToLetter(parseFloat(val)) : '';
 }
 
+// Guarda el Comentario a medida que se escribe — así sobrevive a un
+// re-render del grid (ej. al cambiar el modo de una columna a número exacto,
+// o al borrar/marcar "sin evaluación" la fila de OTRO estudiante), en vez de
+// vivir solo en el <textarea> y perderse en el próximo renderGridCombinado().
+function gridSetComentario(estId, val) {
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  avClaseData[estId]._comentario = val;
+}
+
 function gradeToLetter(g) {
   if (isNaN(g)) return '';
   if (g >= 90) return 'A';
@@ -7341,6 +7519,7 @@ function toggleObs(estId, compId) {
 function updateGridProgress() {
   const total = avEstudiantesActuales.length;
   const done  = avEstudiantesActuales.filter(est => {
+    if (avClaseData[est.id]?._noAplica) return true; // marcado "sin evaluación" — es una decisión tomada, no un pendiente
     const porLao = avClaseData[est.id]?.porLao || {};
     const tieneEnLaos = avLaosGrid.some(({ lao, modo }) => {
       const resp = porLao[lao.id] || {};
@@ -7372,9 +7551,16 @@ function guardarTodaLaClase() {
   const fecha     = document.getElementById('av-fecha').value;
   const profesor  = document.getElementById('av-profesor').value.trim();
   const curso     = db.cursos.find(x => x.id === cursoId) || {};
-  let guardados = 0, saltados = 0;
+  let guardados = 0, saltados = 0, sinEvaluacion = 0;
 
   avEstudiantesActuales.forEach(est => {
+    // Marcado "Sin evaluación" (ej. dado de baja) — no se crea ningún
+    // registro para este estudiante en esta corrida. No toca ni borra
+    // evaluaciones que ya estuvieran guardadas de antes: corregir algo ya
+    // sometido es un caso aparte (solicitud de cambio al administrador),
+    // que este botón no intenta resolver.
+    if (avClaseData[est.id]?._noAplica) { sinEvaluacion++; return; }
+
     const comentario  = document.getElementById(`comentario-${est.id}`)?.value?.trim() || '';
     const finalGradeV = document.getElementById(`fg-${est.id}`)?.value;
     const notaFinal   = finalGradeV !== '' && finalGradeV !== undefined ? parseFloat(finalGradeV) : '';
@@ -7421,7 +7607,7 @@ function guardarTodaLaClase() {
           const puntajeLao = puntosPromedio !== null ? (puntosPromedio / maxValorEscala) * 100 : null;
           return {
             competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
-            puntajeLao, nivel: puntosPromedio !== null ? Math.round(puntosPromedio) : '',
+            puntajeLao, nivel: puntosPromedio !== null ? _round2(puntosPromedio) : '',
             lao: lao.nombre,
           };
         });
@@ -7530,14 +7716,14 @@ function guardarTodaLaClase() {
   });
 
   const status = document.getElementById('av-save-status');
-  status.textContent = `✅ ${guardados} guardados${saltados ? ', '+saltados+' sin evaluar omitidos' : ''}`;
-  notify(`${guardados} avalúos guardados${saltados ? ', '+saltados+' omitidos' : ''} 🎉`);
+  status.textContent = `✅ ${guardados} guardados${saltados ? ', '+saltados+' sin evaluar omitidos' : ''}${sinEvaluacion ? ', '+sinEvaluacion+' marcados sin evaluación' : ''}`;
+  notify(`${guardados} avalúos guardados${saltados ? ', '+saltados+' omitidos' : ''}${sinEvaluacion ? ', '+sinEvaluacion+' sin evaluación' : ''} 🎉`);
 }
 
 function limpiarAvaluo() {
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
   avLaosGrid = []; avEstudiantesActuales = [];
-  avDirectaCursoEntry = null; avCompsFinal = [];
+  avDirectaCursoEntry = null; avCompsFinal = []; avModoManualNivel = {};
   ['av-curso','av-semestre','av-profesor'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
