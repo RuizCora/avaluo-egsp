@@ -7779,10 +7779,18 @@ function _construirColumnasExportAvaluo() {
     if (modo === 'rubrica') {
       const opciones = rubrica.niveles.map(n => ({ value: n.id, label: `${n.label} (${n.puntos})` }));
       rubrica.criterios.forEach(crit => {
+        // El código de competencia va SIEMPRE al inicio del encabezado (a
+        // solicitud de Edgardo, para que no se confunda con el nombre del
+        // LAO) — un criterio puede pesar sobre más de una competencia a la
+        // vez (ej. GERO 6503), así que se listan todos los códigos que
+        // aplican, separados por "/".
+        const competenciaIds = (crit.competencias || []).map(cc => cc.competenciaId);
+        const codigos = competenciaIds.map(id => db.competencias.find(c => c.id === id)?.codigo).filter(Boolean);
+        const prefijo = codigos.length ? `${codigos.join('/')} — ` : '';
         columnas.push({
           clave: `crit::${lao.id}::${crit.id}`, tipo: 'criterio',
-          laoId: lao.id, criterioId: crit.id,
-          header: `${lao.nombre} — ${crit.nombre || '(sin nombre)'}`,
+          laoId: lao.id, criterioId: crit.id, competenciaIds,
+          header: `${prefijo}${lao.nombre} — ${crit.nombre || '(sin nombre)'}`,
           opciones,
         });
       });
@@ -7790,7 +7798,7 @@ function _construirColumnasExportAvaluo() {
       if (!soloScore) {
         const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
         const maxValorEscala = Math.max(...nivelesEscala.map(n => n.valor), 1);
-        comps.forEach(c => columnas.push(_columnaNivelDirectoExport(lao.id, c, nivelesEscala, maxValorEscala, `${lao.nombre} — ${c.codigo}`)));
+        comps.forEach(c => columnas.push(_columnaNivelDirectoExport(lao.id, c, nivelesEscala, maxValorEscala, `${c.codigo} — ${lao.nombre}`)));
       }
       columnas.push({
         clave: `notalao::${lao.id}`, tipo: 'notalao', laoId: lao.id,
@@ -7802,7 +7810,7 @@ function _construirColumnasExportAvaluo() {
   if (avDirectaCursoEntry) {
     const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
     const maxValorEscala = Math.max(...nivelesEscala.map(n => n.valor), 1);
-    avCompsFinal.forEach(c => columnas.push(_columnaNivelDirectoExport(avDirectaCursoEntry.lao.id, c, nivelesEscala, maxValorEscala, `Nivel Final — ${c.codigo}`)));
+    avCompsFinal.forEach(c => columnas.push(_columnaNivelDirectoExport(avDirectaCursoEntry.lao.id, c, nivelesEscala, maxValorEscala, `${c.codigo} — Nivel Final`)));
   }
 
   return columnas;
@@ -7817,12 +7825,12 @@ function _construirColumnasExportAvaluo() {
 function _columnaNivelDirectoExport(laoId, comp, nivelesEscala, maxValorEscala, headerBase) {
   if (esModoManualNivel(laoId, comp.id)) {
     return {
-      clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_manual', laoId, competenciaId: comp.id,
+      clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_manual', laoId, competenciaId: comp.id, competenciaIds: [comp.id],
       header: `${headerBase} (0–${maxValorEscala}, hasta 2 decimales)`, min: 0, max: maxValorEscala,
     };
   }
   const opciones = nivelesEscala.map(n => ({ value: String(n.valor), label: `${n.valor} · ${n.titulo}` }));
-  return { clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_lista', laoId, competenciaId: comp.id, header: headerBase, opciones };
+  return { clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_lista', laoId, competenciaId: comp.id, competenciaIds: [comp.id], header: headerBase, opciones };
 }
 
 // Valor ACTUAL (lo que ya se ha entrado en esta sesión, o se prellenó desde
@@ -8032,6 +8040,32 @@ function _construirBytesPlantillaAvaluo(cursoId) {
   const listasMaxFilas = Math.max(0, ...listasColumnas.map(l => l.length));
   const listasFilas = [];
   for (let r = 0; r < listasMaxFilas; r++) listasFilas.push(listasColumnas.map(l => l[r] || ''));
+
+  // Leyenda de competencias — a solicitud de Edgardo, para que el
+  // facultativo tenga a la vista el texto completo de cada competencia que
+  // está evaluando (los encabezados solo traen su código). Se agrega al
+  // FINAL de la hoja "Avalúo" (misma hoja visible, no una hoja aparte), tras
+  // una fila en blanco — se anexa a `filas` DESPUÉS de calcular las
+  // validaciones de datos de arriba (que ya usaban el conteo de filas de
+  // estudiantes) para no aplicarles ningún dropdown/rango por accidente.
+  // Como estas filas no traen ID de estudiante (columna A vacía), un futuro
+  // importador (Fase 5b) que reconcilie por ID las ignora sin necesidad de
+  // saber de antemano cuántas filas de estudiantes hay.
+  const competenciasReferenciadas = [];
+  columnas.forEach(col => (col.competenciaIds || []).forEach(id => {
+    if (competenciasReferenciadas.some(c => c.id === id)) return;
+    const comp = db.competencias.find(c => c.id === id);
+    if (comp) competenciasReferenciadas.push(comp);
+  }));
+  if (competenciasReferenciadas.length) {
+    filas.push([]);
+    const filaTitulo = []; filaTitulo[1] = 'Competencias evaluadas en esta plantilla:';
+    filas.push(filaTitulo);
+    competenciasReferenciadas.forEach(comp => {
+      const fila = []; fila[1] = comp.codigo; fila[2] = comp.descripcion;
+      filas.push(fila);
+    });
+  }
 
   const hojaAvaluoXml = _construirHojaXmlGenerica({
     headers, filas,
