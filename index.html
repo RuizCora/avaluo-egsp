@@ -1884,10 +1884,21 @@
       </table>
     </div>
 
+    <!-- Fase 5b: subir la plantilla Excel llena para prellenar la cuadrícula -->
+    <div id="av-import-dropzone"
+      style="border:2.5px dashed var(--gold);border-radius:10px;background:#fef9ee;padding:12px 16px;text-align:center;cursor:pointer;transition:background 0.2s;font-size:0.8rem;margin-bottom:12px"
+      onclick="document.getElementById('av-import-file-input').click()"
+      ondragover="event.preventDefault();this.style.background='#fef3c7'"
+      ondragleave="this.style.background='#fef9ee'"
+      ondrop="handleAvaluoPlantillaDrop(event)">
+      📤 Arrastra aquí la plantilla Excel ya llena para aplicarla a esta cuadrícula, o haz clic para seleccionarla
+      <input type="file" id="av-import-file-input" accept=".xlsx" style="display:none" onchange="handleAvaluoPlantillaFileInput(this)">
+    </div>
+
     <!-- Save all -->
     <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center">
       <div id="av-save-status" style="font-size:0.82rem;color:var(--muted)"></div>
-      <button class="btn btn-outline" onclick="exportarPlantillaExcelAvaluo()" title="Descarga esta cuadrícula como plantilla Excel, para llenarla fuera del sistema (aún no se puede volver a subir — esa parte viene en una próxima fase)">📥 Descargar plantilla Excel</button>
+      <button class="btn btn-outline" onclick="exportarPlantillaExcelAvaluo()" title="Descarga esta cuadrícula como plantilla Excel, para llenarla fuera del sistema">📥 Descargar plantilla Excel</button>
       <button class="btn btn-outline" onclick="limpiarAvaluo()">🗑 Limpiar</button>
       <button class="btn btn-primary" onclick="guardarTodaLaClase()" id="av-save-all-btn">💾 Guardar Toda la Clase</button>
     </div>
@@ -7865,7 +7876,12 @@ function _fingerprintColumnasExport(columnas, escala) {
 // avClaseData sin conocer de antemano la estructura de este curso.
 function _construirRecetaExportAvaluo(cursoId, columnas) {
   const curso = db.cursos.find(c => c.id === cursoId);
-  const escalaParaFingerprint = { id: avEscalaActual?.id || null, niveles: avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles };
+  // El fingerprint compara solo el CONTENIDO de la escala (sus niveles), no
+  // el id interno del registro en db.escalasNiveles — ese id no dice nada
+  // sobre si la escala "cambió" para efectos de esta plantilla (ej. una
+  // resiembra de la base de datos puede generar un id nuevo para la misma
+  // escala global, sin que ningún nivel haya cambiado de verdad).
+  const escalaParaFingerprint = { niveles: avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles };
   return {
     version: 1,
     fingerprint: _fingerprintColumnasExport(columnas, escalaParaFingerprint),
@@ -8114,6 +8130,152 @@ function exportarPlantillaExcelAvaluo() {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   notify(`Plantilla de Avalúo descargada: ${avEstudiantesActuales.length} estudiante(s), ${columnas.length} columna(s) ✓`, '📥');
+}
+
+// ============================================================
+// Fase 5b — Importador genérico de la plantilla Excel llena.
+//
+// Es UN SOLO motor genérico (no hay parser por curso): lee la "receta"
+// oculta que la Fase 5a ya embebe en el archivo, recalcula el fingerprint
+// de la estructura ACTUAL del curso/sección y lo compara contra el que
+// trae la receta — si no calza (decisión de diseño #3, confirmada con
+// Edgardo), rechaza la carga entera y pide reexportar, sin aplicar nada a
+// medias. Si calza, reconcilia cada fila por el id oculto del estudiante
+// (columna A, no por posición) contra la sección actual, y aplica cada
+// columna llamando a la MISMA función que usaría el profesor tecleando a
+// mano (gridSetCriterioNivel/gridSetNivelDirecto/gridSetNivelDirectoManual/
+// gridSetNotaLao/gridSetFinalGrade/gridSetComentario) — así el recorte a
+// rango, el redondeo a 2 decimales, etc. son exactamente los mismos que ya
+// aplica el grid en pantalla, sin reimplementar esa lógica aquí.
+// ============================================================
+
+// Lee la hoja oculta "_receta" de un workbook ya parseado por SheetJS y
+// reconstruye el JSON (venía partido en trozos de una celda cada uno, ver
+// _construirBytesPlantillaAvaluo). Devuelve null si la hoja no existe o el
+// JSON no se puede reconstruir (archivo que no es una plantilla del sistema).
+function _leerRecetaDeWorkbook(wb) {
+  const sheet = wb.Sheets['_receta'];
+  if (!sheet) return null;
+  const filas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const json = filas.slice(1).map(f => f[0] || '').join('');
+  try {
+    const receta = JSON.parse(json);
+    return (receta && Array.isArray(receta.columnas)) ? receta : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Traduce el valor CRUDO de una celda de la hoja "Avalúo" (lo que Excel
+// muestra: una etiqueta de lista, o un número) de vuelta al valor que espera
+// el setter correspondiente, y aplica el cambio a avClaseData llamando a esa
+// misma función — nunca escribe avClaseData directamente. `col` es una
+// entrada de _construirColumnasExportAvaluo() (columnas ACTUALES, ya
+// confirmadas idénticas a las de la receta por el fingerprint).
+function _aplicarValorColumnaImportAvaluo(estId, col, rawCelda) {
+  if (col.opciones) {
+    // Columna de lista (criterio de rúbrica, o nivel directo en pastillas) —
+    // la celda trae la ETIQUETA visible ("Competent (3)", "3 · Competent...")
+    // que hay que traducir de vuelta a su valor interno; una etiqueta vacía o
+    // que no calza con ninguna opción se trata como "sin calificar" (nunca se
+    // inventa un valor).
+    const raw = (rawCelda === undefined || rawCelda === null) ? '' : String(rawCelda).trim();
+    const opt = raw === '' ? null : col.opciones.find(o => o.label === raw);
+    const valor = opt ? opt.value : '';
+    if (col.tipo === 'criterio') gridSetCriterioNivel(estId, col.laoId, col.criterioId, valor);
+    else gridSetNivelDirecto(estId, col.laoId, col.competenciaId, valor);
+    return;
+  }
+  const cruda = (rawCelda === undefined || rawCelda === null) ? '' : rawCelda;
+  if (col.tipo === 'nivel_manual') gridSetNivelDirectoManual(estId, col.laoId, col.competenciaId, cruda, col.max);
+  else if (col.tipo === 'notalao') gridSetNotaLao(estId, col.laoId, cruda);
+}
+
+// El motor genérico: recibe un workbook YA PARSEADO por SheetJS (separado de
+// la lectura de bytes/arrayBuffer para poder probarlo en Node sin un
+// navegador real) y el id del curso actualmente seleccionado. Devuelve
+// {ok:false, motivo} si rechaza la carga entera, o {ok:true, aplicados,
+// noEncontrados, faltantes} si la aplicó — nunca aplica nada a medias.
+function _procesarPlantillaAvaluoDesdeWorkbook(wb, cursoId) {
+  if (!cursoId || !avSeccionActual) return { ok: false, motivo: 'Selecciona curso y sección primero' };
+
+  const receta = _leerRecetaDeWorkbook(wb);
+  if (!receta) return { ok: false, motivo: 'Ese archivo no parece ser una plantilla de Avalúo generada por el sistema (no se encontró su receta oculta).' };
+  if (receta.cursoId !== cursoId) return { ok: false, motivo: 'Esta plantilla es de otro curso — selecciona el curso correcto antes de subirla.' };
+  if (receta.seccionId && receta.seccionId !== avSeccionActual.id) return { ok: false, motivo: 'Esta plantilla es de otra sección de este curso — selecciona la sección correcta antes de subirla.' };
+
+  // La huella se recalcula sobre las columnas y la escala ACTUALES del grid
+  // (mismo cálculo que al exportar) — si algo relevante cambió desde que se
+  // exportó esta plantilla (LAOs, rúbrica, o alguna columna que se alternó
+  // entre pastillas/número), la huella no calza y se rechaza toda la carga
+  // en vez de reconciliar a medias (decisión de diseño #3).
+  const columnasActuales = _construirColumnasExportAvaluo();
+  const escalaActual = { niveles: avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles };
+  const fingerprintActual = _fingerprintColumnasExport(columnasActuales, escalaActual);
+  if (fingerprintActual !== receta.fingerprint) {
+    return { ok: false, motivo: 'La estructura de este curso cambió desde que se exportó esta plantilla (LAOs, rúbrica o escala) — vuelve a descargar la plantilla, llénala de nuevo y súbela otra vez.' };
+  }
+
+  const sheet = wb.Sheets['Avalúo'];
+  if (!sheet) return { ok: false, motivo: 'Ese archivo no trae la hoja "Avalúo" esperada.' };
+  const filas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  const idsActuales = new Set(avEstudiantesActuales.map(e => e.id));
+  const idsEnArchivo = new Set();
+  let aplicados = 0;
+  const noEncontrados = [];
+  for (let r = 1; r < filas.length; r++) {
+    const fila = filas[r];
+    const estId = fila[0];
+    if (!estId) continue; // fila en blanco de separación, o la leyenda de competencias al final — nunca traen ID
+    idsEnArchivo.add(estId);
+    if (!idsActuales.has(estId)) { noEncontrados.push(fila[1] || estId); continue; }
+    columnasActuales.forEach((col, i) => _aplicarValorColumnaImportAvaluo(estId, col, fila[2 + i]));
+    gridSetFinalGrade(estId, fila[2 + columnasActuales.length] ?? '');
+    gridSetComentario(estId, fila[3 + columnasActuales.length] ?? '');
+    aplicados++;
+  }
+  const faltantes = avEstudiantesActuales.filter(e => !idsEnArchivo.has(e.id)).map(e => e.nombre);
+
+  // Un solo re-render al final (igual que al cargar la sección por primera
+  // vez): cada celda del grid se reconstruye leyendo avClaseData tal cual
+  // quedó tras aplicar todas las filas, así que no hace falta parchear el
+  // DOM celda por celda aquí.
+  renderGridCombinado();
+  updateGridProgress();
+
+  return { ok: true, aplicados, noEncontrados, faltantes };
+}
+
+function handleAvaluoPlantillaDrop(event) {
+  event.preventDefault();
+  document.getElementById('av-import-dropzone').style.background = '#fef9ee';
+  const file = event.dataTransfer.files[0];
+  if (file) procesarPlantillaAvaluoArchivo(file);
+}
+function handleAvaluoPlantillaFileInput(input) {
+  const file = input.files[0];
+  if (file) procesarPlantillaAvaluoArchivo(file);
+  input.value = '';
+}
+
+// Envoltorio ligado al navegador (lee el File real vía arrayBuffer() y lo
+// parsea con SheetJS) — separado de _procesarPlantillaAvaluoDesdeWorkbook()
+// para que ese motor se pueda probar en Node con un workbook ya armado.
+function procesarPlantillaAvaluoArchivo(file) {
+  const cursoId = document.getElementById('av-curso')?.value;
+  if (!cursoId || !avSeccionActual) { notify('Selecciona curso y sección primero', '⚠️'); return; }
+  if (!/\.xlsx$/i.test(file.name)) { notify('Solo se aceptan archivos .xlsx', '⚠️'); return; }
+  file.arrayBuffer().then(buf => {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const resultado = _procesarPlantillaAvaluoDesdeWorkbook(wb, cursoId);
+    if (!resultado.ok) { notify(resultado.motivo, '⚠️'); return; }
+    let msg = `Plantilla aplicada: ${resultado.aplicados} estudiante(s) actualizados en la cuadrícula ✓`;
+    if (resultado.noEncontrados.length) msg += ` · ⚠️ ${resultado.noEncontrados.length} fila(s) del archivo no calzan con ningún estudiante de esta sección`;
+    if (resultado.faltantes.length) msg += ` · ${resultado.faltantes.length} estudiante(s) de la sección no aparecían en el archivo (sin cambios)`;
+    msg += '. Revisa la cuadrícula y presiona "Guardar Toda la Clase" para guardar.';
+    notify(msg, resultado.noEncontrados.length ? '⚠️' : '📤');
+  }).catch(() => notify('No se pudo leer ese archivo .xlsx', '⚠️'));
 }
 
 // Legacy compatibility (called from cargarCompetenciasAvaluo in old code)
