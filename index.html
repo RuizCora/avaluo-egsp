@@ -1884,14 +1884,14 @@
       </table>
     </div>
 
-    <!-- Fase 5b: subir la plantilla Excel llena para prellenar la cuadrícula -->
+    <!-- Fase 5b/5c: subir la plantilla Excel llena para previsualizar y aplicar a la cuadrícula -->
     <div id="av-import-dropzone"
       style="border:2.5px dashed var(--gold);border-radius:10px;background:#fef9ee;padding:12px 16px;text-align:center;cursor:pointer;transition:background 0.2s;font-size:0.8rem;margin-bottom:12px"
       onclick="document.getElementById('av-import-file-input').click()"
       ondragover="event.preventDefault();this.style.background='#fef3c7'"
       ondragleave="this.style.background='#fef9ee'"
       ondrop="handleAvaluoPlantillaDrop(event)">
-      📤 Arrastra aquí la plantilla Excel ya llena para aplicarla a esta cuadrícula, o haz clic para seleccionarla
+      📤 Arrastra aquí la plantilla Excel ya llena para revisarla y aplicarla a esta cuadrícula, o haz clic para seleccionarla
       <input type="file" id="av-import-file-input" accept=".xlsx" style="display:none" onchange="handleAvaluoPlantillaFileInput(this)">
     </div>
 
@@ -8141,12 +8141,20 @@ function exportarPlantillaExcelAvaluo() {
 // trae la receta — si no calza (decisión de diseño #3, confirmada con
 // Edgardo), rechaza la carga entera y pide reexportar, sin aplicar nada a
 // medias. Si calza, reconcilia cada fila por el id oculto del estudiante
-// (columna A, no por posición) contra la sección actual, y aplica cada
-// columna llamando a la MISMA función que usaría el profesor tecleando a
-// mano (gridSetCriterioNivel/gridSetNivelDirecto/gridSetNivelDirectoManual/
-// gridSetNotaLao/gridSetFinalGrade/gridSetComentario) — así el recorte a
-// rango, el redondeo a 2 decimales, etc. son exactamente los mismos que ya
-// aplica el grid en pantalla, sin reimplementar esa lógica aquí.
+// (columna A, no por posición) contra la sección actual.
+//
+// Fase 5c (2026-09-19) separó esto en dos pasos, con luz verde de Edgardo:
+// _prepararImportAvaluoDesdeWorkbook() valida y arma una PROPUESTA de
+// cambios SIN tocar avClaseData ni el grid — se usa para mostrar una
+// pantalla de previsualización (mismo estilo que la de migración de LAOs)
+// antes de aplicar nada. Solo _aplicarImportAvaluoPreparado(), llamada al
+// confirmar esa pantalla, llama a los setters reales
+// (gridSetCriterioNivel/gridSetNivelDirecto/gridSetNivelDirectoManual/
+// gridSetNotaLao/gridSetFinalGrade/gridSetComentario) y re-renderiza — así
+// el recorte a rango, el redondeo a 2 decimales, etc. son exactamente los
+// mismos que ya aplica el grid en pantalla, sin reimplementar esa lógica.
+// Cancelar la previsualización nunca llama a _aplicarImportAvaluoPreparado(),
+// así que el grid queda intacto.
 // ============================================================
 
 // Lee la hoja oculta "_receta" de un workbook ya parseado por SheetJS y
@@ -8171,7 +8179,9 @@ function _leerRecetaDeWorkbook(wb) {
 // el setter correspondiente, y aplica el cambio a avClaseData llamando a esa
 // misma función — nunca escribe avClaseData directamente. `col` es una
 // entrada de _construirColumnasExportAvaluo() (columnas ACTUALES, ya
-// confirmadas idénticas a las de la receta por el fingerprint).
+// confirmadas idénticas a las de la receta por el fingerprint). Solo la
+// llama _aplicarImportAvaluoPreparado(), nunca la previsualización — hasta
+// que se confirma, nada toca avClaseData.
 function _aplicarValorColumnaImportAvaluo(estId, col, rawCelda) {
   if (col.opciones) {
     // Columna de lista (criterio de rúbrica, o nivel directo en pastillas) —
@@ -8191,12 +8201,42 @@ function _aplicarValorColumnaImportAvaluo(estId, col, rawCelda) {
   else if (col.tipo === 'notalao') gridSetNotaLao(estId, col.laoId, cruda);
 }
 
-// El motor genérico: recibe un workbook YA PARSEADO por SheetJS (separado de
-// la lectura de bytes/arrayBuffer para poder probarlo en Node sin un
-// navegador real) y el id del curso actualmente seleccionado. Devuelve
-// {ok:false, motivo} si rechaza la carga entera, o {ok:true, aplicados,
-// noEncontrados, faltantes} si la aplicó — nunca aplica nada a medias.
-function _procesarPlantillaAvaluoDesdeWorkbook(wb, cursoId) {
+// Traduce un valor CRUDO interno (nivel.id o número) al mismo texto que se
+// ve en Excel para esa columna (mismo formato que ya usa
+// _construirBytesPlantillaAvaluo al exportar, ver _valorActualColumnaExport)
+// — para poder comparar, en la vista previa, "lo que ya hay" contra "lo que
+// se aplicaría" en el mismo espacio de texto.
+function _etiquetaExportColumna(col, raw) {
+  if (col.opciones) {
+    const opt = col.opciones.find(o => String(o.value) === String(raw));
+    return opt ? opt.label : '';
+  }
+  return (raw === '' || raw === undefined || raw === null) ? '' : String(Number(raw));
+}
+
+// El valor "ya guardado" de una columna para un estudiante, en el mismo
+// texto que se vería en Excel.
+function _etiquetaActualColumnaImport(estId, col) {
+  return _etiquetaExportColumna(col, _valorActualColumnaExport(estId, col));
+}
+
+// Normaliza el valor crudo de una celda del ARCHIVO subido al mismo espacio
+// de texto que _etiquetaActualColumnaImport(), sin traducirlo todavía a un
+// valor interno — solo para poder comparar visualmente en la previsualización.
+function _etiquetaCeldaImport(col, rawCelda) {
+  if (col.opciones) return (rawCelda === undefined || rawCelda === null) ? '' : String(rawCelda).trim();
+  return (rawCelda === undefined || rawCelda === null || rawCelda === '') ? '' : String(rawCelda);
+}
+
+// Paso 1 del motor genérico — validar y PREPARAR la importación, sin tocar
+// avClaseData ni el grid todavía. Recibe un workbook YA PARSEADO por SheetJS
+// (separado de la lectura de bytes/arrayBuffer para poder probarlo en Node
+// sin un navegador real) y el id del curso actualmente seleccionado.
+// Devuelve {ok:false, motivo} si hay que rechazar la carga entera, o
+// {ok:true, columnas, filas, noEncontrados, faltantes} con la propuesta de
+// cambios lista para mostrarse en la previsualización (Fase 5c) y, si se
+// confirma, aplicarse con _aplicarImportAvaluoPreparado().
+function _prepararImportAvaluoDesdeWorkbook(wb, cursoId) {
   if (!cursoId || !avSeccionActual) return { ok: false, motivo: 'Selecciona curso y sección primero' };
 
   const receta = _leerRecetaDeWorkbook(wb);
@@ -8218,33 +8258,73 @@ function _procesarPlantillaAvaluoDesdeWorkbook(wb, cursoId) {
 
   const sheet = wb.Sheets['Avalúo'];
   if (!sheet) return { ok: false, motivo: 'Ese archivo no trae la hoja "Avalúo" esperada.' };
-  const filas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const filasHoja = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
   const idsActuales = new Set(avEstudiantesActuales.map(e => e.id));
   const idsEnArchivo = new Set();
-  let aplicados = 0;
+  const filas = [];
   const noEncontrados = [];
-  for (let r = 1; r < filas.length; r++) {
-    const fila = filas[r];
+  for (let r = 1; r < filasHoja.length; r++) {
+    const fila = filasHoja[r];
     const estId = fila[0];
     if (!estId) continue; // fila en blanco de separación, o la leyenda de competencias al final — nunca traen ID
     idsEnArchivo.add(estId);
     if (!idsActuales.has(estId)) { noEncontrados.push(fila[1] || estId); continue; }
-    columnasActuales.forEach((col, i) => _aplicarValorColumnaImportAvaluo(estId, col, fila[2 + i]));
-    gridSetFinalGrade(estId, fila[2 + columnasActuales.length] ?? '');
-    gridSetComentario(estId, fila[3 + columnasActuales.length] ?? '');
-    aplicados++;
+    filas.push({
+      estId,
+      nombre: avEstudiantesActuales.find(e => e.id === estId)?.nombre || fila[1] || estId,
+      valoresRaw: columnasActuales.map((col, i) => fila[2 + i]),
+      notaFinalRaw: fila[2 + columnasActuales.length] ?? '',
+      comentarioRaw: fila[3 + columnasActuales.length] ?? '',
+    });
   }
   const faltantes = avEstudiantesActuales.filter(e => !idsEnArchivo.has(e.id)).map(e => e.nombre);
 
-  // Un solo re-render al final (igual que al cargar la sección por primera
-  // vez): cada celda del grid se reconstruye leyendo avClaseData tal cual
-  // quedó tras aplicar todas las filas, así que no hace falta parchear el
-  // DOM celda por celda aquí.
+  return { ok: true, columnas: columnasActuales, filas, noEncontrados, faltantes };
+}
+
+// Arma, para UNA fila ya preparada, el detalle estudiante-por-estudiante que
+// se muestra en la previsualización: por cada columna (y Nota Final /
+// Comentario), el valor "actual" (lo que ya hay en el grid) contra el
+// "nuevo" (lo que traería el archivo), y si de verdad cambia algo. Función
+// pura, sin efectos secundarios, así que la puede usar tanto el HTML de la
+// previsualización como una prueba que confirme que lo previsualizado es
+// exactamente lo que después se aplica.
+function _construirFilaPreviewImportAvaluo(fila, columnas) {
+  const celdas = columnas.map((col, i) => {
+    const nuevo = _etiquetaCeldaImport(col, fila.valoresRaw[i]);
+    const actual = _etiquetaActualColumnaImport(fila.estId, col);
+    return { header: col.header, nuevo, actual, cambia: nuevo !== actual };
+  });
+  const notaFinalRaw = fila.notaFinalRaw;
+  const notaFinalNuevo = (notaFinalRaw === '' || notaFinalRaw === undefined || notaFinalRaw === null) ? '' : String(notaFinalRaw);
+  const notaFinalActualRaw = avClaseData[fila.estId]?._finalGrade;
+  const notaFinalActual = (notaFinalActualRaw === undefined || notaFinalActualRaw === '') ? '' : String(notaFinalActualRaw);
+  const comentarioNuevo = fila.comentarioRaw || '';
+  const comentarioActual = avClaseData[fila.estId]?._comentario || '';
+  return {
+    estId: fila.estId, nombre: fila.nombre, celdas,
+    notaFinal: { nuevo: notaFinalNuevo, actual: notaFinalActual, cambia: notaFinalNuevo !== notaFinalActual },
+    comentario: { nuevo: comentarioNuevo, actual: comentarioActual, cambia: comentarioNuevo !== comentarioActual },
+  };
+}
+
+// Paso 2 del motor genérico — aplicar de verdad una propuesta ya preparada
+// (y, en pantalla, ya confirmada por el profesor) a avClaseData, llamando a
+// los mismos setters que usaría el profesor tecleando a mano, con un solo
+// re-render al final (igual que al cargar la sección por primera vez: cada
+// celda del grid se reconstruye leyendo avClaseData tal cual quedó tras
+// aplicar todas las filas, así que no hace falta parchear el DOM celda por
+// celda aquí).
+function _aplicarImportAvaluoPreparado(preparado) {
+  preparado.filas.forEach(fila => {
+    preparado.columnas.forEach((col, i) => _aplicarValorColumnaImportAvaluo(fila.estId, col, fila.valoresRaw[i]));
+    gridSetFinalGrade(fila.estId, fila.notaFinalRaw);
+    gridSetComentario(fila.estId, fila.comentarioRaw);
+  });
   renderGridCombinado();
   updateGridProgress();
-
-  return { ok: true, aplicados, noEncontrados, faltantes };
+  return { aplicados: preparado.filas.length, noEncontrados: preparado.noEncontrados, faltantes: preparado.faltantes };
 }
 
 function handleAvaluoPlantillaDrop(event) {
@@ -8259,23 +8339,96 @@ function handleAvaluoPlantillaFileInput(input) {
   input.value = '';
 }
 
+// Propuesta de importación ya validada, pendiente de que el profesor la
+// confirme o la cancele en la pantalla de previsualización (Fase 5c) — vive
+// solo en memoria de sesión, nunca se toca avClaseData hasta que se confirme.
+let _avImportPendiente = null;
+
 // Envoltorio ligado al navegador (lee el File real vía arrayBuffer() y lo
-// parsea con SheetJS) — separado de _procesarPlantillaAvaluoDesdeWorkbook()
-// para que ese motor se pueda probar en Node con un workbook ya armado.
+// parsea con SheetJS) — separado de _prepararImportAvaluoDesdeWorkbook()
+// para que ese motor se pueda probar en Node con un workbook ya armado. Si
+// el archivo pasa la validación, abre la previsualización — nada se aplica
+// al grid todavía en este punto.
 function procesarPlantillaAvaluoArchivo(file) {
   const cursoId = document.getElementById('av-curso')?.value;
   if (!cursoId || !avSeccionActual) { notify('Selecciona curso y sección primero', '⚠️'); return; }
   if (!/\.xlsx$/i.test(file.name)) { notify('Solo se aceptan archivos .xlsx', '⚠️'); return; }
   file.arrayBuffer().then(buf => {
     const wb = XLSX.read(buf, { type: 'array' });
-    const resultado = _procesarPlantillaAvaluoDesdeWorkbook(wb, cursoId);
-    if (!resultado.ok) { notify(resultado.motivo, '⚠️'); return; }
-    let msg = `Plantilla aplicada: ${resultado.aplicados} estudiante(s) actualizados en la cuadrícula ✓`;
-    if (resultado.noEncontrados.length) msg += ` · ⚠️ ${resultado.noEncontrados.length} fila(s) del archivo no calzan con ningún estudiante de esta sección`;
-    if (resultado.faltantes.length) msg += ` · ${resultado.faltantes.length} estudiante(s) de la sección no aparecían en el archivo (sin cambios)`;
-    msg += '. Revisa la cuadrícula y presiona "Guardar Toda la Clase" para guardar.';
-    notify(msg, resultado.noEncontrados.length ? '⚠️' : '📤');
+    const preparado = _prepararImportAvaluoDesdeWorkbook(wb, cursoId);
+    if (!preparado.ok) { notify(preparado.motivo, '⚠️'); return; }
+    _avImportPendiente = preparado;
+    abrirPreviewImportAvaluo(preparado);
   }).catch(() => notify('No se pudo leer ese archivo .xlsx', '⚠️'));
+}
+
+// Arma el HTML de la tabla de previsualización (una fila por cada estudiante
+// que SÍ calza con la sección actual, una columna por cada entrada de la
+// receta más Nota Final y Comentario, resaltando en naranja lo que de
+// verdad cambiaría) y abre el modal — nada toca el grid todavía; eso solo
+// pasa si el profesor confirma con confirmarImportAvaluoPreview().
+function abrirPreviewImportAvaluo(preparado) {
+  const filasPreview = preparado.filas.map(f => _construirFilaPreviewImportAvaluo(f, preparado.columnas));
+  const totalCambios = filasPreview.reduce((acc, f) =>
+    acc + f.celdas.filter(c => c.cambia).length + (f.notaFinal.cambia ? 1 : 0) + (f.comentario.cambia ? 1 : 0), 0);
+
+  let html = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">
+    ${filasPreview.length} estudiante(s) se actualizarían al confirmar (${totalCambios} valor(es) nuevo(s) o distinto(s) de lo que ya había en la cuadrícula) — nada se aplica todavía.
+  </div>`;
+  if (preparado.noEncontrados.length) {
+    html += `<div style="font-size:0.78rem;color:#b45309;margin-bottom:8px">⚠️ ${preparado.noEncontrados.length} fila(s) del archivo no calzan con ningún estudiante de esta sección y se ignorarán: ${preparado.noEncontrados.join(', ')}</div>`;
+  }
+  if (preparado.faltantes.length) {
+    html += `<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px">${preparado.faltantes.length} estudiante(s) de la sección no aparecen en el archivo y quedarán sin cambios: ${preparado.faltantes.join(', ')}</div>`;
+  }
+  if (!filasPreview.length) {
+    html += `<div style="font-size:0.85rem;color:var(--muted);padding:16px 0;text-align:center">No hay ningún estudiante de esta sección en el archivo — no habría nada que aplicar.</div>`;
+  } else {
+    html += `<div style="overflow-x:auto;max-height:50vh;border:1px solid var(--border);border-radius:8px">
+      <table style="border-collapse:collapse;font-size:0.74rem;white-space:nowrap;width:100%">
+        <thead><tr style="position:sticky;top:0;background:var(--bg-card,#fff)">
+          <th style="text-align:left;padding:5px 8px;border-bottom:2px solid var(--border)">Estudiante</th>
+          ${preparado.columnas.map(c => `<th style="text-align:left;padding:5px 8px;border-bottom:2px solid var(--border)">${c.header}</th>`).join('')}
+          <th style="text-align:left;padding:5px 8px;border-bottom:2px solid var(--border)">Nota Final</th>
+          <th style="text-align:left;padding:5px 8px;border-bottom:2px solid var(--border)">Comentario</th>
+        </tr></thead>
+        <tbody>
+          ${filasPreview.map(f => `<tr>
+            <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-weight:600">${f.nombre}</td>
+            ${f.celdas.map(c => `<td style="padding:5px 8px;border-bottom:1px solid var(--border);${c.cambia ? 'color:#b45309;font-weight:700' : 'color:var(--muted)'}">${c.nuevo || '—'}</td>`).join('')}
+            <td style="padding:5px 8px;border-bottom:1px solid var(--border);${f.notaFinal.cambia ? 'color:#b45309;font-weight:700' : 'color:var(--muted)'}">${f.notaFinal.nuevo || '—'}</td>
+            <td style="padding:5px 8px;border-bottom:1px solid var(--border);max-width:220px;overflow:hidden;text-overflow:ellipsis;${f.comentario.cambia ? 'color:#b45309;font-weight:700' : 'color:var(--muted)'}">${f.comentario.nuevo || '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:0.72rem;color:var(--muted);margin-top:6px">En <span style="color:#b45309;font-weight:700">naranja y en negrita</span>: los valores que cambiarían respecto a lo que ya hay en la cuadrícula. En gris: sin cambio.</div>`;
+  }
+  document.getElementById('avimport-preview-body').innerHTML = html;
+  const btnAplicar = document.getElementById('avimport-preview-btn-aplicar');
+  if (btnAplicar) btnAplicar.disabled = !filasPreview.length;
+  openModal('modal-avimport-preview');
+}
+
+// Confirmar la previsualización: aplica de verdad la propuesta pendiente al
+// grid y avisa con el mismo resumen que ya usaba la Fase 5b sin previsualización.
+function confirmarImportAvaluoPreview() {
+  if (!_avImportPendiente) return;
+  const resultado = _aplicarImportAvaluoPreparado(_avImportPendiente);
+  _avImportPendiente = null;
+  closeModal('modal-avimport-preview');
+  let msg = `Plantilla aplicada: ${resultado.aplicados} estudiante(s) actualizados en la cuadrícula ✓`;
+  if (resultado.noEncontrados.length) msg += ` · ⚠️ ${resultado.noEncontrados.length} fila(s) del archivo no calzaron con ningún estudiante de esta sección`;
+  if (resultado.faltantes.length) msg += ` · ${resultado.faltantes.length} estudiante(s) de la sección no aparecían en el archivo (sin cambios)`;
+  msg += '. Revisa la cuadrícula y presiona "Guardar Toda la Clase" para guardar.';
+  notify(msg, resultado.noEncontrados.length ? '⚠️' : '📤');
+}
+
+// Cancelar la previsualización: descarta la propuesta sin tocar el grid.
+function cancelarImportAvaluoPreview() {
+  _avImportPendiente = null;
+  closeModal('modal-avimport-preview');
+  notify('Importación cancelada — no se aplicó ningún cambio a la cuadrícula', 'ℹ️');
 }
 
 // Legacy compatibility (called from cargarCompetenciasAvaluo in old code)
@@ -14400,6 +14553,21 @@ function dummyShowStatus(msg, type) {
     <div id="migracion-laos-body" style="max-height:60vh;overflow-y:auto"></div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-migracion-laos')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Previsualización de importación de plantilla Excel (Rediseño LAOs, Fase 5c) -->
+<div id="modal-avimport-preview" class="modal-overlay">
+  <div class="modal" style="max-width:min(1200px,96vw);width:96vw">
+    <div class="modal-header">
+      <div class="modal-title">📤 Previsualización — plantilla Excel de Avalúo</div>
+      <button class="modal-close" onclick="cancelarImportAvaluoPreview()">✕</button>
+    </div>
+    <div id="avimport-preview-body" style="margin-bottom:6px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cancelarImportAvaluoPreview()">❌ Cancelar</button>
+      <button id="avimport-preview-btn-aplicar" class="btn btn-primary" onclick="confirmarImportAvaluoPreview()">✅ Aplicar a la cuadrícula</button>
     </div>
   </div>
 </div>
