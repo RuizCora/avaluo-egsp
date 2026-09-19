@@ -1887,6 +1887,7 @@
     <!-- Save all -->
     <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center">
       <div id="av-save-status" style="font-size:0.82rem;color:var(--muted)"></div>
+      <button class="btn btn-outline" onclick="exportarPlantillaExcelAvaluo()" title="Descarga esta cuadrícula como plantilla Excel, para llenarla fuera del sistema (aún no se puede volver a subir — esa parte viene en una próxima fase)">📥 Descargar plantilla Excel</button>
       <button class="btn btn-outline" onclick="limpiarAvaluo()">🗑 Limpiar</button>
       <button class="btn btn-primary" onclick="guardarTodaLaClase()" id="av-save-all-btn">💾 Guardar Toda la Clase</button>
     </div>
@@ -7735,6 +7736,350 @@ function limpiarAvaluo() {
   document.getElementById('av-meta-row').style.display = 'none';
   document.getElementById('av-save-status').textContent = '';
   setDefaultDate();
+}
+
+// ======================== FASE 5a: Plantilla Excel de Avalúo (ida y vuelta) ========================
+// Origen: habrá profesores que prefieran llenar la evaluación fuera del
+// sistema (en su computadora) para incorporarla después. La objeción de
+// Edgardo era que la cuadrícula cambia por curso (rúbrica vs. directa,
+// columna compartida, pastillas vs. número exacto), por lo que temía
+// necesitar un "parser" distinto por curso. La solución: el archivo
+// exportado lleva embebida su propia "receta" — qué LAO/competencia/
+// criterio es cada columna y cómo se captura — para que Fase 5b (todavía no
+// construida) sea UN SOLO importador genérico que lee esa receta, en vez de
+// un parser por curso. Esta fase (5a) solo genera y descarga la plantilla;
+// no hay todavía forma de volver a subirla.
+//
+// Tres decisiones de diseño confirmadas con Edgardo antes de construir:
+// (1) solo Excel para el ida y vuelta, nunca Word; (2) una sección a la vez;
+// (3) si la estructura del curso cambia entre exportar y volver a subir, la
+// futura Fase 5b debe BLOQUEAR la carga y pedir reexportar — nunca aplicar
+// datos a medias. Por eso esta plantilla incluye una huella (fingerprint) de
+// la estructura, calculada exactamente sobre las mismas columnas que se
+// escriben en el archivo.
+
+// Arma el esquema de columnas exportables del grid de Avalúo YA CONSTRUIDO
+// (requiere que buildGridCombinado() se haya ejecutado — mismo requisito que
+// ya tiene guardarTodaLaClase()). Cada entrada describe una celda editable
+// real del grid — nunca una calculada — y usa exactamente las mismas claves
+// (laoId/competenciaId/criterioId) que ya usan gridSetCriterioNivel(),
+// gridSetNivelDirecto() y gridSetNotaLao(), para que un futuro importador
+// pueda aplicar los valores llamando a esas mismas funciones.
+//
+// Deliberadamente NO se exportan las columnas calculadas/de solo lectura: la
+// pastilla "Nivel por Competencia" de un LAO con rúbrica (se deriva de sus
+// criterios) y la columna compartida "Nivel Final por Competencia" cuando el
+// curso NO está en Evaluación Directa (se calcula en vivo combinando LAOs) —
+// no hay nada que el profesor deba llenar ahí.
+function _construirColumnasExportAvaluo() {
+  const soloScore = !!avDirectaCursoEntry;
+  const columnas = [];
+
+  avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
+    if (modo === 'rubrica') {
+      const opciones = rubrica.niveles.map(n => ({ value: n.id, label: `${n.label} (${n.puntos})` }));
+      rubrica.criterios.forEach(crit => {
+        columnas.push({
+          clave: `crit::${lao.id}::${crit.id}`, tipo: 'criterio',
+          laoId: lao.id, criterioId: crit.id,
+          header: `${lao.nombre} — ${crit.nombre || '(sin nombre)'}`,
+          opciones,
+        });
+      });
+    } else {
+      if (!soloScore) {
+        const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
+        const maxValorEscala = Math.max(...nivelesEscala.map(n => n.valor), 1);
+        comps.forEach(c => columnas.push(_columnaNivelDirectoExport(lao.id, c, nivelesEscala, maxValorEscala, `${lao.nombre} — ${c.codigo}`)));
+      }
+      columnas.push({
+        clave: `notalao::${lao.id}`, tipo: 'notalao', laoId: lao.id,
+        header: `${lao.nombre} — Nota LAO (0-100)`, min: 0, max: 100,
+      });
+    }
+  });
+
+  if (avDirectaCursoEntry) {
+    const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
+    const maxValorEscala = Math.max(...nivelesEscala.map(n => n.valor), 1);
+    avCompsFinal.forEach(c => columnas.push(_columnaNivelDirectoExport(avDirectaCursoEntry.lao.id, c, nivelesEscala, maxValorEscala, `Nivel Final — ${c.codigo}`)));
+  }
+
+  return columnas;
+}
+
+// Una columna de nivel directo puede ser lista (pastillas, default) o número
+// exacto (0 a maxValorEscala, hasta 2 decimales) — según la decisión que el
+// profesor ya haya tomado para esa columna con toggleModoManualNivel(). El
+// mismo helper sirve tanto para un LAO real en modo directa como para la
+// columna compartida cuando el curso está en Evaluación Directa (que
+// internamente usa el id del LAO virtual avDirectaCursoEntry.lao.id).
+function _columnaNivelDirectoExport(laoId, comp, nivelesEscala, maxValorEscala, headerBase) {
+  if (esModoManualNivel(laoId, comp.id)) {
+    return {
+      clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_manual', laoId, competenciaId: comp.id,
+      header: `${headerBase} (0–${maxValorEscala}, hasta 2 decimales)`, min: 0, max: maxValorEscala,
+    };
+  }
+  const opciones = nivelesEscala.map(n => ({ value: String(n.valor), label: `${n.valor} · ${n.titulo}` }));
+  return { clave: `nivel::${laoId}::${comp.id}`, tipo: 'nivel_lista', laoId, competenciaId: comp.id, header: headerBase, opciones };
+}
+
+// Valor ACTUAL (lo que ya se ha entrado en esta sesión, o se prellenó desde
+// db.avaluos al construir el grid) de una columna exportable, en el formato
+// crudo interno (nivel.id para criterios, string numérico para niveles/Nota
+// LAO) — _valoresParaFilaExport() lo traduce a lo que se ve en Excel.
+function _valorActualColumnaExport(estId, col) {
+  const porLao = avClaseData[estId]?.porLao || {};
+  if (col.tipo === 'criterio') return porLao[col.laoId]?._criterios?.[col.criterioId] || '';
+  if (col.tipo === 'notalao') { const v = porLao[col.laoId]?._notaLao; return (v === undefined || v === '') ? '' : v; }
+  const v = porLao[col.laoId]?._nivelesDirectos?.[col.competenciaId];
+  return (v === undefined) ? '' : v;
+}
+
+// Huella (fingerprint) de la estructura del curso al momento de exportar —
+// calculada sobre las MISMAS columnas que se escriben en el archivo (nunca
+// se recalcula por separado), más la escala de niveles vigente. Se guarda
+// dentro de la receta; la futura Fase 5b la recalcula al momento de
+// re-importar y, si no calza, rechaza la carga y pide reexportar (decisión
+// de diseño #3) en vez de intentar reconciliar a medias.
+function _fingerprintColumnasExport(columnas, escala) {
+  const canon = columnas.map(c => ({
+    clave: c.clave, tipo: c.tipo, min: c.min, max: c.max,
+    opciones: c.opciones ? c.opciones.map(o => o.value) : undefined,
+  }));
+  const json = JSON.stringify({ escala, columnas: canon });
+  return _xlsxCrc32(new TextEncoder().encode(json)).toString(16);
+}
+
+// La "receta" completa que viaja oculta dentro del .xlsx — todo lo que un
+// futuro importador genérico necesita para mapear cada columna de vuelta a
+// avClaseData sin conocer de antemano la estructura de este curso.
+function _construirRecetaExportAvaluo(cursoId, columnas) {
+  const curso = db.cursos.find(c => c.id === cursoId);
+  const escalaParaFingerprint = { id: avEscalaActual?.id || null, niveles: avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles };
+  return {
+    version: 1,
+    fingerprint: _fingerprintColumnasExport(columnas, escalaParaFingerprint),
+    cursoId, cursoCodigo: curso?.codigo || '', cursoNombre: curso?.nombre || '',
+    seccionId: avSeccionActual?.id || '', seccionNumero: avSeccionActual?.numero || '',
+    exportadoEn: new Date().toISOString(),
+    columnas: columnas.map(c => ({
+      clave: c.clave, tipo: c.tipo, laoId: c.laoId, competenciaId: c.competenciaId, criterioId: c.criterioId,
+      header: c.header, opciones: c.opciones, min: c.min, max: c.max,
+    })),
+    estudiantes: avEstudiantesActuales.map(e => ({ id: e.id, nombre: e.nombre })),
+  };
+}
+
+// ---- Escritor .xlsx crudo genérico, multi-hoja (generaliza el de la Fase D
+// — ver _construirXlsxConDropdown — que solo soportaba una hoja) ----
+function _construirHojaXmlGenerica({ headers, filas, colsHidden, dataValidations, tabSelected }) {
+  const numCols = Math.max(headers.length, 1);
+  const totalRows = 1 + filas.length;
+  const dim = `A1:${_xlsxColLetter(numCols)}${Math.max(totalRows, 1)}`;
+
+  let headerCells = '';
+  headers.forEach((h, i) => { headerCells += `<c r="${_xlsxColLetter(i + 1)}1" t="inlineStr" s="1"><is><t>${_xlsxXmlEscape(h)}</t></is></c>`; });
+  let rowsXml = `<row r="1">${headerCells}</row>`;
+
+  filas.forEach((fila, r) => {
+    const rowNum = r + 2;
+    let cells = '';
+    fila.forEach((val, i) => {
+      if (val === undefined || val === null || val === '') return;
+      if (typeof val === 'number' && isFinite(val)) {
+        cells += `<c r="${_xlsxColLetter(i + 1)}${rowNum}"><v>${val}</v></c>`;
+      } else {
+        cells += `<c r="${_xlsxColLetter(i + 1)}${rowNum}" t="inlineStr"><is><t>${_xlsxXmlEscape(val)}</t></is></c>`;
+      }
+    });
+    rowsXml += `<row r="${rowNum}">${cells}</row>`;
+  });
+
+  const colsXml = (colsHidden && colsHidden.length)
+    ? `<cols>${colsHidden.map(c => `<col min="${c.min}" max="${c.max}" width="${c.width || 24}" customWidth="1"${c.hidden ? ' hidden="1"' : ''}/>`).join('')}</cols>`
+    : `<cols><col min="1" max="${numCols}" width="26" customWidth="1"/></cols>`;
+  const dvXml = (dataValidations && dataValidations.length)
+    ? `<dataValidations count="${dataValidations.length}">${dataValidations.join('')}</dataValidations>` : '';
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<dimension ref="${dim}"/>
+<sheetViews><sheetView${tabSelected ? ' tabSelected="1"' : ''} workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+${colsXml}
+<sheetData>${rowsXml}</sheetData>
+${dvXml}
+</worksheet>`;
+}
+function _xlsxDataValidationLista(sqref, formulaRango) {
+  return `<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorTitle="Valor no válido" error="Selecciona un valor de la lista." sqref="${sqref}"><formula1>${formulaRango}</formula1></dataValidation>`;
+}
+function _xlsxDataValidationDecimal(sqref, min, max) {
+  return `<dataValidation type="decimal" operator="between" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorTitle="Valor fuera de rango" error="Debe ser un número entre ${min} y ${max}." sqref="${sqref}"><formula1>${min}</formula1><formula2>${max}</formula2></dataValidation>`;
+}
+
+// Arma un workbook .xlsx con VARIAS hojas (hojas: [{nombre, oculta, xml}]),
+// reutilizando el mismo empaquetador ZIP (_construirZipStore) de la Fase D.
+function _construirXlsxMultihoja(hojas) {
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>${hojas.map((h, i) => `<sheet name="${_xlsxXmlEscape(h.nombre)}" sheetId="${i + 1}"${h.oculta ? ' state="hidden"' : ''} r:id="rId${i + 1}"/>`).join('')}</sheets>
+</workbook>`;
+  const stylesRelId = hojas.length + 1;
+  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${hojas.map((h, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}
+<Relationship Id="rId${stylesRelId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const files = [
+    { name: '[Content_Types].xml', data: contentTypes },
+    { name: '_rels/.rels', data: rootRels },
+    { name: 'xl/workbook.xml', data: workbook },
+    { name: 'xl/_rels/workbook.xml.rels', data: workbookRels },
+    { name: 'xl/styles.xml', data: styles },
+  ];
+  hojas.forEach((h, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: h.xml }));
+  return _construirZipStore(files);
+}
+
+// Arma los bytes del .xlsx de la sección actualmente cargada en el grid de
+// Avalúo — separado de exportarPlantillaExcelAvaluo() (que solo añade la
+// descarga vía Blob/URL/<a>) para poder generarlo y verificarlo en pruebas
+// de Node sin un navegador real. Arma 3 hojas: "Avalúo" (visible, para
+// llenar — columna A oculta con el id del estudiante, para que Fase 5b
+// pueda reconciliar por id y no por posición de fila si alguien reordena o
+// filtra), "_listas" (oculta, las opciones de cada dropdown) y "_receta"
+// (oculta, la receta en JSON, partida en trozos de una celda cada uno).
+// Devuelve null (con notify de aviso) si no hay grid construido o sección
+// sin estudiantes — mismo criterio que guardarTodaLaClase().
+function _construirBytesPlantillaAvaluo(cursoId) {
+  if (!cursoId || !avSeccionActual || (!avLaosGrid.length && !avDirectaCursoEntry)) {
+    notify('Selecciona curso y sección primero', '⚠️'); return null;
+  }
+  if (!avEstudiantesActuales.length) { notify('Esta sección no tiene estudiantes', '⚠️'); return null; }
+
+  const columnas = _construirColumnasExportAvaluo();
+  const receta = _construirRecetaExportAvaluo(cursoId, columnas);
+
+  const headers = ['ID (no borrar)', 'Estudiante', ...columnas.map(c => c.header), 'Nota Final del Curso (0-100)', 'Comentario'];
+  const filas = avEstudiantesActuales.map(est => {
+    const fila = [est.id, est.nombre];
+    columnas.forEach(col => {
+      const raw = _valorActualColumnaExport(est.id, col);
+      if (col.opciones) {
+        const opt = col.opciones.find(o => String(o.value) === String(raw));
+        fila.push(opt ? opt.label : '');
+      } else {
+        fila.push(raw === '' || raw === undefined ? '' : Number(raw));
+      }
+    });
+    const notaFinal = avClaseData[est.id]?._finalGrade;
+    fila.push(notaFinal === undefined || notaFinal === '' ? '' : Number(notaFinal));
+    fila.push(avClaseData[est.id]?._comentario || '');
+    return fila;
+  });
+
+  // Listas de opciones (hoja "_listas") + validaciones de datos de la hoja
+  // "Avalúo" — un dropdown por columna de lista (referenciando su rango en
+  // "_listas", no una lista literal, para no toparse con el límite de ~255
+  // caracteres de Excel en listas escritas directo en la fórmula), y un
+  // rango numérico por columna de número. +3 = +1 (1-indexado) +2 (ID, Nombre).
+  const listasHeaders = [];
+  const listasColumnas = [];
+  const dataValidations = [];
+  let listaIdx = 0;
+  columnas.forEach((col, i) => {
+    const colExcel = _xlsxColLetter(i + 3);
+    const sqref = `${colExcel}2:${colExcel}${filas.length + 1}`;
+    if (col.opciones) {
+      listaIdx++;
+      const listaColLetter = _xlsxColLetter(listaIdx);
+      listasHeaders.push(col.header);
+      listasColumnas.push(col.opciones.map(o => o.label));
+      const rango = `_listas!$${listaColLetter}$2:$${listaColLetter}$${col.opciones.length + 1}`;
+      dataValidations.push(_xlsxDataValidationLista(sqref, rango));
+    } else if (col.min !== undefined && col.max !== undefined) {
+      dataValidations.push(_xlsxDataValidationDecimal(sqref, col.min, col.max));
+    }
+  });
+  const colNotaFinal = _xlsxColLetter(columnas.length + 3);
+  dataValidations.push(_xlsxDataValidationDecimal(`${colNotaFinal}2:${colNotaFinal}${filas.length + 1}`, 0, 100));
+
+  const listasMaxFilas = Math.max(0, ...listasColumnas.map(l => l.length));
+  const listasFilas = [];
+  for (let r = 0; r < listasMaxFilas; r++) listasFilas.push(listasColumnas.map(l => l[r] || ''));
+
+  const hojaAvaluoXml = _construirHojaXmlGenerica({
+    headers, filas,
+    colsHidden: [{ min: 1, max: 1, width: 14, hidden: true }, { min: 2, max: headers.length, width: 26 }],
+    dataValidations, tabSelected: true,
+  });
+  const hojaListasXml = _construirHojaXmlGenerica({ headers: listasHeaders, filas: listasFilas });
+
+  // Hoja "_receta" — el JSON completo, partido en trozos de una celda cada
+  // uno (columna A) para nunca acercarse al límite de caracteres por celda
+  // de Excel; Fase 5b los concatena en orden de fila para reconstruirlo.
+  const recetaJson = JSON.stringify(receta);
+  const CHUNK = 20000;
+  const recetaFilas = [];
+  for (let i = 0; i < recetaJson.length; i += CHUNK) recetaFilas.push([recetaJson.slice(i, i + CHUNK)]);
+  const hojaRecetaXml = _construirHojaXmlGenerica({ headers: ['json'], filas: recetaFilas });
+
+  const bytes = _construirXlsxMultihoja([
+    { nombre: 'Avalúo', oculta: false, xml: hojaAvaluoXml },
+    { nombre: '_listas', oculta: true, xml: hojaListasXml },
+    { nombre: '_receta', oculta: true, xml: hojaRecetaXml },
+  ]);
+
+  const curso = db.cursos.find(c => c.id === cursoId);
+  const nombreArchivo = `Plantilla_Avaluo_${(curso?.codigo || 'curso').replace(/[^\w-]+/g, '_')}_Sec${String(avSeccionActual.numero || '').replace(/[^\w-]+/g, '_')}.xlsx`;
+  return { bytes, columnas, receta, nombreArchivo };
+}
+
+// Descarga la plantilla .xlsx de la sección actualmente cargada en el grid
+// de Avalúo (ver _construirBytesPlantillaAvaluo para el detalle de las 3
+// hojas que arma). Requiere Curso + Sección ya elegidos, igual que
+// guardarTodaLaClase().
+function exportarPlantillaExcelAvaluo() {
+  const cursoId = document.getElementById('av-curso')?.value;
+  const resultado = _construirBytesPlantillaAvaluo(cursoId);
+  if (!resultado) return; // _construirBytesPlantillaAvaluo ya mostró el aviso correspondiente
+
+  const { bytes, columnas, nombreArchivo } = resultado;
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  notify(`Plantilla de Avalúo descargada: ${avEstudiantesActuales.length} estudiante(s), ${columnas.length} columna(s) ✓`, '📥');
 }
 
 // Legacy compatibility (called from cargarCompetenciasAvaluo in old code)
