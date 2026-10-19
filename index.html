@@ -849,6 +849,7 @@
   .crit-desc-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
   .crit-desc-table textarea { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 5px 7px; font-size: 0.8rem; font-family: inherit; resize: vertical; }
 
+  .av-modalidad-box { padding: 8px 10px; margin-bottom: 8px; border: 1.5px solid var(--gold); border-radius: 8px; background: #fffaf0; }
   /* ── WIZARD ─────────────────────────────────────────────── */
   .wiz-step {
     flex: 1; text-align: center; padding: 10px 6px; font-size: 0.72rem;
@@ -1495,7 +1496,7 @@
   <div id="readonly-notice-cursos" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar cursos. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('cursos')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div class="section-title">Gestión de Cursos</div>
-    <span id="btn-nuevo-curso"><button class="btn btn-primary" onclick="openModal('modal-curso')">+ Nuevo Curso</button></span>
+    <span id="btn-nuevo-curso"><button class="btn btn-primary" onclick="abrirNuevoCurso()">+ Nuevo Curso</button></span>
   </div>
   <div class="section-sub">Registra los cursos del programa académico</div>
   <div class="rpt-filter-bar" style="margin-bottom:14px">
@@ -2395,6 +2396,11 @@
       <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px">Regular aplica siempre. Marca Desacelerada y/o Acelerada solo si el programa las ofrece. La duración (años + trimestres) se usará más adelante para calcular tasas de graduación.</div>
       <div id="prog-cat-secuencias" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
+    <div class="form-group">
+      <label>Modalidad de evaluación de competencias</label>
+      <select id="prog-cat-modalidad"><option value="">Sin fijar — cada profesor escoge</option></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Aplica a todos los cursos del programa, salvo los que el administrador cambie desde el curso.</div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-programa-catalogo')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarProgramaCatalogo()">💾 Guardar</button>
@@ -2734,7 +2740,7 @@
     <div class="form-row">
       <div class="form-group">
         <label>Programa</label>
-        <select id="c-programa">
+        <select id="c-programa" onchange="_renderSelectModalidadCurso()">
           <option value="">— Seleccionar —</option>
         </select>
       </div>
@@ -2744,11 +2750,10 @@
       </div>
     </div>
     <div class="form-row" id="c-directa-row" style="display:none">
-      <div class="form-group">
-        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
-          <input type="checkbox" id="c-directa-curso" style="width:auto">
-          Permitir evaluación directa a nivel de curso (anula el nivel calculado de los LAOs individuales) — solo administrador
-        </label>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Modalidad de evaluación del curso <span style="font-weight:400;color:var(--muted)">— solo administrador</span></label>
+        <select id="c-modalidad"><option value="">Usar la del programa</option></select>
+        <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">Si el curso usa la del programa y el programa no la fija, cada profesor escoge la modalidad para sus secciones de este curso en la pantalla de Avalúo.</div>
       </div>
     </div>
     <div class="modal-footer">
@@ -3123,6 +3128,31 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 function _actualizarVisibilidadDirectaCurso() {
   const row = document.getElementById('c-directa-row');
   if (row) row.style.display = currentUser?.rol === 'admin' ? '' : 'none';
+  _renderSelectModalidadCurso();
+}
+
+// Fase R2: selector de modalidad en el modal de Curso (solo admin). La opción
+// vacía = "usar la del programa", y muestra cuál es la del programa elegido.
+function _renderSelectModalidadCurso() {
+  const sel = document.getElementById('c-modalidad');
+  if (!sel) return;
+  const valor = sel.dataset.valor ?? sel.value ?? '';
+  const progId = document.getElementById('c-programa')?.value || '';
+  const prog = progId ? (db.programas || []).find(p => p.id === progId) : null;
+  const delPrograma = _modalidadValida(prog?.modalidadEvaluacion) ? modalidadInfo(prog.modalidadEvaluacion).corto : 'sin fijar — el profesor escoge';
+  sel.innerHTML = `<option value="">Usar la del programa (${delPrograma})</option>` + _opcionesModalidadHtml(valor);
+  sel.value = _modalidadValida(valor) ? valor : '';
+  delete sel.dataset.valor;
+}
+
+// Copia al curso lo elegido en el selector (solo si el usuario es admin; para
+// otros roles el selector está oculto y no se toca lo que ya tenía el curso)
+function _aplicarModalidadCursoDesdeForm(curso) {
+  if (!curso) return;
+  delete curso.permiteDirectaCurso;
+  if (currentUser?.rol !== 'admin') return;
+  const v = document.getElementById('c-modalidad')?.value || '';
+  if (_modalidadValida(v)) curso.modalidadEvaluacion = v; else delete curso.modalidadEvaluacion;
 }
 
 // ======================== NOTIFY ========================
@@ -3157,8 +3187,8 @@ function guardarCurso() {
         descripcion: document.getElementById('c-desc').value.trim(),
         programaId,
         programa: programaObj ? programaObj.nombre : '',
-        permiteDirectaCurso: !!document.getElementById('c-directa-curso')?.checked,
       };
+      _aplicarModalidadCursoDesdeForm(db.cursos[idx]);
     }
     notify('Curso actualizado correctamente ✏️');
   } else {
@@ -3171,9 +3201,9 @@ function guardarCurso() {
       descripcion: document.getElementById('c-desc').value.trim(),
       programaId,
       programa: programaObj ? programaObj.nombre : '',
-      permiteDirectaCurso: !!document.getElementById('c-directa-curso')?.checked,
       fechaCreacion: new Date().toISOString()
     };
+    _aplicarModalidadCursoDesdeForm(curso);
     db.cursos.push(curso);
     notify('Curso "' + nombre + '" registrado correctamente');
   }
@@ -3182,8 +3212,19 @@ function guardarCurso() {
   renderCursos();
   populateCursoSelects();
   ['c-codigo','c-nombre','c-dept','c-creditos','c-desc','c-edit-id'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
-  const chkDirecta = document.getElementById('c-directa-curso'); if (chkDirecta) chkDirecta.checked = false;
+  const selMod = document.getElementById('c-modalidad'); if (selMod) selMod.value = '';
   const t = document.getElementById('modal-curso-title'); if(t) t.textContent = '📚 Registrar Curso';
+}
+
+// Abre el modal de Curso en blanco. Antes el botón "+ Nuevo Curso" abría el
+// modal tal cual quedó: si se había cancelado una edición, conservaba el id
+// del curso editado y "guardar" sobrescribía ese curso en vez de crear uno.
+function abrirNuevoCurso() {
+  ['c-codigo','c-nombre','c-dept','c-creditos','c-desc','c-edit-id'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const prog = document.getElementById('c-programa'); if (prog) prog.value = '';
+  const selMod = document.getElementById('c-modalidad'); if (selMod) { selMod.value = ''; selMod.dataset.valor = ''; }
+  const t = document.getElementById('modal-curso-title'); if (t) t.textContent = '📚 Registrar Curso';
+  openModal('modal-curso');
 }
 
 function abrirEditarCurso(id) {
@@ -3195,10 +3236,12 @@ function abrirEditarCurso(id) {
   document.getElementById('c-dept').value = cur.departamento || '';
   document.getElementById('c-creditos').value = cur.creditos || '';
   document.getElementById('c-desc').value = cur.descripcion || '';
-  const chkDirecta = document.getElementById('c-directa-curso'); if (chkDirecta) chkDirecta.checked = !!cur.permiteDirectaCurso;
+  _ensureModalidadMigrada();
   _populateCursoProgramaSelect();
   const prog = document.getElementById('c-programa');
   if (prog) prog.value = cur.programaId || '';
+  const selMod = document.getElementById('c-modalidad');
+  if (selMod) selMod.dataset.valor = _modalidadValida(cur.modalidadEvaluacion) ? cur.modalidadEvaluacion : '';
   const t = document.getElementById('modal-curso-title');
   if (t) t.textContent = '✏️ Editar Curso';
   openModal('modal-curso');
@@ -5675,7 +5718,11 @@ function computeNivelCompetenciaFinal(estudianteId, competenciaId, cursoId, aval
   const escala = resolverEscalaParaCurso(cursoId);
   const maxValor = escala?.niveles?.length ? Math.max(...escala.niveles.map(n => n.valor)) : 4;
 
-  const avDirecta = avs.find(a => a.estudianteId === estudianteId && a.laoId === laoDirectaCursoId(cursoId));
+  // Fase R2: si el administrador fijó una modalidad POR LAO, una evaluación
+  // directa que haya quedado guardada de antes ya no cuenta.
+  const modFija = resolverModalidadEvaluacion(cursoId, null);
+  const ignorarDirecta = modFija.fijadaPorAdmin && !esModalidadDirecta(modFija.modalidad);
+  const avDirecta = ignorarDirecta ? null : avs.find(a => a.estudianteId === estudianteId && a.laoId === laoDirectaCursoId(cursoId));
   if (avDirecta) {
     const evDirecta = avDirecta.evaluaciones?.find(e => e.competenciaId === competenciaId);
     if (evDirecta && evDirecta.nivel !== '' && evDirecta.nivel !== undefined && evDirecta.nivel !== null) {
@@ -6540,6 +6587,7 @@ function selectPrograma(programaId) {
       <div>
         <div class="prog-detail-name">${prog.nombre}</div>
         <div class="prog-detail-sub">${deptNombre ? '🏛 ' + deptNombre : 'Sin departamento asignado'}</div>
+        <div class="prog-detail-sub">📝 Modalidad de evaluación: ${_modalidadValida(prog.modalidadEvaluacion) ? modalidadInfo(prog.modalidadEvaluacion).corto : 'sin fijar — cada profesor escoge'}</div>
       </div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
         <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${programaId}')">✏️ Editar</button>
@@ -6618,6 +6666,7 @@ function abrirNuevoPrograma() {
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = '';
   document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(_secuenciasVacias());
+  _renderSelectModalidadPrograma('');
   openModal('modal-programa-catalogo');
 }
 function abrirEditarPrograma(id) {
@@ -6629,6 +6678,7 @@ function abrirEditarPrograma(id) {
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = p.departamentoId || '';
   document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(p.secuencias || _secuenciasVacias());
+  _renderSelectModalidadPrograma(p.modalidadEvaluacion || '');
   openModal('modal-programa-catalogo');
 }
 
@@ -6674,6 +6724,12 @@ function _leerSecuenciasDelForm() {
   });
   return secuencias;
 }
+function _renderSelectModalidadPrograma(valor) {
+  const sel = document.getElementById('prog-cat-modalidad');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Sin fijar — cada profesor escoge</option>' + _opcionesModalidadHtml(valor);
+  sel.value = _modalidadValida(valor) ? valor : '';
+}
 function _populateDeptoSelect() {
   const sel = document.getElementById('prog-cat-departamento');
   sel.innerHTML = '<option value="">— Sin asignar —</option>' +
@@ -6684,6 +6740,7 @@ function guardarProgramaCatalogo() {
   if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
   const departamentoId = document.getElementById('prog-cat-departamento').value || null;
   const secuencias = _leerSecuenciasDelForm();
+  const modalidad = document.getElementById('prog-cat-modalidad')?.value || '';
   const editId = document.getElementById('prog-cat-edit-id').value;
   if (editId) {
     const p = db.programas.find(x => x.id === editId);
@@ -6692,6 +6749,7 @@ function guardarProgramaCatalogo() {
       p.nombre = nombre;
       p.departamentoId = departamentoId;
       p.secuencias = secuencias;
+      if (_modalidadValida(modalidad)) p.modalidadEvaluacion = modalidad; else delete p.modalidadEvaluacion;
       // Renombrar en cascada: mantiene sincronizados los strings denormalizados
       // que usan cursos, el banco de competencias, y facultad — para que nada
       // quede "huérfano" apuntando al nombre viejo.
@@ -6710,10 +6768,12 @@ function guardarProgramaCatalogo() {
     if (db.programas.some(p => p.nombre.toLowerCase() === nombre.toLowerCase())) {
       notify('Ya existe un programa con ese nombre', '⚠️'); return;
     }
-    db.programas.push({
+    const nuevo = {
       id: 'prog_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       nombre, tipo: '', descripcion: '', departamentoId, secuencias, fechaCreacion: new Date().toISOString(),
-    });
+    };
+    if (_modalidadValida(modalidad)) nuevo.modalidadEvaluacion = modalidad;
+    db.programas.push(nuevo);
   }
   saveDB();
   closeModal('modal-programa-catalogo');
@@ -7076,6 +7136,175 @@ function _modosDisponiblesLao(lao, rubrica) {
   return tieneRubrica ? ['rubrica', 'directa'] : ['directa']; // 'libre' (default)
 }
 
+// ======================== FASE R2: MODALIDAD DE EVALUACIÓN ========================
+// Decide CÓMO se evalúa un curso. La fija el administrador por PROGRAMA
+// (programa.modalidadEvaluacion) y, si quiere, la cambia para un curso
+// específico (curso.modalidadEvaluacion, override solo de admin). Si ninguno
+// fijó nada, el PROFESOR escoge — una sola vez por curso, para todas sus
+// secciones de ese curso (curso.eleccionesModalidad: [{profesor, modalidad}],
+// arreglo en vez de objeto porque la clave natural es un correo y Firebase
+// no admite "." en las llaves).
+//
+//   directa_sin_rubrica → Evaluación Directa del Curso con pastillas (lo que
+//                         antes era la casilla `permiteDirectaCurso`).
+//   directa_con_rubrica → Evaluación Directa del Curso con rúbrica (Fase R3;
+//                         hasta entonces aparece deshabilitada).
+//   lao_sin_rubrica     → por LAO, todos con pastillas aunque tengan rúbrica.
+//   lao_con_rubrica     → por LAO; los que tienen rúbrica asignada se evalúan
+//                         solo con ella, los que no, con pastillas. Es también
+//                         el comportamiento por defecto mientras nadie escoja.
+const MODALIDADES_EVALUACION = [
+  { id: 'directa_sin_rubrica', label: 'Evaluación directa del curso — sin rúbrica (pastillas por competencia)', corto: 'Directa sin rúbrica' },
+  { id: 'directa_con_rubrica', label: 'Evaluación directa del curso — con rúbrica', corto: 'Directa con rúbrica', proximamente: true },
+  { id: 'lao_sin_rubrica',     label: 'Por LAO — sin rúbrica (pastillas en cada LAO)', corto: 'Por LAO sin rúbrica' },
+  { id: 'lao_con_rubrica',     label: 'Por LAO — con rúbrica (los LAOs que tienen rúbrica se evalúan con ella)', corto: 'Por LAO con rúbrica' },
+];
+const MODALIDAD_PREDETERMINADA = 'lao_con_rubrica';
+
+function modalidadInfo(id) {
+  return MODALIDADES_EVALUACION.find(m => m.id === id) || null;
+}
+function _modalidadValida(id) {
+  const m = modalidadInfo(id);
+  return !!m && !m.proximamente;
+}
+function esModalidadDirecta(id) { return id === 'directa_sin_rubrica' || id === 'directa_con_rubrica'; }
+
+// Opciones <option> para los selectores de modalidad
+function _opcionesModalidadHtml(seleccionado, opts = {}) {
+  return MODALIDADES_EVALUACION.map(m => {
+    const deshab = m.proximamente || (opts.deshabilitar || []).includes(m.id);
+    const sufijo = m.proximamente ? ' (disponible en la próxima fase)' : ((opts.motivos || {})[m.id] || '');
+    return `<option value="${m.id}" ${m.id === seleccionado ? 'selected' : ''} ${deshab ? 'disabled' : ''}>${m.label}${sufijo}</option>`;
+  }).join('');
+}
+
+// Clave del profesor de una sección (correo si existe, si no el nombre) —
+// mismo criterio que canSeeSeccion() para reconocer al profesor.
+function _claveProfesorSeccion(sec) {
+  return String(sec?.profesorEmail || sec?.profesor || '').trim().toLowerCase();
+}
+function _usuarioEsProfesorDeSeccion(sec) {
+  if (!currentUser || !sec) return false;
+  if (sec.profesorEmail && currentUser.email) return sec.profesorEmail.toLowerCase() === currentUser.email.toLowerCase();
+  if (sec.profesor && currentUser.nombre) return sec.profesor.toLowerCase() === currentUser.nombre.toLowerCase();
+  return false;
+}
+
+// Migración (una vez por curso, idempotente): la casilla vieja
+// `permiteDirectaCurso` pasa a ser la modalidad 'directa_sin_rubrica' fijada
+// para ese curso — así ningún curso cambia de comportamiento.
+function _ensureModalidadMigrada() {
+  let changed = false;
+  (db.cursos || []).forEach(c => {
+    if (!('permiteDirectaCurso' in c)) return;
+    if (c.permiteDirectaCurso && !c.modalidadEvaluacion) c.modalidadEvaluacion = 'directa_sin_rubrica';
+    delete c.permiteDirectaCurso;
+    changed = true;
+  });
+  if (changed) saveDB();
+}
+
+// Resuelve la modalidad vigente de un curso (y, si está abierta, la del
+// profesor de la sección dada). Devuelve:
+//   { modalidad, origen: 'curso'|'programa'|'profesor'|'predeterminada', fijadaPorAdmin }
+function resolverModalidadEvaluacion(cursoId, sec) {
+  _ensureModalidadMigrada();
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (_modalidadValida(curso?.modalidadEvaluacion)) {
+    return { modalidad: curso.modalidadEvaluacion, origen: 'curso', fijadaPorAdmin: true };
+  }
+  const prog = curso?.programaId ? (db.programas || []).find(p => p.id === curso.programaId) : null;
+  if (_modalidadValida(prog?.modalidadEvaluacion)) {
+    return { modalidad: prog.modalidadEvaluacion, origen: 'programa', fijadaPorAdmin: true };
+  }
+  const clave = _claveProfesorSeccion(sec);
+  const eleccion = clave && (curso?.eleccionesModalidad || []).find(e => e.profesor === clave);
+  if (eleccion && _modalidadValida(eleccion.modalidad)) {
+    return { modalidad: eleccion.modalidad, origen: 'profesor', fijadaPorAdmin: false };
+  }
+  return { modalidad: MODALIDAD_PREDETERMINADA, origen: 'predeterminada', fijadaPorAdmin: false };
+}
+
+// Guarda la elección del profesor (solo cuando la modalidad no está fijada)
+function guardarEleccionModalidadProfesor(cursoId, sec, modalidad) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (!curso || !sec) return false;
+  if (resolverModalidadEvaluacion(cursoId, sec).fijadaPorAdmin) return false;
+  if (!_modalidadValida(modalidad)) return false;
+  if (!(currentUser?.rol === 'admin' || _usuarioEsProfesorDeSeccion(sec))) return false;
+  const clave = _claveProfesorSeccion(sec);
+  if (!clave) return false;
+  if (!Array.isArray(curso.eleccionesModalidad)) curso.eleccionesModalidad = [];
+  const ex = curso.eleccionesModalidad.find(e => e.profesor === clave);
+  const registro = { profesor: clave, modalidad, fecha: new Date().toISOString(), por: currentUser?.username || currentUser?.nombre || '' };
+  if (ex) Object.assign(ex, registro); else curso.eleccionesModalidad.push(registro);
+  saveDB();
+  return true;
+}
+
+// Modo con el que se evalúa un LAO real según la modalidad del curso.
+// Devuelve 'rubrica' | 'directa' | null (null = bloqueado: exige rúbrica y no la tiene).
+function _modoLaoSegunModalidad(lao, rubrica, modalidad) {
+  if (modalidad === 'lao_sin_rubrica') return 'directa';
+  const modos = _modosDisponiblesLao(lao, rubrica);
+  return modos.includes('rubrica') ? 'rubrica' : (modos.includes('directa') ? 'directa' : null);
+}
+
+
+// Fase R2: franja de modalidad arriba del grid de Avalúo. Si la modalidad no
+// está fijada por el administrador, el profesor de la sección (o un admin)
+// la escoge aquí; la elección vale para todas sus secciones de este curso.
+function _htmlModalidadAvaluo(cursoId, sec, modRes, resueltos) {
+  const info = modalidadInfo(modRes.modalidad);
+  const base = `<div class="av-modalidad-box">
+    <div><strong>Modalidad de evaluación:</strong> ${info ? info.corto : modRes.modalidad}
+      <span style="color:var(--muted)">— ${_origenModalidadTexto(modRes.origen)}</span></div>`;
+  if (modRes.fijadaPorAdmin) return base + '</div>';
+  const puede = currentUser?.rol === 'admin' || _usuarioEsProfesorDeSeccion(sec);
+  if (!puede) return base + `<div style="font-size:0.76rem;color:var(--muted);margin-top:3px">La escoge el profesor de la sección.</div></div>`;
+  const hayRubrica = (resueltos || []).some(r => r.rubrica);
+  const opts = _opcionesModalidadHtml(modRes.origen === 'profesor' ? modRes.modalidad : '', {
+    deshabilitar: hayRubrica ? [] : ['lao_con_rubrica'],
+    motivos: hayRubrica ? {} : { lao_con_rubrica: ' (ningún LAO de este curso tiene rúbrica)' },
+  });
+  return base + `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+      <select id="av-modalidad-sel" style="max-width:520px">
+        ${modRes.origen === 'profesor' ? '' : '<option value="" selected>— Escoge cómo evaluarás este curso —</option>'}${opts}
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="elegirModalidadAvaluo()">Usar esta modalidad</button>
+    </div>
+    <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">Aplica a todas tus secciones de este curso. Puedes cambiarla después.</div>
+  </div>`;
+}
+
+function elegirModalidadAvaluo() {
+  const cursoId = document.getElementById('av-curso')?.value;
+  const sel = document.getElementById('av-modalidad-sel');
+  const modalidad = sel?.value || '';
+  if (!cursoId || !avSeccionActual) return;
+  if (!_modalidadValida(modalidad)) { notify('Escoge una modalidad', '⚠️'); return; }
+  const actual = resolverModalidadEvaluacion(cursoId, avSeccionActual);
+  if (actual.origen === 'profesor' && actual.modalidad === modalidad) { notify('Esa ya es la modalidad del curso', 'ℹ️'); return; }
+  let aviso = 'La cuadrícula se recargará con la nueva modalidad. Los cambios que no hayas guardado se perderán.';
+  const hayDirectaGuardada = (db.avaluos || []).some(a => a.cursoId === cursoId && a.laoId === laoDirectaCursoId(cursoId));
+  if (esModalidadDirecta(actual.modalidad) && !esModalidadDirecta(modalidad) && hayDirectaGuardada) {
+    aviso += '\n\nOjo: este curso ya tiene evaluaciones directas guardadas. Mientras existan, siguen contando como el nivel final de esas competencias.';
+  }
+  if (!confirm(aviso + '\n\n¿Continuar?')) return;
+  if (!guardarEleccionModalidadProfesor(cursoId, avSeccionActual, modalidad)) { notify('No se pudo guardar la modalidad', '⚠️'); return; }
+  notify('Modalidad guardada: ' + modalidadInfo(modalidad).corto, '✅');
+  onSeccionChange();
+}
+
+// Texto corto para mostrar de dónde viene la modalidad
+function _origenModalidadTexto(origen) {
+  return { curso: 'fijada por el administrador para este curso',
+           programa: 'fijada por el administrador para el programa',
+           profesor: 'escogida por el profesor para este curso',
+           predeterminada: 'predeterminada — el profesor todavía no ha escogido' }[origen] || '';
+}
+
 // Al seleccionar sección, se resuelven TODOS los LAOs del curso que el
 // usuario puede evaluar y se combinan en un solo grid — ya no se elige un
 // LAO a la vez. Cada LAO usa su modo por defecto (rúbrica si está
@@ -7111,10 +7340,13 @@ function onSeccionChange() {
     return;
   }
 
+  // Fase R2: la modalidad del curso decide si se evalúa por LAO (y si los
+  // LAOs usan su rúbrica) o con la Evaluación Directa del Curso.
+  const modalidadRes = resolverModalidadEvaluacion(cursoId, avSeccionActual);
+  const modalidad = modalidadRes.modalidad;
   const resueltos = laos.map(lao => {
     const rubrica = db.rubricas.find(r => r.laoId === lao.id) || null;
-    const modos = _modosDisponiblesLao(lao, rubrica);
-    const modo = modos.includes('rubrica') ? 'rubrica' : (modos.includes('directa') ? 'directa' : null);
+    const modo = _modoLaoSegunModalidad(lao, rubrica, modalidad);
     const comps = db.competencias.filter(c => (lao.competencias || []).some(cc => cc.competenciaId === c.id));
     return { lao, rubrica, modo, comps };
   });
@@ -7132,8 +7364,7 @@ function onSeccionChange() {
   // Es un "o lo uno o lo otro": una competencia se evalúa combinando sus
   // LAOs, o se evalúa directamente a nivel de curso — nunca ambas cosas
   // visibles a la vez para no confundir cuál es la evaluación real.
-  const curso = db.cursos.find(c => c.id === cursoId);
-  avDirectaCursoEntry = curso?.permiteDirectaCurso ? {
+  avDirectaCursoEntry = modalidad === 'directa_sin_rubrica' ? {
     lao: {
       id: laoDirectaCursoId(cursoId), cursoId,
       nombre: 'Evaluación Directa del Curso',
@@ -7145,7 +7376,7 @@ function onSeccionChange() {
   } : null;
 
   infoEl.style.display = '';
-  infoEl.innerHTML = [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: 'directa', comps: avDirectaCursoEntry.comps } : null]
+  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: 'directa', comps: avDirectaCursoEntry.comps } : null]
     .filter(Boolean).map(r => {
     let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
     if (r.lao.isGenerico) linea += '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.';
