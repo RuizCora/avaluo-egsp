@@ -826,6 +826,29 @@
   }
 
 
+  /* Fase R1: dominios y criterios de evaluación */
+  .al-dom-header {
+    font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 0.82rem;
+    color: #1B365D; background: #eef2f7; border-left: 4px solid #1B365D;
+    padding: 6px 10px; border-radius: 4px; margin: 14px 0 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .al-dom-count { font-weight: 600; font-size: 0.7rem; color: #fff; background: #1B365D; border-radius: 10px; padding: 1px 7px; }
+  .al-crit-resumen { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 0.72rem; color: var(--muted); }
+  .al-crit-vacio { font-style: italic; }
+  .al-crit-tag { background: #eef2f7; color: #1B365D; border-radius: 4px; padding: 2px 7px; font-size: 0.7rem; }
+  .dom-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  .dom-table th { text-align: left; font-size: 0.74rem; color: var(--muted); padding: 4px 6px; border-bottom: 1.5px solid var(--border); }
+  .dom-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+  .dom-table input { width: 100%; padding: 6px 8px; border: 1.5px solid var(--border); border-radius: 6px; font-size: 0.84rem; }
+  .crit-card { border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; background: var(--white); }
+  .crit-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .crit-card-head .crit-nombre { flex: 1; min-width: 200px; padding: 6px 8px; border: 1.5px solid var(--border); border-radius: 6px; font-size: 0.86rem; font-weight: 600; }
+  .crit-desc-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .crit-desc-table th { width: 190px; text-align: left; vertical-align: top; padding: 5px 8px; color: #fff; font-weight: 600; font-size: 0.74rem; border-bottom: 1px solid #fff; }
+  .crit-desc-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
+  .crit-desc-table textarea { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 5px 7px; font-size: 0.8rem; font-family: inherit; resize: vertical; }
+
   /* ── WIZARD ─────────────────────────────────────────────── */
   .wiz-step {
     flex: 1; text-align: center; padding: 10px 6px; font-size: 0.72rem;
@@ -2923,7 +2946,9 @@ let db = {
   laos: [],              // Learning Assessment Opportunities — entidades propias, ligadas a curso + competencias
   rubricas: [],           // rúbricas (grid criterios × niveles), ligadas 1:1 a un LAO
   escalasNiveles: [],     // escalas de niveles configurables (títulos/descripciones/agrupaciones), con alcance global o por programa
-  estudiantes: []         // Fase B: roster de estudiantes — {id, numero, nombre, programaId, anioComienzo, registracion, secuencia}
+  estudiantes: [],        // Fase B: roster de estudiantes — {id, numero, nombre, programaId, anioComienzo, registracion, secuencia}
+  dominiosCompetencias: [], // Fase R1: dominios de competencias por programa — {id, programa, numero, nombre}
+  semillasAplicadas: []     // Fase R1: marcas de siembras de una sola vez (ids de texto), para que lo borrado no resucite
 };
 
 let _viewAsRole = null;   // admin View-As impersonation role
@@ -2947,7 +2972,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes','dominiosCompetencias','semillasAplicadas'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -2982,6 +3007,8 @@ function loadDB() {
   if (!db.rubricas)     db.rubricas = [];
   if (!db.escalasNiveles) db.escalasNiveles = [];
   if (!db.estudiantes)  db.estudiantes = [];
+  if (!db.dominiosCompetencias) db.dominiosCompetencias = [];
+  if (!db.semillasAplicadas) db.semillasAplicadas = [];
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
@@ -5011,6 +5038,7 @@ function _renombrarProgramaCascada(prog, nombreNuevo) {
   prog.nombre = nombreNuevo;
   db.cursos.forEach(c => { if (c.programaId === prog.id) c.programa = nombreNuevo; });
   (db.bancoCompetencias || []).forEach(bc => { if (bc.programa === nombreAnterior) bc.programa = nombreNuevo; });
+  (db.dominiosCompetencias || []).forEach(d => { if (d.programa === nombreAnterior) d.programa = nombreNuevo; });
   (db.facultad || []).forEach(f => {
     if (f.programaIds && f.programaIds.includes(prog.id) && f.programas) {
       f.programas = f.programas.split('|').map(s => s.trim() === nombreAnterior ? nombreNuevo : s.trim()).join('|');
@@ -5119,21 +5147,156 @@ function _ensureCompetenciasSinDuplicados() {
 // "semilla" inicial — igual que PRELOADED_CURSOS para los cursos.
 function _ensureBancoCompetenciasSeeded() {
   if (!db.bancoCompetencias) db.bancoCompetencias = [];
+  if (!db.semillasAplicadas) db.semillasAplicadas = [];
+  // El catálogo de programas (y su renombre de Fase A) va primero: la semilla
+  // del banco se escribe con el nombre VIGENTE del programa, no con el viejo.
+  _ensureProgramCatalogSeeded();
   let changed = false;
-  const existentes = new Set(db.bancoCompetencias.map(c => c.programa + "::" + c.num));
-  ALL_COMPETENCIAS.forEach(c => {
-    const key = c.programa + "::" + c.num;
-    if (!existentes.has(key)) {
-      db.bancoCompetencias.push({
-        id: "banco_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        num: c.num, texto: c.texto, programa: c.programa,
-        fechaCreacion: new Date().toISOString(),
-      });
-      existentes.add(key);
-      changed = true;
-    }
-  });
+
+  // (Fase R1) Limpieza, una sola vez: ALL_COMPETENCIAS conserva los nombres
+  // de programa de antes de Fase A (ej. 'MHSA'). Como la siembra anterior
+  // comparaba contra esos nombres viejos, después del renombre volvía a
+  // insertar las competencias bajo el nombre viejo — un "fantasma" invisible
+  // en el Banco pero presente en los datos. Aquí se eliminan esos duplicados
+  // (o se renombran si no hay contraparte con el nombre vigente).
+  if (!_semillaAplicada('banco_nombres_canonicos_v1')) {
+    const claves = new Set(db.bancoCompetencias.map(c => c.programa + '::' + c.num));
+    const quitar = new Set();
+    db.bancoCompetencias.forEach(c => {
+      const canon = _nombreProgramaVigente(c.programa);
+      if (canon === c.programa) return;
+      if (claves.has(canon + '::' + c.num)) quitar.add(c.id);
+      else { c.programa = canon; claves.add(canon + '::' + c.num); }
+    });
+    if (quitar.size) db.bancoCompetencias = db.bancoCompetencias.filter(c => !quitar.has(c.id));
+    _marcarSemilla('banco_nombres_canonicos_v1');
+    changed = true;
+  }
+
+  // Siembra desde ALL_COMPETENCIAS: UNA sola vez (antes corría en cada
+  // carga y reinsertaba cualquier competencia que se hubiese borrado).
+  if (!_semillaAplicada('banco_competencias_v1')) {
+    const existentes = new Set(db.bancoCompetencias.map(c => c.programa + "::" + c.num));
+    ALL_COMPETENCIAS.forEach(c => {
+      const programa = _nombreProgramaVigente(c.programa);
+      const key = programa + "::" + c.num;
+      if (!existentes.has(key)) {
+        db.bancoCompetencias.push({
+          id: "banco_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          num: c.num, texto: c.texto, programa,
+          fechaCreacion: new Date().toISOString(),
+        });
+        existentes.add(key);
+      }
+    });
+    _marcarSemilla('banco_competencias_v1');
+    changed = true;
+  }
+
+  if (_ensureAlineamientoSemillaMHSA()) changed = true;
   if (changed) saveDB();
+}
+
+// ── Marcas de siembra de una sola vez (db.semillasAplicadas) ─────────────────
+function _semillaAplicada(id) {
+  return Array.isArray(db.semillasAplicadas) && db.semillasAplicadas.includes(id);
+}
+function _marcarSemilla(id) {
+  if (!Array.isArray(db.semillasAplicadas)) db.semillasAplicadas = [];
+  if (!db.semillasAplicadas.includes(id)) db.semillasAplicadas.push(id);
+}
+
+// Traduce un nombre de programa (posiblemente pre-Fase A) al nombre vigente
+// en el catálogo. Si no lo encuentra en el catálogo, devuelve el nombre
+// canónico de Fase A (o el mismo nombre si no tiene renombre).
+function _nombreProgramaVigente(nombre) {
+  const canon = PROG_RENAME_MAP_FASE_A[nombre] || nombre;
+  const prog = (db.programas || []).find(p => (p.nombre || '').toLowerCase() === canon.toLowerCase())
+            || (db.programas || []).find(p => (p.nombre || '').toLowerCase() === String(nombre).toLowerCase());
+  return prog ? prog.nombre : canon;
+}
+
+// ======================== FASE R1: ALINEAMIENTO DE CRITERIOS ========================
+// Dominios de competencias (db.dominiosCompetencias) y criterios de evaluación
+// por competencia (bancoCompetencias[].criteriosEvaluacion). Es la base de la
+// rúbrica de Evaluación Directa del Curso (Fases R2/R3) y de las descargas
+// Word/PDF (R4). La semilla de MHSA sale del documento "Integrated Evaluation
+// Rubric (Aligned Curriculum Model)" V.5 (Rubrica_24_sept_26.docx) y se aplica
+// UNA sola vez: después todo es editable/borrable desde Alineación Curricular.
+//
+// Formato de un criterio:
+//   { id, codigo:'C1', nombre, peso (relativo, 1 = partes iguales),
+//     descriptores: { n4:'…', n3:'…', … } }
+// Los descriptores van indexados por el VALOR del nivel con prefijo "n" (no
+// por el título): así sobreviven a cambios de títulos en la Escala de Niveles,
+// y Firebase no los convierte en arreglo (lo hace con llaves numéricas 0..n).
+//
+// IDs deterministas en lo sembrado (dom_seed_…, crit_seed_…): si dos usuarios
+// abren la app a la vez con la base sin sembrar, ambos escriben exactamente
+// los mismos datos y no quedan referencias cruzadas rotas.
+function _ensureAlineamientoSemillaMHSA() {
+  const SEMILLA_ID = 'alineamiento_mhsa_v5';
+  if (_semillaAplicada(SEMILLA_ID)) return false;
+  const programa = _nombreProgramaVigente('MHSA');
+  const comps = (db.bancoCompetencias || []).filter(c => c.programa === programa);
+  if (!comps.length) return false; // todavía no hay banco MHSA: se intenta en la próxima carga
+  if (!db.dominiosCompetencias) db.dominiosCompetencias = [];
+  const sem = ALINEAMIENTO_SEMILLA_MHSA;
+
+  sem.dominios.forEach(d => {
+    let dom = db.dominiosCompetencias.find(x => x.programa === programa && String(x.numero) === String(d.numero));
+    if (!dom) {
+      dom = { id: 'dom_seed_mhsa_' + d.numero, programa, numero: d.numero, nombre: d.nombre,
+              fechaCreacion: new Date().toISOString() };
+      db.dominiosCompetencias.push(dom);
+    }
+    comps.forEach(c => {
+      if (!c.dominioId && String(c.num).split('.')[0] === String(d.numero)) c.dominioId = dom.id;
+    });
+  });
+
+  Object.entries(sem.criterios).forEach(([num, lista]) => {
+    const comp = comps.find(c => c.num === num);
+    if (!comp || (comp.criteriosEvaluacion && comp.criteriosEvaluacion.length)) return;
+    comp.criteriosEvaluacion = lista.map(cr => ({
+      id: 'crit_seed_mhsa_' + num.replace('.', '_') + '_' + cr.codigo,
+      codigo: cr.codigo, nombre: cr.nombre, peso: 1,
+      descriptores: Object.fromEntries(Object.entries(cr.descriptores).map(([v, t]) => ['n' + v, t])),
+    }));
+  });
+
+  _marcarSemilla(SEMILLA_ID);
+  return true;
+}
+
+// Escala de niveles vigente para un programa (por NOMBRE, que es como el banco
+// identifica al programa): la específica del programa si existe, si no la global.
+function resolverEscalaParaPrograma(nombrePrograma) {
+  _ensureEscalaNivelesSeeded();
+  const prog = (db.programas || []).find(p => p.nombre === nombrePrograma);
+  const especifica = prog && db.escalasNiveles.find(e =>
+    e.activa && e.aplicaA === 'programas' && e.programaIds?.includes(prog.id));
+  return especifica || db.escalasNiveles.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+}
+
+// Dominios de un programa, ordenados por número
+function dominiosDePrograma(nombrePrograma) {
+  return (db.dominiosCompetencias || [])
+    .filter(d => d.programa === nombrePrograma)
+    .sort((a, b) => (parseFloat(a.numero) || 0) - (parseFloat(b.numero) || 0) || String(a.nombre).localeCompare(String(b.nombre)));
+}
+
+// Criterios de evaluación de una competencia del banco (siempre un arreglo:
+// Firebase elimina los arreglos vacíos, así que puede llegar undefined)
+function criteriosDeCompetencia(bc) {
+  return Array.isArray(bc?.criteriosEvaluacion) ? bc.criteriosEvaluacion : [];
+}
+
+// Descriptor de un criterio para un valor de nivel (tolera las dos formas
+// posibles: objeto {n3:…} o, por si acaso, arreglo/objeto indexado por valor)
+function descriptorCriterio(cr, valor) {
+  const d = cr?.descriptores || {};
+  return d['n' + valor] ?? d[valor] ?? '';
 }
 
 // ======================== ESCALAS DE NIVELES ========================
@@ -6535,6 +6698,7 @@ function guardarProgramaCatalogo() {
       if (nombreAnterior !== nombre) {
         db.cursos.forEach(c => { if (c.programaId === editId) c.programa = nombre; });
         db.bancoCompetencias.forEach(bc => { if (bc.programa === nombreAnterior) bc.programa = nombre; });
+        (db.dominiosCompetencias || []).forEach(d => { if (d.programa === nombreAnterior) d.programa = nombre; });
         (db.facultad || []).forEach(f => {
           if (f.programaIds && f.programaIds.includes(editId) && f.programas) {
             f.programas = f.programas.split('|').map(s => s.trim() === nombreAnterior ? nombre : s.trim()).join('|');
@@ -10927,6 +11091,337 @@ const ALL_COMPETENCIAS = [
   { num:'DESS5', texto:'Formulate healthy public policies to promote the health and wellbeing of the population from an equity and social justice perspective.', programa:'DrPH Social Determinants of Health' },
 ];
 
+// Fase R1 — Semilla del alineamiento de criterios MHSA (documento V.5,
+// "Integrated Evaluation Rubric (Aligned Curriculum Model)", 24-sept-2026).
+// Solo se usa UNA vez (ver _ensureAlineamientoSemillaMHSA); después los datos
+// viven en db.dominiosCompetencias / db.bancoCompetencias y son editables.
+const ALINEAMIENTO_SEMILLA_MHSA = {
+ "dominios": [
+  {
+   "numero": 1,
+   "nombre": "Communication and Relationship Management"
+  },
+  {
+   "numero": 2,
+   "nombre": "Leadership"
+  },
+  {
+   "numero": 3,
+   "nombre": "Professionalism"
+  },
+  {
+   "numero": 4,
+   "nombre": "Knowledge of Healthcare Environment"
+  },
+  {
+   "numero": 5,
+   "nombre": "Business Skills and Knowledge"
+  },
+  {
+   "numero": 6,
+   "nombre": "Public Health Skills and Knowledge"
+  }
+ ],
+ "criterios": {
+  "1.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Written Message Structure",
+    "descriptores": {
+     "4": "Writes flawless administrative documents with exceptional technical rigor, logical coherence, and perfect grammar, exceeding baseline graduate expectations.",
+     "3": "Writes clear and cohesive administrative reports or policies, using appropriate professional terminology suitable for healthcare delivery environments.",
+     "2": "Drafts documents with minor structural flaws or inconsistent technical language, showing basic knowledge but requiring supervision.",
+     "1": "Presents disorganized or fragmented written work containing critical errors; performance is minimal and just beginning to develop.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Oral Delivery & Performance",
+    "descriptores": {
+     "4": "Delivers highly persuasive presentations with masterful time management, fluid articulation, and commanding executive presence that surpasses expectations.",
+     "3": "Demonstrates absolute mastery of the topic, uses guiding points without relying on reading, engages and actively interacts with the audience.",
+     "2": "Demonstrates solid mastery and uses guiding points; keeps the audience's attention, but with limited interaction.",
+     "1": "Demonstrates basic knowledge but relies on reading lengthy paragraphs and does not interact with the audience.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Presentation",
+    "descriptores": {
+     "4": "Presents exceptional visual layout designs using precise advanced mapping charts, data matrices, or executive-level visuals that significantly streamline strategic understanding.",
+     "3": "Highly professional and organized layouts. Excellent use of structured graphs, tables, or diagrams that make it easy to understand the content.",
+     "2": "Proper visual organization. Includes correct graphic elements, but with little variety or minor details of readability and spacing.",
+     "1": "Disorganized and visually dense formatting. Lacks adequate visual aids or these make it difficult to understand the text.",
+     "0": "Presentation that is chaotic, illegible, or does not follow any professional design standards required at the graduate level."
+    }
+   }
+  ],
+  "1.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Operational Collaboration",
+    "descriptores": {
+     "4": "Masterfully synthesizes advanced high-performance team frameworks within the submitted work, flawlessly demonstrating how strategic collaboration, task allocation, and team dynamics optimize organizational outcomes with exceptional analytical rigor.",
+     "3": "Correctly identifies and applies foundational teamwork principles and high-performance models (e.g., Tuckman, Lencioni) to justify the structural or collaborative design proposed in the submitted work.",
+     "2": "Mentions teamwork concepts or group principles superficially within the assignment, but fails to link them logically or structurally to the practical operations discussed in the text.",
+     "1": "Fails to incorporate teamwork theories or collaborative principles, basing administrative structures or group workflows entirely on personal, non-theoretical assumptions within the deliverable.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation in the submitted work."
+    }
+   }
+  ],
+  "2.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Vision & Change Management",
+    "descriptores": {
+     "4": "Masters the integration of advanced leadership frameworks and change theories, fully justifying all strategic and visionary choices exceptionally.",
+     "3": "Correctly identifies and applies foundational leadership principles and change models (e.g., Kotter) to health services case studies.",
+     "2": "Mentions leadership frameworks or change phases superficially without linking them logically to the administrative challenges presented.",
+     "1": "Fails to incorporate leadership or change theories, basing organizational change proposals entirely on personal assumptions.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "2.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Negotiation & Mediation",
+    "descriptores": {
+     "4": "Executes sophisticated, highly structured negotiation models (e.g., Harvard Model) to achieve optimal mutual gains and resolve deep organizational conflicts.",
+     "3": "Uses appropriate negotiation and mediation techniques to guide conflicting healthcare parties toward a professional, realistic compromise.",
+     "2": "Attempts to mediate or collaborate but relies on weak or coercive tactics, resulting in unstable, short-term agreements.",
+     "1": "Fails to apply negotiation or mediation principles, escalating organizational tension or forcing authoritarian, non-consensual outcomes.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "3.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Ethical & Deontological Integration",
+    "descriptores": {
+     "4": "Detects nuanced, complex ethical conflicts and hidden governance vulnerabilities long before they escalate, modeling the highest professional codes.",
+     "3": "Correctly identifies ethical dilemmas, conflicts of interest, and governance risks, aligning choices with codes of medical-legal ethics.",
+     "2": "Identifies obvious ethical issues but misses subtler compliance or governance risks embedded in the administrative structure.",
+     "1": "Fails to recognize blatant ethical violations, conflicts of interest, or compliance red flags within healthcare delivery scenarios.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "3.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Professional Service & Growth",
+    "descriptores": {
+     "4": "Conducts a profound critical self-appraisal, mapping out an advanced path (e.g., FACHE) and demonstrating profound executive network contribution.",
+     "3": "Designs a realistic professional development plan and articulates the value of active participation in professional healthcare management organizations (e.g., ACHE, IHF).",
+     "2": "Acknowledges professional groups or learning plans but cannot identify specific networks or how they contribute to executive competence clearly.",
+     "1": "Dismisses professional associations completely, viewing continuous career networking and learning as irrelevant to administration.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "4.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Health Policy & Regulation Analysis",
+    "descriptores": {
+     "4": "Displays flawless, exhaustive mastery of healthcare statutes, reforms, and national public policy frameworks, accurately predicting population health impacts.",
+     "3": "Accurately interprets and applies current public policies, healthcare regulations, and policy decision-making processes to institutional scenarios.",
+     "2": "Demonstrates a superficial grasp of health laws, misapplying minor regulatory details or failing to link them clearly to population health delivery.",
+     "1": "Ignores or severely misinterprets public policies and basic healthcare regulations governing health service delivery.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "4.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Medico-Legal Risk Management",
+    "descriptores": {
+     "4": "Proactively uncovers hidden systemic flaws and engineered bulletproof risk-mitigation systems, checklists, and legal compliance safeguards flawlessly.",
+     "3": "Correctly identifies potential medical-legal risks, liability hazards, and non-compliance points, designing realistic risk management protocols.",
+     "2": "Spots obvious legal hazards but misses deeper institutional compliance, credentialing, or practical step-by-step risk mitigation workflows.",
+     "1": "Fails to detect severe medical-legal liabilities or offer preventive strategies, leaving the organization vulnerable to lawsuits or safety hazards.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "4.3": [
+   {
+    "codigo": "C1",
+    "nombre": "Healthcare Delivery System Trends",
+    "descriptores": {
+     "4": "Systematically synthesizes cutting-edge industry trends, macroeconomic shifts, and structural reforms to pioneer delivery system changes.",
+     "3": "Evaluates contemporary healthcare issues, industry developments, and professional trends to plan necessary changes in delivery systems.",
+     "2": "References healthcare system changes or trends but struggles to connect them logically to the direct operational needs of the facility.",
+     "1": "Relies strictly on anecdotal or outdated assumptions, ignoring current systemic trends, technological changes, or professional data.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "4.4": [
+   {
+    "codigo": "C1",
+    "nombre": "System Thinking & Core Management",
+    "descriptores": {
+     "4": "Masterfully integrates systems thinking perspectives and core organizational theories to optimize macro-level and micro-level facility structures.",
+     "3": "Applies foundational management concepts, theories, principles, and systems thinking to analyze and resolve healthcare organizational challenges.",
+     "2": "Mentions core management concepts or systems perspectives superficially without linking them logically to the practical operation of the healthcare setup.",
+     "1": "Fails to incorporate basic management theories or systems thinking, treating interconnected workflows as isolated events.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Cost & Financial Viability",
+    "descriptores": {
+     "4": "Constructs flawless, advanced operating budgets, cost-allocation models, and financial indicators (ROI, NPV, IRR) with deep fiscal engineering insight.",
+     "3": "Accurately calculates fixed/variable costs, operating budgets, and break-even points, applying financial tools to ensure fiscal viability.",
+     "2": "Completes financial or cost accounting tasks with minor arithmetic or conceptual errors that distort budgetary balances or justifications.",
+     "1": "Submits budgets or financial plans filled with critical errors, ignoring investment appraisal tools or threatening economic survival.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Organizational Culture Analysis",
+    "descriptores": {
+     "4": "Dissects intricate subcultures, power networks, and deep human behavioral links to strategic hospital performance metrics with superior precision.",
+     "3": "Accurately diagnoses the existing organizational culture, corporate climate, and behavioral alignments that drive clinical and strategic goals.",
+     "2": "Identifies surface-level cultural aspects (e.g., morale) but misses structural behavioral bottlenecks or clinical resistance dynamics.",
+     "1": "Completely overlooks corporate culture, analyzing institutional failure purely through mechanical or non-human metrics.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.3": [
+   {
+    "codigo": "C1",
+    "nombre": "Environmental Scanning & Strategic Planning",
+    "descriptores": {
+     "4": "Executes a highly sophisticated analysis of competitive behaviors, shifting consumer demands, and technological forces to design bulletproof strategic plans.",
+     "3": "Develops a realistic organizational strategic plan based on scanning market forces, competitive dynamics, and demand trends within the health sector.",
+     "2": "Identifies market forces or environmental aspects but fails to link them logically to the strategic position or plan of the facility.",
+     "1": "Ignores market competition and patient demographic shifts, analyzing the facility as an isolated entity without strategic foresight.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.4": [
+   {
+    "codigo": "C1",
+    "nombre": "Marketing Principles in Decision Making",
+    "descriptores": {
+     "4": "Integrates sophisticated marketing strategy frameworks and patient-consumer demand metrics seamlessly to drive high-level administrative choices.",
+     "3": "Discusses and applies standard healthcare marketing principles, service line position, and institutional communication to support decision-making.",
+     "2": "Mentions marketing concepts or patient outreach superficially but fails to integrate them practically into the management decision flow.",
+     "1": "Completely disregards healthcare marketing principles, designing services or making decisions without considering consumer or community connection.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.5": [
+   {
+    "codigo": "C1",
+    "nombre": "Statistical & Quantitative Methods",
+    "descriptores": {
+     "4": "Constructs advanced, flawless quantitative models and statistical cross-analyses to optimize operational performance with absolute mathematical rigor.",
+     "3": "Applies statistical and quantitative methods accurately to measure, analyze, and propose actions for improving performance and efficiency indicators.",
+     "2": "Completes quantitative calculations with minor mathematical or interpretation errors that alter the clarity of the efficiency report.",
+     "1": "Submits quantitative data or performance measures filled with critical flaws, managing operations intuitively without statistical validity.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.6": [
+   {
+    "codigo": "C1",
+    "nombre": "Economic Analysis of Healthcare Systems",
+    "descriptores": {
+     "4": "Masterfully synthesizes healthcare micro/macroeconomic principles to drive system improvements across equity, access, and productivity metrics perfectly.",
+     "3": "Applies foundational economic concepts to analyze sector trends and outline realistic improvements in system productivity, access, efficiency, and equity.",
+     "2": "Acknowledges health economic metrics but struggles to apply or translate them logically into concrete workflows for system improvement.",
+     "1": "Ignores economic realities or structural trends, proposing unsustainable adjustments that undermine efficiency or institutional equity.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.7": [
+   {
+    "codigo": "C1",
+    "nombre": "Human Resources Management",
+    "descriptores": {
+     "4": "Engineers highly sophisticated incentive architectures, staffing models, and legal frameworks that permanently resolve complex clinical burnout and performance bottlenecks.",
+     "3": "Articulates and applies core principles and legal aspects of human resources management to align staff behavior with performance goals.",
+     "2": "Suggests generic human resources or motivational ideas that fail to address labor regulations, legal constraints, or clinical team realities.",
+     "1": "Ignores human resource management principles or legal labor standards, resulting in designs that fracture culture or compromise compliance.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.8": [
+   {
+    "codigo": "C1",
+    "nombre": "Compliance, Safety & Industry Standards",
+    "descriptores": {
+     "4": "Integrates advanced global safety milestones, International Patient Safety Goals (IPSGs), and rigorous quality frameworks into corporate design impeccably.",
+     "3": "Evaluates institutional compliance with industry best practices, clinical safety standards, and standardized healthcare quality indicators successfully.",
+     "2": "Tracks isolated quality or safety metrics but fails to integrate them into a comprehensive compliance structure or safety safeguard plan.",
+     "1": "Disregards industry benchmarks, standards, and safety guidelines entirely, proposing hazardous or non-compliant clinical operational plans.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "5.9": [
+   {
+    "codigo": "C1",
+    "nombre": "Health Information Technology Evaluation",
+    "descriptores": {
+     "4": "Designs robust health data architectures, electronic medical records workflows, and ironclad data privacy standards (e.g., HIPAA-level) seamlessly.",
+     "3": "Evaluates and incorporates the strategic use of administrative and clinical health information technology (HIT) to facilitate data-driven decision-making.",
+     "2": "References health information technology or systems but fails to build practical workflows or secure administrative safeguards into the proposal.",
+     "1": "Violates basic data system principles or completely ignores the role of information technology in supporting modern clinical and executive processes.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "6.1": [
+   {
+    "codigo": "C1",
+    "nombre": "Epidemiological & Quality Indicator Analytics",
+    "descriptores": {
+     "4": "Cross-analyzes complex population health profiles, morbidity formulas, and hospital benchmarks to forecast delivery demands with masterful precision.",
+     "3": "Correctly interprets epidemiological profiles, disease incidence/prevalence, and quality benchmarks to guide resource allocation and bed management decisions.",
+     "2": "Reviews population data or quality metrics superficially, failing to connect changing health trends to direct hospital capacity adjustments.",
+     "1": "Allocates critical healthcare resources intuitively, completely ignoring public health evidence, clinical data, and community epidemiological trends.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ],
+  "6.2": [
+   {
+    "codigo": "C1",
+    "nombre": "Social Determinants of Health (SDOH) Integration",
+    "descriptores": {
+     "4": "Executes deep, localized mapping of hidden socio-economic and structural barriers, re-engineering clinical pathways to permanently maximize equity and access.",
+     "3": "Accurately identifies and explains how social determinants of health (SDOH) affect the local target population, compliance, readmissions, and service use.",
+     "2": "Acknowledges social vulnerabilities but cannot explain how they translate into internal hospital bottlenecks, financial risk, or localized barriers.",
+     "1": "Assumes clinical outcomes are independent of social realities, treating all marginalized populations as if they share identical baseline resources.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+    }
+   }
+  ]
+ }
+};
+
+
 const COURSE_DATA = {
   // ── MPH/MPHE Core ────────────────────────────────────────────────────────
   'c_EPID6523': { comps:['1','4'],                  laos:['LAO 1: Case Study Analysis','LAO 2: Test #1','LAO 3: Test #2','LAO 4: Test #3'] },
@@ -11833,13 +12328,31 @@ function renderAlBank(filterProg, isAdmin) {
   progs.forEach(prog => {
     const comps = db.bancoCompetencias.filter(c => c.programa === prog);
     if (!comps.length) return;
+    const dominios = dominiosDePrograma(prog);
+    const totalCrit = comps.reduce((n, c) => n + criteriosDeCompetencia(c).length, 0);
     html += `<div style="margin-bottom:28px">
       <div class="al-prog-header">
         <span>${prog}</span>
-        <span style="font-size:0.78rem;font-weight:400;color:var(--muted)">${comps.length} competencias</span>
-        ${isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="abrirNuevaCompetenciaBank('${prog}')">＋ Nueva Competencia</button>` : ''}
+        <span style="font-size:0.78rem;font-weight:400;color:var(--muted)">${comps.length} competencias${dominios.length ? ` · ${dominios.length} dominios` : ''}${totalCrit ? ` · ${totalCrit} criterios de evaluación` : ''}</span>
+        ${isAdmin ? `<span style="margin-left:auto;display:flex;gap:6px;white-space:nowrap;flex-shrink:0">
+          <button class="btn btn-outline btn-sm" onclick="abrirDominiosPrograma('${_alEscAttr(prog)}')">🗂️ Dominios</button>
+          <button class="btn btn-outline btn-sm" onclick="abrirNuevaCompetenciaBank('${_alEscAttr(prog)}')">＋ Nueva Competencia</button>
+        </span>` : ''}
       </div>`;
-    comps.forEach(comp => {
+    // Fase R1: agrupar por dominio cuando el programa tiene dominios. Las
+    // competencias sin dominio (o con un dominio que ya no existe) van al final.
+    const grupos = dominios.length
+      ? [...dominios.map(d => ({ dom: d, comps: comps.filter(c => c.dominioId === d.id) })),
+         { dom: null, comps: comps.filter(c => !c.dominioId || !dominios.some(d => d.id === c.dominioId)) }]
+      : [{ dom: null, comps }];
+    grupos.forEach(g => {
+    if (!g.comps.length) return;
+    if (dominios.length) {
+      html += `<div class="al-dom-header">${g.dom
+        ? `Dominio ${_alEsc(g.dom.numero)}: ${_alEsc(g.dom.nombre)}`
+        : 'Sin dominio asignado'}<span class="al-dom-count">${g.comps.length}</span></div>`;
+    }
+    g.comps.forEach(comp => {
       // Find which db courses have this competency linked
       const linkedComps = db.competencias.filter(dc =>
         dc.codigo === 'C'+comp.num || dc.codigo === comp.num
@@ -11872,13 +12385,17 @@ function renderAlBank(filterProg, isAdmin) {
               }).join('')}
               ${linkedCourses.length === 0 ? `<span style="font-size:0.75rem;color:var(--muted);font-style:italic">Sin cursos vinculados</span>` : ''}
             </div>
+            ${_alResumenCriteriosHtml(comp)}
           </div>
-          ${isAdmin ? `<div style="display:flex;gap:6px;flex-shrink:0">
-            <button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${comp.num}','${prog}')" title="Vincular curso">＋ Curso</button>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-outline btn-sm" onclick="abrirCriteriosCompetencia('${comp.id}')" title="${isAdmin ? 'Editar criterios de evaluación' : 'Ver criterios de evaluación'}">📐 Criterios</button>
+            ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${comp.num}','${prog}')" title="Vincular curso">＋ Curso</button>
             <button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${comp.num}','${prog}')" title="Editar competencia">✏️</button>
-          </div>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="eliminarCompetenciaBank('${comp.id}')" title="Eliminar competencia del banco">🗑️</button>` : ''}
+          </div>
         </div>
       </div>`;
+    });
     });
     html += '</div>';
   });
@@ -12070,6 +12587,7 @@ function abrirNuevaCompetenciaBank(prog) {
   document.getElementById('bank-comp-programa-display').value = prog;
   document.getElementById('bank-comp-num').value = '';
   document.getElementById('bank-comp-texto').value = '';
+  _poblarSelectDominioBank(prog, '');
   openModal('modal-competencia-bank');
 }
 
@@ -12082,6 +12600,7 @@ function abrirEditarCompetenciaBank(compNum, prog) {
   document.getElementById('bank-comp-programa-display').value = bc.programa;
   document.getElementById('bank-comp-num').value = bc.num;
   document.getElementById('bank-comp-texto').value = bc.texto;
+  _poblarSelectDominioBank(bc.programa, bc.dominioId || '');
   openModal('modal-competencia-bank');
 }
 
@@ -12090,6 +12609,7 @@ function guardarCompetenciaBank() {
   const programa = document.getElementById('bank-comp-programa').value;
   const num = document.getElementById('bank-comp-num').value.trim();
   const texto = document.getElementById('bank-comp-texto').value.trim();
+  const dominioId = document.getElementById('bank-comp-dominio')?.value || '';
   if (!num || !texto) { notify('Completa el código y la descripción', '⚠️'); return; }
 
   if (!db.bancoCompetencias) db.bancoCompetencias = [];
@@ -12100,6 +12620,7 @@ function guardarCompetenciaBank() {
     const numAnterior = bc.num;
     bc.num = num;
     bc.texto = texto;
+    if (dominioId) bc.dominioId = dominioId; else delete bc.dominioId;
     // Si cambió el código, actualiza también las instancias de curso ya
     // vinculadas para que no se pierda el enlace (db.competencias.codigo)
     if (numAnterior !== num) {
@@ -12113,16 +12634,286 @@ function guardarCompetenciaBank() {
   } else {
     const dup = db.bancoCompetencias.find(c => c.num === num && c.programa === programa);
     if (dup) { notify('Ya existe una competencia con ese código en este programa', '⚠️'); return; }
-    db.bancoCompetencias.push({
+    const nueva = {
       id: 'banco_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       num, texto, programa,
       fechaCreacion: new Date().toISOString(),
-    });
+    };
+    if (dominioId) nueva.dominioId = dominioId;
+    db.bancoCompetencias.push(nueva);
     notify('Competencia añadida al banco ✓');
   }
   saveDB();
   closeModal('modal-competencia-bank');
   renderAlineacion();
+}
+
+// ======================== FASE R1: UI DE DOMINIOS Y CRITERIOS ========================
+function _alEsc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+// Para meter un texto dentro de un onclick="f('…')"
+function _alEscAttr(s) {
+  return _alEsc(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
+// Resumen compacto de los criterios de una competencia (tarjeta del Banco)
+function _alResumenCriteriosHtml(comp) {
+  const crits = criteriosDeCompetencia(comp);
+  if (!crits.length) return `<div class="al-crit-resumen al-crit-vacio">📐 Sin criterios de evaluación</div>`;
+  return `<div class="al-crit-resumen">📐 ${crits.map(cr =>
+    `<span class="al-crit-tag"><strong>${_alEsc(cr.codigo)}</strong> ${_alEsc(cr.nombre)}</span>`).join('')}</div>`;
+}
+
+function _poblarSelectDominioBank(programa, seleccionado) {
+  const sel = document.getElementById('bank-comp-dominio');
+  if (!sel) return;
+  const doms = dominiosDePrograma(programa);
+  sel.innerHTML = '<option value="">— Sin dominio —</option>' + doms.map(d =>
+    `<option value="${_alEsc(d.id)}">Dominio ${_alEsc(d.numero)}: ${_alEsc(d.nombre)}</option>`).join('');
+  sel.value = doms.some(d => d.id === seleccionado) ? seleccionado : '';
+}
+
+// Borrar una competencia del banco. Si está vinculada a cursos se bloquea:
+// primero hay que desvincularla (así no quedan avalúos/LAOs huérfanos).
+function eliminarCompetenciaBank(compId) {
+  if (currentUser?.rol !== 'admin') return;
+  const bc = db.bancoCompetencias.find(c => c.id === compId);
+  if (!bc) return;
+  const vinculos = db.competencias.filter(dc => dc.codigo === 'C' + bc.num || dc.codigo === bc.num);
+  const cursosVinc = [...new Set(vinculos.map(v => v.cursoId))]
+    .map(id => db.cursos.find(c => c.id === id)).filter(c => c && c.programa === bc.programa);
+  if (cursosVinc.length) {
+    notify(`No se puede eliminar C${bc.num}: está vinculada a ${cursosVinc.map(c => c.codigo).join(', ')}. Desvincúlala primero.`, '⚠️');
+    return;
+  }
+  const nCrit = criteriosDeCompetencia(bc).length;
+  if (!confirm(`¿Eliminar la competencia C${bc.num} del banco de ${bc.programa}?` +
+    (nCrit ? `\n\nTambién se eliminarán sus ${nCrit} criterio(s) de evaluación.` : '') +
+    '\n\nEsta acción no se puede deshacer.')) return;
+  db.bancoCompetencias = db.bancoCompetencias.filter(c => c.id !== compId);
+  saveDB();
+  renderAlineacion();
+  notify('Competencia eliminada del banco', '🗑');
+}
+
+// ── Editor de DOMINIOS de un programa ─────────────────────────────────────────
+let _domEdit = null; // { programa, lista:[{id, numero, nombre, _nuevo?}], borrados:Set }
+
+function abrirDominiosPrograma(programa) {
+  if (currentUser?.rol !== 'admin') return;
+  _domEdit = {
+    programa,
+    lista: dominiosDePrograma(programa).map(d => ({ id: d.id, numero: d.numero, nombre: d.nombre })),
+    borrados: new Set(),
+  };
+  document.getElementById('dom-title').textContent = '🗂️ Dominios de competencias — ' + programa;
+  _renderDominiosEditor();
+  openModal('modal-dominios');
+}
+
+function _renderDominiosEditor() {
+  const el = document.getElementById('dom-body');
+  if (!el || !_domEdit) return;
+  const filas = _domEdit.lista.filter(d => !_domEdit.borrados.has(d.id));
+  const nComps = id => db.bancoCompetencias.filter(c => c.programa === _domEdit.programa && c.dominioId === id).length;
+  el.innerHTML = `
+    <table class="dom-table">
+      <thead><tr><th style="width:90px">Número</th><th>Nombre del dominio</th><th style="width:110px">Competencias</th><th style="width:44px"></th></tr></thead>
+      <tbody>
+        ${filas.map(d => `<tr>
+          <td><input type="text" value="${_alEsc(d.numero)}" oninput="_domSet('${d.id}','numero',this.value)"></td>
+          <td><input type="text" value="${_alEsc(d.nombre)}" oninput="_domSet('${d.id}','nombre',this.value)" placeholder="ej. Leadership"></td>
+          <td style="text-align:center;color:var(--muted)">${d._nuevo ? '—' : nComps(d.id)}</td>
+          <td><button class="btn btn-outline btn-sm" title="Eliminar dominio" onclick="_domBorrar('${d.id}')">🗑️</button></td>
+        </tr>`).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:14px">Este programa todavía no tiene dominios.</td></tr>`}
+      </tbody>
+    </table>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="_domAgregar()">＋ Agregar dominio</button>
+    <div style="font-size:0.76rem;color:var(--muted);margin-top:10px">Eliminar un dominio no elimina sus competencias: quedan “sin dominio asignado”. Cada competencia se asigna a su dominio desde ✏️ en el Banco.</div>`;
+}
+
+function _domSet(id, campo, valor) {
+  const d = _domEdit?.lista.find(x => x.id === id);
+  if (d) d[campo] = valor;
+}
+function _domAgregar() {
+  const nums = _domEdit.lista.filter(d => !_domEdit.borrados.has(d.id)).map(d => parseFloat(d.numero) || 0);
+  _domEdit.lista.push({
+    id: 'dom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    numero: String((nums.length ? Math.max(...nums) : 0) + 1), nombre: '', _nuevo: true,
+  });
+  _renderDominiosEditor();
+}
+function _domBorrar(id) {
+  const d = _domEdit.lista.find(x => x.id === id);
+  if (!d) return;
+  const n = db.bancoCompetencias.filter(c => c.programa === _domEdit.programa && c.dominioId === id).length;
+  if (n && !confirm(`El dominio "${d.nombre}" tiene ${n} competencia(s). Quedarán sin dominio asignado. ¿Continuar?`)) return;
+  if (d._nuevo) _domEdit.lista = _domEdit.lista.filter(x => x.id !== id);
+  else _domEdit.borrados.add(id);
+  _renderDominiosEditor();
+}
+
+function guardarDominiosPrograma() {
+  if (!_domEdit) return;
+  const vivos = _domEdit.lista.filter(d => !_domEdit.borrados.has(d.id));
+  for (const d of vivos) {
+    d.numero = String(d.numero ?? '').trim();
+    d.nombre = String(d.nombre ?? '').trim();
+    if (!d.numero || !d.nombre) { notify('Cada dominio necesita número y nombre', '⚠️'); return; }
+  }
+  const nums = vivos.map(d => d.numero.toLowerCase());
+  if (new Set(nums).size !== nums.length) { notify('Hay dos dominios con el mismo número', '⚠️'); return; }
+
+  const prog = _domEdit.programa;
+  if (!db.dominiosCompetencias) db.dominiosCompetencias = [];
+  // Borrados: fuera del catálogo, y sus competencias quedan sin dominio
+  _domEdit.borrados.forEach(id => {
+    db.dominiosCompetencias = db.dominiosCompetencias.filter(d => d.id !== id);
+    db.bancoCompetencias.forEach(c => { if (c.dominioId === id) delete c.dominioId; });
+  });
+  vivos.forEach(d => {
+    const ex = db.dominiosCompetencias.find(x => x.id === d.id);
+    if (ex) { ex.numero = d.numero; ex.nombre = d.nombre; }
+    else db.dominiosCompetencias.push({ id: d.id, programa: prog, numero: d.numero, nombre: d.nombre,
+                                        fechaCreacion: new Date().toISOString() });
+  });
+  saveDB();
+  closeModal('modal-dominios');
+  _domEdit = null;
+  renderAlineacion();
+  notify('Dominios guardados ✓');
+}
+
+// ── Editor de CRITERIOS de evaluación de una competencia ──────────────────────
+let _critEdit = null; // { compId, lista:[criterio], soloLectura, niveles:[{valor,titulo}] }
+
+function abrirCriteriosCompetencia(compId) {
+  const bc = db.bancoCompetencias.find(c => c.id === compId);
+  if (!bc) return;
+  const escala = resolverEscalaParaPrograma(bc.programa);
+  _critEdit = {
+    compId,
+    lista: JSON.parse(JSON.stringify(criteriosDeCompetencia(bc))),
+    soloLectura: currentUser?.rol !== 'admin',
+    escalaNombre: escala?.nombre || '',
+    niveles: [...(escala?.niveles || [])].sort((a, b) => b.valor - a.valor),
+  };
+  document.getElementById('crit-title').textContent = `📐 Criterios de evaluación — C${bc.num} (${bc.programa})`;
+  document.getElementById('crit-comp-texto').textContent = bc.texto;
+  document.getElementById('crit-btn-guardar').style.display = _critEdit.soloLectura ? 'none' : '';
+  _renderCriteriosEditor();
+  openModal('modal-criterios-comp');
+}
+
+function _renderCriteriosEditor() {
+  const el = document.getElementById('crit-body');
+  if (!el || !_critEdit) return;
+  const { lista, soloLectura, niveles } = _critEdit;
+  const pesoTotal = lista.reduce((s, c) => s + (parseFloat(c.peso) > 0 ? parseFloat(c.peso) : 0), 0);
+  const valoresEscala = new Set(niveles.map(n => 'n' + n.valor));
+  const head = `<div style="font-size:0.78rem;color:var(--muted);margin-bottom:12px">
+    Niveles según la escala vigente del programa${_critEdit.escalaNombre ? ` (<strong>${_alEsc(_critEdit.escalaNombre)}</strong>)` : ''}.
+    El peso es relativo dentro de la competencia (todos en 1 = partes iguales).</div>`;
+  if (!lista.length) {
+    el.innerHTML = head + `<div class="empty-state" style="padding:18px"><p>Esta competencia todavía no tiene criterios de evaluación.</p></div>` +
+      (soloLectura ? '' : `<button class="btn btn-outline btn-sm" onclick="_critAgregar()">＋ Agregar criterio</button>`);
+    return;
+  }
+  el.innerHTML = head + lista.map((cr, i) => {
+    const pct = pesoTotal > 0 && parseFloat(cr.peso) > 0 ? Math.round(parseFloat(cr.peso) / pesoTotal * 1000) / 10 : 0;
+    const extras = Object.keys(cr.descriptores || {}).filter(k => !valoresEscala.has(k) && String(cr.descriptores[k] || '').trim());
+    const codigo = 'C' + (i + 1);
+    if (soloLectura) {
+      return `<div class="crit-card">
+        <div class="crit-card-head"><span class="al-comp-num" style="margin:0">${codigo}</span>
+          <strong style="flex:1">${_alEsc(cr.nombre)}</strong>
+          <span style="font-size:0.75rem;color:var(--muted)">Peso ${_alEsc(cr.peso ?? 1)} (${pct}%)</span></div>
+        <table class="crit-desc-table"><tbody>${niveles.map(n => `<tr>
+          <th>${_alEsc(n.titulo)} (${n.valor})</th>
+          <td>${_alEsc(descriptorCriterio(cr, n.valor)) || '<span style="color:var(--muted)">—</span>'}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    }
+    return `<div class="crit-card">
+      <div class="crit-card-head">
+        <span class="al-comp-num" style="margin:0">${codigo}</span>
+        <input type="text" class="crit-nombre" value="${_alEsc(cr.nombre)}" placeholder="Nombre del componente (ej. Written Message Structure)" oninput="_critSet(${i},'nombre',this.value)">
+        <label style="font-size:0.75rem;color:var(--muted);white-space:nowrap">Peso
+          <input type="number" min="0" step="any" value="${_alEsc(cr.peso ?? 1)}" style="width:64px" oninput="_critSet(${i},'peso',this.value)" onchange="_renderCriteriosEditor()"></label>
+        <span style="font-size:0.75rem;color:var(--muted);width:46px;text-align:right">${pct}%</span>
+        <button class="btn btn-outline btn-sm" title="Subir" ${i === 0 ? 'disabled' : ''} onclick="_critMover(${i},-1)">↑</button>
+        <button class="btn btn-outline btn-sm" title="Bajar" ${i === lista.length - 1 ? 'disabled' : ''} onclick="_critMover(${i},1)">↓</button>
+        <button class="btn btn-outline btn-sm" title="Eliminar criterio" onclick="_critBorrar(${i})">🗑️</button>
+      </div>
+      <table class="crit-desc-table"><tbody>${niveles.map(n => `<tr>
+        <th>${_alEsc(n.titulo)} (${n.valor})</th>
+        <td><textarea rows="2" placeholder="Descriptor para este nivel…" oninput="_critSetDesc(${i},${Number(n.valor)},this.value)">${_alEsc(descriptorCriterio(cr, n.valor))}</textarea></td></tr>`).join('')}
+      </tbody></table>
+      ${extras.length ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:4px">ℹ️ Se conservan ${extras.length} descriptor(es) de niveles que no están en la escala actual.</div>` : ''}
+    </div>`;
+  }).join('') + (soloLectura ? '' : `<button class="btn btn-outline btn-sm" onclick="_critAgregar()">＋ Agregar criterio</button>`);
+}
+
+function _critSet(i, campo, valor) {
+  const cr = _critEdit?.lista[i];
+  if (cr) cr[campo] = valor;
+}
+function _critSetDesc(i, valor, texto) {
+  const cr = _critEdit?.lista[i];
+  if (!cr) return;
+  if (!cr.descriptores || Array.isArray(cr.descriptores)) cr.descriptores = Object.assign({}, cr.descriptores || {});
+  delete cr.descriptores[valor]; // normaliza la forma vieja (llave numérica) a la forma "n<valor>"
+  cr.descriptores['n' + valor] = texto;
+}
+function _critAgregar() {
+  _critEdit.lista.push({
+    id: 'crit_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    codigo: 'C' + (_critEdit.lista.length + 1), nombre: '', peso: 1, descriptores: {},
+  });
+  _renderCriteriosEditor();
+}
+function _critMover(i, delta) {
+  const l = _critEdit.lista, j = i + delta;
+  if (j < 0 || j >= l.length) return;
+  [l[i], l[j]] = [l[j], l[i]];
+  _renderCriteriosEditor();
+}
+function _critBorrar(i) {
+  const cr = _critEdit.lista[i];
+  if (!cr) return;
+  if (!confirm(`¿Eliminar el criterio "${cr.nombre || ('C' + (i + 1))}"?`)) return;
+  _critEdit.lista.splice(i, 1);
+  _renderCriteriosEditor();
+}
+
+function guardarCriteriosCompetencia() {
+  if (!_critEdit || _critEdit.soloLectura) return;
+  const bc = db.bancoCompetencias.find(c => c.id === _critEdit.compId);
+  if (!bc) return;
+  const lista = [];
+  for (let i = 0; i < _critEdit.lista.length; i++) {
+    const cr = _critEdit.lista[i];
+    const nombre = String(cr.nombre ?? '').trim();
+    if (!nombre) { notify(`El criterio C${i + 1} necesita un nombre`, '⚠️'); return; }
+    const peso = parseFloat(cr.peso);
+    if (!(peso >= 0)) { notify(`El peso de C${i + 1} no es válido`, '⚠️'); return; }
+    // Descriptores: solo llaves "n<valor>" con texto (Firebase no guarda vacíos de todas formas)
+    const descriptores = {};
+    Object.entries(cr.descriptores || {}).forEach(([k, t]) => {
+      const key = String(k).startsWith('n') ? k : 'n' + k;
+      const txt = String(t ?? '').trim();
+      if (txt) descriptores[key] = txt;
+    });
+    lista.push({ id: cr.id, codigo: 'C' + (i + 1), nombre, peso, descriptores });
+  }
+  if (lista.length && lista.every(c => c.peso === 0)) { notify('Al menos un criterio debe tener peso mayor que 0', '⚠️'); return; }
+  if (lista.length) bc.criteriosEvaluacion = lista; else delete bc.criteriosEvaluacion;
+  saveDB();
+  closeModal('modal-criterios-comp');
+  _critEdit = null;
+  renderAlineacion();
+  notify('Criterios de evaluación guardados ✓');
 }
 
 
@@ -14590,12 +15381,49 @@ function dummyShowStatus(msg, type) {
       <input type="text" id="bank-comp-num" placeholder="ej. 5.5">
     </div>
     <div class="form-group">
+      <label>Dominio</label>
+      <select id="bank-comp-dominio"><option value="">— Sin dominio —</option></select>
+      <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">Los dominios se crean y editan con el botón “🗂️ Dominios” del programa.</div>
+    </div>
+    <div class="form-group">
       <label>Descripción *</label>
       <textarea id="bank-comp-texto" rows="4" placeholder="Texto completo de la competencia..."></textarea>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-competencia-bank')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarCompetenciaBank()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Fase R1: Modal Dominios de competencias de un programa -->
+<div id="modal-dominios" class="modal-overlay">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div class="modal-title" id="dom-title">🗂️ Dominios de competencias</div>
+      <button class="modal-close" onclick="closeModal('modal-dominios')">✕</button>
+    </div>
+    <div id="dom-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-dominios')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarDominiosPrograma()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fase R1: Modal Criterios de evaluación de una competencia del banco -->
+<div id="modal-criterios-comp" class="modal-overlay">
+  <div class="modal" style="max-width:min(980px,96vw);max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="crit-title">📐 Criterios de evaluación</div>
+      <button class="modal-close" onclick="closeModal('modal-criterios-comp')">✕</button>
+    </div>
+    <div id="crit-comp-texto" style="font-size:0.86rem;line-height:1.5;margin-bottom:10px;padding:10px 12px;background:var(--cream);border-radius:8px"></div>
+    <div id="crit-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-criterios-comp')">Cerrar</button>
+      <button class="btn btn-primary" id="crit-btn-guardar" onclick="guardarCriteriosCompetencia()">💾 Guardar</button>
     </div>
   </div>
 </div>
