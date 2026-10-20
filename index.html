@@ -1790,7 +1790,7 @@
   <div class="modal" style="max-width:min(1400px,96vw);width:96vw">
     <div class="modal-header">
       <div class="modal-title">📊 Constructor de Rúbrica</div>
-      <button class="modal-close" onclick="closeModal('modal-rubrica-builder');openModal('modal-lao')">✕</button>
+      <button class="modal-close" onclick="_rbCerrarBuilder()">✕</button>
     </div>
     <input type="hidden" id="rb-lao-id">
     <div id="rb-escala-info" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;padding:8px 12px;background:var(--cream);border-radius:6px"></div>
@@ -1803,7 +1803,7 @@
     </div>
     <div id="rb-peso-total" style="font-size:0.82rem;margin-top:8px;text-align:right"></div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('modal-rubrica-builder');openModal('modal-lao')">Cancelar</button>
+      <button class="btn btn-outline" onclick="_rbCerrarBuilder()">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarRubricaBuilder()">💾 Guardar Rúbrica</button>
     </div>
   </div>
@@ -2754,6 +2754,15 @@
         <label>Modalidad de evaluación del curso <span style="font-weight:400;color:var(--muted)">— solo administrador</span></label>
         <select id="c-modalidad"><option value="">Usar la del programa</option></select>
         <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">Si el curso usa la del programa y el programa no la fija, cada profesor escoge la modalidad para sus secciones de este curso en la pantalla de Avalúo.</div>
+        <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+          <label style="margin-bottom:4px">Rúbrica de evaluación directa <span style="font-weight:400;color:var(--muted)">— se usa cuando la modalidad es “directa con rúbrica”</span></label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer"><input type="radio" name="c-fuente-rubrica" value="alineamiento" style="width:auto" onchange="_actualizarEstadoRubricaDirectaCurso()"> Alineamiento del programa (se arma sola con los criterios de cada competencia del curso)</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer"><input type="radio" name="c-fuente-rubrica" value="curso" style="width:auto" onchange="_actualizarEstadoRubricaDirectaCurso()"> Rúbrica propia del curso</label>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+            <button type="button" class="btn btn-outline btn-sm" id="c-btn-rubrica-directa" onclick="abrirRubricaDirectaCurso()">📐 Ver rúbrica</button>
+            <span id="c-rubrica-directa-estado" style="font-size:0.76rem;color:var(--muted)"></span>
+          </div>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -3153,6 +3162,9 @@ function _aplicarModalidadCursoDesdeForm(curso) {
   if (currentUser?.rol !== 'admin') return;
   const v = document.getElementById('c-modalidad')?.value || '';
   if (_modalidadValida(v)) curso.modalidadEvaluacion = v; else delete curso.modalidadEvaluacion;
+  if (document.querySelector('input[name="c-fuente-rubrica"]')) {
+    if (_fuenteRubricaSeleccionada() === 'curso') curso.fuenteRubricaDirecta = 'curso'; else delete curso.fuenteRubricaDirecta;
+  }
 }
 
 // ======================== NOTIFY ========================
@@ -3224,6 +3236,7 @@ function abrirNuevoCurso() {
   const prog = document.getElementById('c-programa'); if (prog) prog.value = '';
   const selMod = document.getElementById('c-modalidad'); if (selMod) { selMod.value = ''; selMod.dataset.valor = ''; }
   const t = document.getElementById('modal-curso-title'); if (t) t.textContent = '📚 Registrar Curso';
+  _renderFuenteRubricaCurso(null);
   openModal('modal-curso');
 }
 
@@ -3242,6 +3255,7 @@ function abrirEditarCurso(id) {
   if (prog) prog.value = cur.programaId || '';
   const selMod = document.getElementById('c-modalidad');
   if (selMod) selMod.dataset.valor = _modalidadValida(cur.modalidadEvaluacion) ? cur.modalidadEvaluacion : '';
+  _renderFuenteRubricaCurso(cur);
   const t = document.getElementById('modal-curso-title');
   if (t) t.textContent = '✏️ Editar Curso';
   openModal('modal-curso');
@@ -6195,12 +6209,139 @@ function guardarLao() {
   notify('LAO guardado ✓');
 }
 
+
+// ── Fase R3: fuente y edición de la rúbrica de evaluación directa (modal Curso) ──
+function _renderFuenteRubricaCurso(curso) {
+  const fuente = curso?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento';
+  document.querySelectorAll('input[name="c-fuente-rubrica"]').forEach(r => { r.checked = r.value === fuente; });
+  _actualizarEstadoRubricaDirectaCurso();
+}
+function _fuenteRubricaSeleccionada() {
+  return document.querySelector('input[name="c-fuente-rubrica"]:checked')?.value === 'curso' ? 'curso' : 'alineamiento';
+}
+function _actualizarEstadoRubricaDirectaCurso() {
+  const el = document.getElementById('c-rubrica-directa-estado');
+  const btn = document.getElementById('c-btn-rubrica-directa');
+  if (!el) return;
+  const cursoId = document.getElementById('c-edit-id')?.value || '';
+  if (!cursoId) { el.textContent = 'Guarda el curso primero para ver o crear su rúbrica.'; if (btn) btn.disabled = true; return; }
+  if (btn) btn.disabled = false;
+  const fuente = _fuenteRubricaSeleccionada();
+  if (fuente === 'curso') {
+    const r = (db.rubricas || []).find(x => x.laoId === laoDirectaCursoId(cursoId));
+    el.textContent = r?.criterios?.length ? `Rúbrica propia: ${r.criterios.length} criterio(s).` : 'Todavía no tiene rúbrica propia — créala con el botón.';
+    if (btn) btn.textContent = r ? '📐 Editar rúbrica propia' : '📐 Crear rúbrica propia';
+  } else {
+    const d = _rubricaDirectaDesdeAlineamiento(cursoId);
+    const n = d.rubrica?.criterios.length || 0;
+    el.textContent = n ? `Del alineamiento: ${n} criterio(s)` + (d.compsSinCriterios.length ? ` · sin criterios: ${d.compsSinCriterios.map(c => c.codigo).join(', ')}` : '') + '.'
+                       : 'Ninguna competencia del curso tiene criterios en el alineamiento del programa.';
+    if (btn) btn.textContent = '📐 Ver rúbrica del alineamiento';
+  }
+}
+
+function abrirRubricaDirectaCurso() {
+  const cursoId = document.getElementById('c-edit-id')?.value || '';
+  if (!cursoId) { notify('Guarda el curso primero', '⚠️'); return; }
+  if (_fuenteRubricaSeleccionada() === 'curso') abrirRubricaBuilderDirecta(cursoId);
+  else verRubricaDirectaAlineamiento(cursoId);
+}
+
+// Vista (solo lectura) de la rúbrica que se arma sola desde el alineamiento
+function verRubricaDirectaAlineamiento(cursoId, volverA) {
+  const curso = db.cursos.find(c => c.id === cursoId);
+  const { rubrica, compsSinCriterios } = _rubricaDirectaDesdeAlineamiento(cursoId);
+  document.getElementById('rdp-title').textContent = `📐 Rúbrica de evaluación directa — ${curso?.codigo || ''} (alineamiento del programa)`;
+  document.getElementById('rdp-volver').value = volverA || 'modal-curso';
+  const body = document.getElementById('rdp-body');
+  if (!rubrica) {
+    body.innerHTML = `<div class="empty-state" style="padding:18px"><p>Ninguna competencia vinculada a este curso tiene criterios de evaluación en el alineamiento del programa. Se agregan en Alineación Curricular → 📐 Criterios.</p></div>`;
+  } else {
+    body.innerHTML = `<div style="overflow-x:auto"><table class="crit-desc-table rdp-table"><thead><tr>
+        <th>Competencia</th><th>Componente</th>${rubrica.niveles.map(n => `<th>${_alEsc(n.label)} (${n.puntos})</th>`).join('')}
+      </tr></thead><tbody>${rubrica.criterios.map(cr => {
+        const comp = db.competencias.find(c => c.id === cr.competencias[0]?.competenciaId);
+        return `<tr><td><strong>${_alEsc(comp?.codigo || '')}</strong></td><td><strong>${_alEsc(cr.codigo)}</strong> ${_alEsc(cr.nombre)}</td>
+          ${rubrica.niveles.map(n => `<td>${_alEsc(cr.celdas[n.id] || '') || '<span style="color:var(--muted)">—</span>'}</td>`).join('')}</tr>`;
+      }).join('')}</tbody></table></div>` +
+      (compsSinCriterios.length ? `<div style="font-size:0.78rem;color:var(--rust);margin-top:8px">⚠️ Sin criterios en el alineamiento: ${compsSinCriterios.map(c => c.codigo).join(', ')}.</div>` : '') +
+      `<div style="font-size:0.74rem;color:var(--muted);margin-top:8px">Esta rúbrica se arma sola y se actualiza en vivo con el alineamiento del programa. Para cambiar un criterio, edítalo en Alineación Curricular → 📐 Criterios, o usa una rúbrica propia del curso.</div>`;
+  }
+  if (volverA !== false) closeModal('modal-curso');
+  openModal('modal-rubrica-directa-preview');
+}
+function cerrarRubricaDirectaPreview() {
+  closeModal('modal-rubrica-directa-preview');
+  const volver = document.getElementById('rdp-volver').value;
+  if (volver === 'modal-curso') { openModal('modal-curso'); _renderFuenteRubricaCursoDesdeForm(); }
+}
+// Al volver al modal de Curso conserva lo que el admin ya había marcado
+function _renderFuenteRubricaCursoDesdeForm() { _actualizarEstadoRubricaDirectaCurso(); }
+
+// Constructor de Rúbrica en contexto "evaluación directa del curso"
+let _rbContexto = null; // null = LAO real (comportamiento original) | { tipo:'directa', cursoId }
+
+function abrirRubricaBuilderDirecta(cursoId) {
+  const laoId = laoDirectaCursoId(cursoId);
+  _rbContexto = { tipo: 'directa', cursoId };
+  document.getElementById('rb-lao-id').value = laoId;
+  const rubrica = (db.rubricas || []).find(r => r.laoId === laoId);
+  const comps = (db.competencias || []).filter(c => c.cursoId === cursoId);
+  if (rubrica) {
+    _rbNiveles = JSON.parse(JSON.stringify(rubrica.niveles));
+    _rbCriterios = JSON.parse(JSON.stringify(rubrica.criterios)).map(c => ({ ...c, celdas: c.celdas || {}, competencias: c.competencias || [] }));
+    _rbEscalaActual = resolverEscalaParaCurso(cursoId);
+  } else {
+    // Rúbrica propia NUEVA: parte del alineamiento del programa si existe
+    // (para personalizarlo), si no, un criterio vacío por competencia.
+    const escala = resolverEscalaParaCurso(cursoId);
+    _rbEscalaActual = escala;
+    _rbNiveles = _nivelesRubricaDesdeEscala(escala);
+    const der = _rubricaDirectaDesdeAlineamiento(cursoId).rubrica;
+    _rbCriterios = der
+      ? der.criterios.map(c => ({ id: 'crit_' + Math.random().toString(36).slice(2, 8), nombre: `${c.codigo}: ${c.nombre}`, peso: 0,
+          competencias: c.competencias.map(cc => ({ competenciaId: cc.competenciaId, peso: 100 })), celdas: { ...c.celdas } }))
+      : comps.map(cc => ({ id: 'crit_' + Math.random().toString(36).slice(2, 8), nombre: '', peso: 0,
+          competencias: [{ competenciaId: cc.id, peso: 100 }], celdas: {} }));
+    // Pesos de contribución parejos por competencia
+    comps.forEach(cc => {
+      const del = _rbCriterios.filter(c => c.competencias.some(x => x.competenciaId === cc.id));
+      del.forEach(c => { c.competencias.find(x => x.competenciaId === cc.id).peso = Math.round(100 / del.length * 100) / 100; });
+    });
+    if (!_rbCriterios.length) _rbCriterios = [{ id: 'crit_' + Math.random().toString(36).slice(2, 8), nombre: '', peso: 0, competencias: [], celdas: {} }];
+  }
+  const t = document.querySelector('#modal-rubrica-builder .modal-title');
+  if (t) t.textContent = '📊 Rúbrica de Evaluación Directa — ' + (db.cursos.find(c => c.id === cursoId)?.codigo || '');
+  _renderRubricaGrid();
+  closeModal('modal-curso');
+  openModal('modal-rubrica-builder');
+}
+function _rbCerrarBuilder() {
+  closeModal('modal-rubrica-builder');
+  const t = document.querySelector('#modal-rubrica-builder .modal-title');
+  if (t) t.textContent = '📊 Constructor de Rúbrica';
+  if (_rbContexto?.tipo === 'directa') { _rbContexto = null; openModal('modal-curso'); _actualizarEstadoRubricaDirectaCurso(); return; }
+  openModal('modal-lao');
+}
+// LAO "para el grid del constructor": el real, o uno virtual con TODAS las
+// competencias del curso cuando se edita la rúbrica de evaluación directa.
+function _rbLaoParaGrid(laoId) {
+  if (_rbContexto?.tipo === 'directa') {
+    return { id: laoId, cursoId: _rbContexto.cursoId,
+      competencias: (db.competencias || []).filter(c => c.cursoId === _rbContexto.cursoId).map(c => ({ competenciaId: c.id })) };
+  }
+  return db.laos.find(l => l.id === laoId);
+}
+
 // ── Constructor de Rúbrica (grid criterios × niveles) ──────────
 let _rbNiveles = [];
 let _rbCriterios = [];
 let _rbEscalaActual = null; // la Escala de Niveles de la que se heredaron las columnas (solo informativo)
 
 function abrirRubricaBuilder() {
+  _rbContexto = null;
+  const tituloRb = document.querySelector('#modal-rubrica-builder .modal-title');
+  if (tituloRb) tituloRb.textContent = '📊 Constructor de Rúbrica';
   const laoId = document.getElementById('lao-edit-id').value;
   if (!laoId) { notify('Guarda el LAO primero antes de configurar su rúbrica', '⚠️'); return; }
   const lao = db.laos.find(l => l.id === laoId);
@@ -6326,7 +6467,8 @@ function _rbActualizarPesoTotal() {
 
   const pesoNotaTotal = _rbCriterios.reduce((s, c) => s + (c.peso || 0), 0);
   const okNota = Math.abs(pesoNotaTotal - 100) < 0.5;
-  let html = `<div style="margin-bottom:4px">📝 Peso hacia la <strong>nota del LAO</strong> (todos los criterios): <strong style="color:${okNota ? '#2e7d32' : '#dc2626'}">${pesoNotaTotal}%</strong>${okNota ? ' ✓' : ' — debe sumar 100%'}</div>`;
+  // La rúbrica de evaluación directa no produce "nota del LAO" — solo niveles por competencia
+  let html = _rbContexto?.tipo === 'directa' ? '' : `<div style="margin-bottom:4px">📝 Peso hacia la <strong>nota del LAO</strong> (todos los criterios): <strong style="color:${okNota ? '#2e7d32' : '#dc2626'}">${pesoNotaTotal}%</strong>${okNota ? ' ✓' : ' — debe sumar 100%'}</div>`;
 
   const lineas = Object.keys(grupos).map(compId => {
     const comp = db.competencias.find(c => c.id === compId);
@@ -6335,13 +6477,16 @@ function _rbActualizarPesoTotal() {
     return `<div>🎯 Contribución a ${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${total}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
   });
   html += lineas.join('');
-  if (sinCompetencia) html += `<div style="color:var(--muted)">ℹ️ ${sinCompetencia} criterio(s) marcado(s) N/A — solo cuentan para la nota, no miden ninguna competencia</div>`;
+  if (sinCompetencia) html += _rbContexto?.tipo === 'directa'
+    ? `<div style="color:#dc2626">⚠️ ${sinCompetencia} criterio(s) sin competencia — en la evaluación directa no cuentan para nada; marca qué competencia miden</div>`
+    : `<div style="color:var(--muted)">ℹ️ ${sinCompetencia} criterio(s) marcado(s) N/A — solo cuentan para la nota, no miden ninguna competencia</div>`;
   el.innerHTML = html;
 }
 
 function _renderRubricaGrid() {
   const laoId = document.getElementById('rb-lao-id').value;
-  const lao = db.laos.find(l => l.id === laoId);
+  const lao = _rbLaoParaGrid(laoId);
+  const esDirecta = _rbContexto?.tipo === 'directa';
   // Las columnas siempre se muestran de mayor a menor (la más alta a la
   // izquierda), sin importar el orden en que se guardaron originalmente.
   _rbNiveles.sort((a, b) => b.puntos - a.puntos);
@@ -6371,10 +6516,10 @@ function _renderRubricaGrid() {
               <button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="rbEliminarCriterio('${c.id}')" title="Eliminar este criterio">🗑 Eliminar fila</button>
             </div>
             <input type="text" class="rb-criterio-nombre" value="${c.nombre}" placeholder="Nombre del criterio" onchange="rbUpdateCriterio('${c.id}','nombre',this.value)">
-            <div class="rb-criterio-meta">
+            ${esDirecta ? '' : `<div class="rb-criterio-meta">
               <span style="font-size:0.7rem;color:var(--muted)">Peso en nota:</span>
               <input type="number" class="rb-criterio-peso" value="${c.peso}" onchange="rbUpdateCriterio('${c.id}','peso',this.value)" title="Peso hacia la nota general del LAO">%
-            </div>
+            </div>`}
             <div style="margin-top:8px;font-size:0.72rem;border-top:1px dashed var(--border);padding-top:6px">
               <div style="color:var(--muted);margin-bottom:2px">Mide competencia(s) ${sinComp ? '<span class="badge badge-gold" style="font-size:0.62rem">N/A</span>' : ''}:</div>
               ${compOpts.map(o => {
@@ -6404,7 +6549,9 @@ function guardarRubricaBuilder() {
   const desbalanceados = Object.entries(grupos).filter(([compId, gs]) =>
     Math.abs(gs.reduce((s, g) => s + (g.peso || 0), 0) - 100) > 0.5);
   const avisos = [];
-  if (Math.abs(pesoNotaTotal - 100) > 0.5) avisos.push(`el peso hacia la nota del LAO suma ${pesoNotaTotal}% (no 100%)`);
+  const esDirecta = _rbContexto?.tipo === 'directa';
+  if (!esDirecta && Math.abs(pesoNotaTotal - 100) > 0.5) avisos.push(`el peso hacia la nota del LAO suma ${pesoNotaTotal}% (no 100%)`);
+  if (esDirecta && _rbCriterios.some(c => !String(c.nombre || '').trim())) avisos.push('hay criterios sin nombre');
   if (desbalanceados.length) {
     const nombres = desbalanceados.map(([compId]) => db.competencias.find(c => c.id === compId)?.codigo || compId).join(', ');
     avisos.push(`la contribución a estas competencias no suma 100%: ${nombres}`);
@@ -6419,6 +6566,14 @@ function guardarRubricaBuilder() {
     db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...record, escalaId: _rbEscalaActual?.id || null, fechaCreacion: new Date().toISOString() });
   }
   saveDB();
+  if (esDirecta) {
+    // Al crear la rúbrica propia, el curso pasa a usarla (es lo que el admin marcó)
+    const curso = db.cursos.find(c => c.id === _rbContexto.cursoId);
+    if (curso) { curso.fuenteRubricaDirecta = 'curso'; saveDB(); }
+    _rbCerrarBuilder();
+    notify('Rúbrica de evaluación directa guardada ✓');
+    return;
+  }
   closeModal('modal-rubrica-builder');
   openModal('modal-lao');
   document.getElementById('lao-rubrica-btn-label').textContent = 'Editar Rúbrica';
@@ -7147,15 +7302,15 @@ function _modosDisponiblesLao(lao, rubrica) {
 //
 //   directa_sin_rubrica → Evaluación Directa del Curso con pastillas (lo que
 //                         antes era la casilla `permiteDirectaCurso`).
-//   directa_con_rubrica → Evaluación Directa del Curso con rúbrica (Fase R3;
-//                         hasta entonces aparece deshabilitada).
+//   directa_con_rubrica → Evaluación Directa del Curso con rúbrica (Fase R3):
+//                         la del alineamiento del programa o una propia del curso.
 //   lao_sin_rubrica     → por LAO, todos con pastillas aunque tengan rúbrica.
 //   lao_con_rubrica     → por LAO; los que tienen rúbrica asignada se evalúan
 //                         solo con ella, los que no, con pastillas. Es también
 //                         el comportamiento por defecto mientras nadie escoja.
 const MODALIDADES_EVALUACION = [
   { id: 'directa_sin_rubrica', label: 'Evaluación directa del curso — sin rúbrica (pastillas por competencia)', corto: 'Directa sin rúbrica' },
-  { id: 'directa_con_rubrica', label: 'Evaluación directa del curso — con rúbrica', corto: 'Directa con rúbrica', proximamente: true },
+  { id: 'directa_con_rubrica', label: 'Evaluación directa del curso — con rúbrica', corto: 'Directa con rúbrica' },
   { id: 'lao_sin_rubrica',     label: 'Por LAO — sin rúbrica (pastillas en cada LAO)', corto: 'Por LAO sin rúbrica' },
   { id: 'lao_con_rubrica',     label: 'Por LAO — con rúbrica (los LAOs que tienen rúbrica se evalúan con ella)', corto: 'Por LAO con rúbrica' },
 ];
@@ -7264,10 +7419,11 @@ function _htmlModalidadAvaluo(cursoId, sec, modRes, resueltos) {
   const puede = currentUser?.rol === 'admin' || _usuarioEsProfesorDeSeccion(sec);
   if (!puede) return base + `<div style="font-size:0.76rem;color:var(--muted);margin-top:3px">La escoge el profesor de la sección.</div></div>`;
   const hayRubrica = (resueltos || []).some(r => r.rubrica);
-  const opts = _opcionesModalidadHtml(modRes.origen === 'profesor' ? modRes.modalidad : '', {
-    deshabilitar: hayRubrica ? [] : ['lao_con_rubrica'],
-    motivos: hayRubrica ? {} : { lao_con_rubrica: ' (ningún LAO de este curso tiene rúbrica)' },
-  });
+  const hayRubricaDirecta = !!resolverRubricaDirectaCurso(cursoId).rubrica;
+  const deshabilitar = [], motivos = {};
+  if (!hayRubrica) { deshabilitar.push('lao_con_rubrica'); motivos.lao_con_rubrica = ' (ningún LAO de este curso tiene rúbrica)'; }
+  if (!hayRubricaDirecta) { deshabilitar.push('directa_con_rubrica'); motivos.directa_con_rubrica = ' (el curso no tiene rúbrica de evaluación directa)'; }
+  const opts = _opcionesModalidadHtml(modRes.origen === 'profesor' ? modRes.modalidad : '', { deshabilitar, motivos });
   return base + `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
       <select id="av-modalidad-sel" style="max-width:520px">
         ${modRes.origen === 'profesor' ? '' : '<option value="" selected>— Escoge cómo evaluarás este curso —</option>'}${opts}
@@ -7295,6 +7451,107 @@ function elegirModalidadAvaluo() {
   if (!guardarEleccionModalidadProfesor(cursoId, avSeccionActual, modalidad)) { notify('No se pudo guardar la modalidad', '⚠️'); return; }
   notify('Modalidad guardada: ' + modalidadInfo(modalidad).corto, '✅');
   onSeccionChange();
+}
+
+
+// ======================== FASE R3: RÚBRICA DE EVALUACIÓN DIRECTA ========================
+// La modalidad 'directa_con_rubrica' evalúa el "LAO grande" del curso (el LAO
+// virtual directa_<cursoId>) con una rúbrica en el MISMO formato que las
+// rúbricas de LAO ({niveles:[{id,label,puntos}], criterios:[{id,nombre,peso,
+// competencias:[{competenciaId,peso}],celdas}]}) — así el grid, el cálculo
+// por competencia, el guardado y la plantilla Excel reutilizan exactamente
+// la maquinaria que ya existe para los LAOs con rúbrica.
+//
+// Fuente (curso.fuenteRubricaDirecta, la cambia solo el administrador):
+//   'alineamiento' (por defecto) → se DERIVA en memoria, "en vivo", de los
+//       criterios de evaluación del alineamiento del programa (Fase R1) para
+//       cada competencia vinculada al curso. Nunca se copia: si el programa
+//       edita el alineamiento, la rúbrica del curso lo refleja de inmediato.
+//       Los ids de criterio son los del alineamiento (estables), así que las
+//       evaluaciones ya guardadas siguen casando.
+//   'curso' → rúbrica propia guardada en db.rubricas con laoId = directa_<cursoId>,
+//       hecha con el mismo Constructor de Rúbrica de los LAOs.
+// Los niveles salen siempre de la escala vigente del programa del curso.
+
+function _nivelesRubricaDesdeEscala(escala) {
+  return [...(escala?.niveles || ESCALA_NIVELES_DEFAULT.niveles)]
+    .sort((a, b) => b.valor - a.valor)
+    .map(n => ({ id: String(n.valor), label: n.titulo, puntos: n.valor }));
+}
+
+// Competencia del banco que corresponde a una competencia vinculada al curso
+function _bancoDeCompetenciaCurso(comp, curso) {
+  const prog = curso?.programa || '';
+  return (db.bancoCompetencias || []).find(bc => bc.programa === prog &&
+    (comp.codigo === 'C' + bc.num || comp.codigo === bc.num)) || null;
+}
+
+// Rúbrica derivada del alineamiento del programa (sin guardar)
+function _rubricaDirectaDesdeAlineamiento(cursoId) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (!curso) return { rubrica: null, compsSinCriterios: [] };
+  const escala = resolverEscalaParaCurso(cursoId);
+  const niveles = _nivelesRubricaDesdeEscala(escala);
+  const comps = (db.competencias || []).filter(c => c.cursoId === cursoId);
+  const criterios = [], compsSinCriterios = [], usados = new Set();
+  comps.forEach(comp => {
+    const bc = _bancoDeCompetenciaCurso(comp, curso);
+    const crits = criteriosDeCompetencia(bc);
+    if (!crits.length) { compsSinCriterios.push(comp); return; }
+    crits.forEach(cr => {
+      const id = usados.has(cr.id) ? cr.id + '__' + comp.id : cr.id;
+      usados.add(id);
+      criterios.push({
+        id, codigo: cr.codigo, nombre: cr.nombre, peso: 0,
+        competencias: [{ competenciaId: comp.id, peso: parseFloat(cr.peso) > 0 ? parseFloat(cr.peso) : 0 }],
+        celdas: Object.fromEntries(niveles.map(n => [n.id, descriptorCriterio(cr, n.puntos)])),
+        _alineamiento: true,
+      });
+    });
+  });
+  return {
+    rubrica: criterios.length ? { laoId: laoDirectaCursoId(cursoId), niveles, criterios, escalaId: escala?.id || null, derivada: true } : null,
+    compsSinCriterios,
+  };
+}
+
+// Resuelve la rúbrica de evaluación directa vigente de un curso.
+// Devuelve { fuente, rubrica (o null), compsSinCriterios:[comp] }
+function resolverRubricaDirectaCurso(cursoId) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  const fuente = curso?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento';
+  if (fuente === 'curso') {
+    const rubrica = (db.rubricas || []).find(r => r.laoId === laoDirectaCursoId(cursoId)) || null;
+    const comps = (db.competencias || []).filter(c => c.cursoId === cursoId);
+    const compsSinCriterios = rubrica
+      ? comps.filter(c => !rubrica.criterios.some(cr => (cr.competencias || []).some(cc => cc.competenciaId === c.id)))
+      : comps;
+    return { fuente, rubrica: (rubrica && rubrica.criterios?.length) ? rubrica : null, compsSinCriterios };
+  }
+  return { fuente, ..._rubricaDirectaDesdeAlineamiento(cursoId) };
+}
+
+// Entrada del grid (LAO real o la Evaluación Directa del Curso) por id de LAO
+function _entradaGridPorLao(laoId) {
+  if (avDirectaCursoEntry && avDirectaCursoEntry.lao.id === laoId) return avDirectaCursoEntry;
+  return avLaosGrid.find(x => x.lao.id === laoId) || null;
+}
+function _directaEsRubrica() {
+  return !!(avDirectaCursoEntry && avDirectaCursoEntry.modo === 'rubrica' && avDirectaCursoEntry.rubrica);
+}
+
+// Etiqueta corta de un criterio de la rúbrica directa: "C1.1 · C2 — Oral Delivery"
+function _etiquetaCriterioDirecta(cr) {
+  const codigos = (cr.competencias || []).map(cc => db.competencias.find(c => c.id === cc.competenciaId)?.codigo).filter(Boolean);
+  const pre = codigos.join('/') + (cr.codigo ? ' · ' + cr.codigo : '');
+  return { pre, nombre: cr.nombre || '(sin nombre)' };
+}
+
+// ¿Cuántas evaluaciones guardadas usan un criterio del alineamiento? (para
+// avisar antes de borrarlo — los niveles ya guardados no cambian)
+function _usosCriterioAlineamiento(critId) {
+  return (db.avaluos || []).filter(a => a.esDirectaCurso && a.criteriosResp &&
+    Object.keys(a.criteriosResp).some(k => (k === critId || k.startsWith(critId + '__')) && a.criteriosResp[k])).length;
 }
 
 // Texto corto para mostrar de dónde viene la modalidad
@@ -7364,29 +7621,46 @@ function onSeccionChange() {
   // Es un "o lo uno o lo otro": una competencia se evalúa combinando sus
   // LAOs, o se evalúa directamente a nivel de curso — nunca ambas cosas
   // visibles a la vez para no confundir cuál es la evaluación real.
-  avDirectaCursoEntry = modalidad === 'directa_sin_rubrica' ? {
+  // Fase R3: con 'directa_con_rubrica' el LAO virtual se evalúa con la rúbrica
+  // de evaluación directa (del alineamiento o propia del curso). Si todavía
+  // no hay rúbrica, se bloquea (igual que un LAO que exige rúbrica y no la tiene).
+  let rubDirecta = null;
+  if (modalidad === 'directa_con_rubrica') rubDirecta = resolverRubricaDirectaCurso(cursoId);
+  avDirectaCursoEntry = esModalidadDirecta(modalidad) ? {
     lao: {
       id: laoDirectaCursoId(cursoId), cursoId,
       nombre: 'Evaluación Directa del Curso',
-      descripcion: 'Nivel asignado directamente por competencia — reemplaza el nivel calculado combinando los LAOs.',
-      modoEvaluacion: 'solo_directa', esOficial: true, compartido: true,
-      isGenerico: false, esDirectaCurso: true,
+      descripcion: modalidad === 'directa_con_rubrica'
+        ? `Nivel por competencia calculado con la rúbrica de evaluación directa (${rubDirecta?.fuente === 'curso' ? 'rúbrica propia del curso' : 'alineamiento del programa'}) — reemplaza el nivel calculado combinando los LAOs.`
+        : 'Nivel asignado directamente por competencia — reemplaza el nivel calculado combinando los LAOs.',
+      modoEvaluacion: modalidad === 'directa_con_rubrica' ? 'requiere_rubrica' : 'solo_directa',
+      esOficial: true, compartido: true, isGenerico: false, esDirectaCurso: true,
     },
     comps: db.competencias.filter(c => c.cursoId === cursoId),
+    rubrica: rubDirecta?.rubrica || null,
+    modo: modalidad === 'directa_con_rubrica' ? (rubDirecta?.rubrica ? 'rubrica' : null) : 'directa',
+    compsSinCriterios: rubDirecta?.compsSinCriterios || [],
   } : null;
 
   infoEl.style.display = '';
-  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: 'directa', comps: avDirectaCursoEntry.comps } : null]
+  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo, comps: avDirectaCursoEntry.comps } : null]
     .filter(Boolean).map(r => {
     let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
     if (r.lao.isGenerico) linea += '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.';
-    if (!r.modo) linea += '<br>🔒 Este LAO requiere rúbrica, pero todavía no tiene una configurada. Pide a un administrador que la configure antes de evaluar.';
+    if (!r.modo && r.lao.esDirectaCurso) linea += `<br>🔒 Este curso se evalúa con rúbrica de evaluación directa, pero todavía no hay ninguna disponible (${rubDirecta?.fuente === 'curso' ? 'el administrador debe crear la rúbrica propia del curso' : 'ninguna competencia del curso tiene criterios en el alineamiento del programa — se agregan en Alineación Curricular'}).`;
+    else if (!r.modo) linea += '<br>🔒 Este LAO requiere rúbrica, pero todavía no tiene una configurada. Pide a un administrador que la configure antes de evaluar.';
     else if (!r.comps.length) linea += '<br>⚠️ Este LAO no tiene competencias asignadas.';
+    if (r.lao.esDirectaCurso && r.modo === 'rubrica' && avDirectaCursoEntry.compsSinCriterios.length) {
+      linea += `<br>⚠️ Sin criterios en la rúbrica (no se podrán evaluar): ${avDirectaCursoEntry.compsSinCriterios.map(c => c.codigo).join(', ')}.`;
+    }
     linea += '</div>';
     return linea;
   }).join('');
 
+  // Evaluación directa con rúbrica sin rúbrica disponible: bloqueada
+  if (avDirectaCursoEntry && !avDirectaCursoEntry.modo) avDirectaCursoEntry = null;
   if (!avLaosGrid.length && !avDirectaCursoEntry) return;
+  if (modalidad === 'directa_con_rubrica' && !avDirectaCursoEntry) return;
 
   buildGridCombinado(cursoId);
 }
@@ -7413,7 +7687,7 @@ function buildGridCombinado(cursoId) {
   avClaseData = {};
   avGuardados = new Set();
   const entradasParaPrellenar = avDirectaCursoEntry
-    ? [...avLaosGrid, { lao: avDirectaCursoEntry.lao, modo: 'directa' }]
+    ? [...avLaosGrid, { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo }]
     : avLaosGrid;
   avEstudiantesActuales.forEach(est => {
     const porLao = {};
@@ -7509,7 +7783,9 @@ function _renderTheadCombinado() {
   const grupoHtml = avLaosGrid.map(({ rubrica, modo, comps, lao }) => {
     const ncols = modo === 'rubrica' ? rubrica.criterios.length + (soloScore ? 0 : 1) : (soloScore ? 1 : comps.length + 1);
     return `<th colspan="${ncols}" style="background:#3a3a5c;color:#fff">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}</th>`;
-  }).join('') + `<th colspan="${avCompsFinal.length}" style="background:var(--gold);color:#2a2a4a">🎯 Nivel Final por Competencia</th>`;
+  }).join('') + (_directaEsRubrica()
+    ? `<th colspan="${avDirectaCursoEntry.rubrica.criterios.length}" style="background:#1B365D;color:#fff">📐 Evaluación Directa del Curso — Rúbrica</th>`
+    : '') + `<th colspan="${avCompsFinal.length}" style="background:var(--gold);color:#2a2a4a">🎯 Nivel Final por Competencia</th>`;
   const detalleHtml = avLaosGrid.map(({ rubrica, modo, comps, lao }) => {
     if (modo === 'rubrica') {
       const critCols = rubrica.criterios.map(c =>
@@ -7523,8 +7799,11 @@ function _renderTheadCombinado() {
       `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}${_btnToggleModoManual(lao.id, c.id)}</th>`
     ).join('');
     return `${compCols}<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
-  }).join('') + avCompsFinal.map(c => {
-    if (avDirectaCursoEntry) {
+  }).join('') + (_directaEsRubrica() ? avDirectaCursoEntry.rubrica.criterios.map(cr => {
+    const et = _etiquetaCriterioDirecta(cr);
+    return `<th title="${_alEsc(et.pre + ' — ' + et.nombre)}" style="min-width:170px;background:#24476f">${_alEsc(et.pre)}<br><span style="font-size:0.66rem;font-weight:400">${_alEsc(et.nombre)}</span></th>`;
+  }).join('') : '') + avCompsFinal.map(c => {
+    if (avDirectaCursoEntry && !_directaEsRubrica()) {
       return `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}${_btnToggleModoManual(avDirectaCursoEntry.lao.id, c.id)}</th>`;
     }
     return `<th title="${c.descripcion || ''}" style="min-width:110px">${c.codigo}</th>`;
@@ -7576,7 +7855,7 @@ function _rbPesoParaCompetencia(criterio, compId) {
 }
 
 function _calcNivelCompGrid(estId, laoId, compId) {
-  const entry = avLaosGrid.find(x => x.lao.id === laoId);
+  const entry = _entradaGridPorLao(laoId);
   if (!entry || entry.modo !== 'rubrica') return null; // modo directa: elección directa del profesor, sin cálculo
   const critsComp = entry.rubrica.criterios.filter(c => _rbPesoParaCompetencia(c, compId) !== undefined);
   if (!critsComp.length) return null;
@@ -7608,6 +7887,10 @@ function _calcNivelCompGrid(estId, laoId, compId) {
 // se reconvierte a un nivel de la escala del curso — mismo criterio que
 // computeNivelCompetenciaFinal().
 function _calcNivelFinalCompetenciaGrid(estId, compId) {
+  // Fase R3: con Evaluación Directa con rúbrica, el nivel final ES el que da
+  // la rúbrica directa (reemplaza la combinación de LAOs, igual que la directa
+  // con pastillas).
+  if (_directaEsRubrica()) return _calcNivelCompGrid(estId, avDirectaCursoEntry.lao.id, compId);
   const contribuciones = [];
   avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
     if (!comps.some(c => c.id === compId)) return;
@@ -7699,8 +7982,22 @@ function renderGridCombinado() {
     // son pastillas (o número exacto, si el profesor eligió esa columna en
     // modo manual) editables por el profesor; si no, son chips de solo
     // lectura calculados en vivo combinando los LAOs reales.
+    // Fase R3: criterios de la rúbrica de evaluación directa (si aplica)
+    const directaCritHtml = _directaEsRubrica() ? (() => {
+      const { lao, rubrica } = avDirectaCursoEntry;
+      return rubrica.criterios.map(cr => {
+        const sel = avClaseData[est.id]?.porLao?.[lao.id]?._criterios?.[cr.id] || '';
+        return `<td class="grid-cell">
+          <select onchange="gridSetCriterioNivel('${est.id}','${lao.id}','${cr.id}',this.value)" style="width:100%;font-size:0.76rem;padding:4px" title="${_alEsc(_etiquetaCriterioDirecta(cr).nombre)}">
+            <option value="">— Sin calificar —</option>
+            ${rubrica.niveles.map(n => `<option value="${n.id}" ${sel === n.id ? 'selected' : ''} title="${_alEsc((cr.celdas || {})[n.id] || '')}">${_alEsc(n.label)} (${n.puntos})</option>`).join('')}
+          </select>
+        </td>`;
+      }).join('');
+    })() : '';
+
     const finalCellsHtml = avCompsFinal.map(c => {
-      if (avDirectaCursoEntry) {
+      if (avDirectaCursoEntry && !_directaEsRubrica()) {
         const laoId = avDirectaCursoEntry.lao.id;
         const sel = avClaseData[est.id]?.porLao?.[laoId]?._nivelesDirectos?.[c.id] || '';
         const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
@@ -7730,6 +8027,7 @@ function renderGridCombinado() {
         </div>
       </td>
       ${laoCellsHtml}
+      ${directaCritHtml}
       ${finalCellsHtml}
       <td class="td-nota td-final-grade">
         <input type="number" min="0" max="100" step="0.1"
@@ -7879,7 +8177,7 @@ function gridSetCriterioNivel(estId, laoId, critId, nivelId) {
   updateGridProgress();
   // Este criterio puede alimentar varias competencias — refresca el "Nivel
   // Final por Competencia" de cada una (no-op seguro si esa celda no existe).
-  const entry = avLaosGrid.find(x => x.lao.id === laoId);
+  const entry = _entradaGridPorLao(laoId);
   const criterio = entry?.rubrica?.criterios.find(c => c.id === critId);
   (criterio?.competencias || []).forEach(cc => _refrescarNivelFinalCompetencia(estId, cc.competenciaId));
 }
@@ -7937,6 +8235,7 @@ function updateGridProgress() {
     if (tieneEnLaos) return true;
     if (!avDirectaCursoEntry) return false;
     const respDirecta = porLao[avDirectaCursoEntry.lao.id] || {};
+    if (_directaEsRubrica()) return Object.values(respDirecta._criterios || {}).some(v => v);
     return Object.values(respDirecta._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
   }).length;
   document.getElementById('av-progress-done').textContent = done;
@@ -8060,7 +8359,10 @@ function guardarTodaLaClase() {
     if (avDirectaCursoEntry) {
       const { lao, comps } = avDirectaCursoEntry;
       const resp = avClaseData[est.id]?.porLao?.[lao.id] || {};
-      const tieneAlgo = Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
+      const esRub = _directaEsRubrica();
+      const tieneAlgo = esRub
+        ? Object.values(resp._criterios || {}).some(v => v)
+        : Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined);
       if (tieneAlgo) {
         estTuvoAlgo = true;
 
@@ -8070,12 +8372,27 @@ function guardarTodaLaClase() {
         );
         if (oldIdx >= 0) db.avaluos.splice(oldIdx, 1);
 
-        const evaluaciones = comps.map(c => ({
-          competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
-          puntajeLao: null,
-          nivel: resp._nivelesDirectos?.[c.id] !== undefined ? resp._nivelesDirectos[c.id] : '',
-          lao: lao.nombre,
-        }));
+        // Fase R3: con rúbrica, el nivel de cada competencia es el promedio
+        // ponderado (sin redondear a entero) de sus criterios — mismo cálculo
+        // que _calcNivelCompGrid() muestra en vivo. Sin rúbrica: las pastillas.
+        const maxRub = esRub ? Math.max(...avDirectaCursoEntry.rubrica.niveles.map(n => n.puntos), 1) : null;
+        const evaluaciones = comps.map(c => {
+          if (esRub) {
+            const n = _calcNivelCompGrid(est.id, lao.id, c.id);
+            return {
+              competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
+              puntajeLao: n === null ? null : (n / maxRub) * 100,
+              nivel: n === null ? '' : n,
+              lao: lao.nombre,
+            };
+          }
+          return {
+            competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
+            puntajeLao: null,
+            nivel: resp._nivelesDirectos?.[c.id] !== undefined ? resp._nivelesDirectos[c.id] : '',
+            lao: lao.nombre,
+          };
+        });
 
         db.avaluos.push({
           id: Date.now().toString() + Math.random().toString(36).slice(2,5),
@@ -8090,9 +8407,10 @@ function guardarTodaLaClase() {
           semestre, fecha, profesor,
           laoId:         lao.id,
           laoNombre:     lao.nombre,
-          modoEvaluacion: 'directa',
+          modoEvaluacion: esRub ? 'rubrica' : 'directa',
           esDirectaCurso: true,
-          criteriosResp: undefined,
+          criteriosResp: esRub ? { ...resp._criterios } : undefined,
+          ...(esRub ? { fuenteRubricaDirecta: db.cursos.find(c => c.id === cursoId)?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento' } : {}),
           notaLao: undefined,
           comentarioGeneral: comentario,
           notaFinal,
@@ -8213,7 +8531,21 @@ function _construirColumnasExportAvaluo() {
     }
   });
 
-  if (avDirectaCursoEntry) {
+  if (_directaEsRubrica()) {
+    // Fase R3: un dropdown por criterio de la rúbrica de evaluación directa
+    // (el Nivel Final se calcula de ellos, así que no se exporta aparte).
+    const { lao, rubrica } = avDirectaCursoEntry;
+    const opciones = rubrica.niveles.map(n => ({ value: n.id, label: `${n.label} (${n.puntos})` }));
+    rubrica.criterios.forEach(crit => {
+      const et = _etiquetaCriterioDirecta(crit);
+      columnas.push({
+        clave: `crit::${lao.id}::${crit.id}`, tipo: 'criterio',
+        laoId: lao.id, criterioId: crit.id, competenciaIds: (crit.competencias || []).map(cc => cc.competenciaId),
+        header: `${et.pre} — Evaluación Directa — ${et.nombre}`,
+        opciones,
+      });
+    });
+  } else if (avDirectaCursoEntry) {
     const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
     const maxValorEscala = Math.max(...nivelesEscala.map(n => n.valor), 1);
     avCompsFinal.forEach(c => columnas.push(_columnaNivelDirectoExport(avDirectaCursoEntry.lao.id, c, nivelesEscala, maxValorEscala, `${c.codigo} — Nivel Final`)));
@@ -13113,7 +13445,14 @@ function _critMover(i, delta) {
 function _critBorrar(i) {
   const cr = _critEdit.lista[i];
   if (!cr) return;
-  if (!confirm(`¿Eliminar el criterio "${cr.nombre || ('C' + (i + 1))}"?`)) return;
+  // Fase R3: si ya hay evaluaciones directas que usaron este criterio, se
+  // avisa — los niveles ya guardados no cambian, pero al reabrir esas
+  // secciones el criterio ya no aparecerá en la cuadrícula.
+  const usos = _usosCriterioAlineamiento(cr.id);
+  const aviso = usos ? `
+
+Ojo: ${usos} evaluación(es) ya guardada(s) usaron este criterio. Sus niveles guardados no cambian, pero el criterio dejará de aparecer en la cuadrícula de Avalúo.` : '';
+  if (!confirm(`¿Eliminar el criterio "${cr.nombre || ('C' + (i + 1))}"?${aviso}`)) return;
   _critEdit.lista.splice(i, 1);
   _renderCriteriosEditor();
 }
@@ -15655,6 +15994,22 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-criterios-comp')">Cerrar</button>
       <button class="btn btn-primary" id="crit-btn-guardar" onclick="guardarCriteriosCompetencia()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Fase R3: vista de la rúbrica de evaluación directa derivada del alineamiento -->
+<div id="modal-rubrica-directa-preview" class="modal-overlay">
+  <div class="modal" style="max-width:min(1300px,96vw);width:96vw;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="rdp-title">📐 Rúbrica de evaluación directa</div>
+      <button class="modal-close" onclick="cerrarRubricaDirectaPreview()">✕</button>
+    </div>
+    <input type="hidden" id="rdp-volver">
+    <div id="rdp-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cerrarRubricaDirectaPreview()">Cerrar</button>
     </div>
   </div>
 </div>
