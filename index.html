@@ -7894,7 +7894,7 @@ function _borradorAlineamientoDesdeWordLibre(secuencia, ctx) {
 let _solRub = null; // { cursoId, laoId, borrador, archivo }
 
 function abrirSolicitudRubrica(cursoId, laoId) {
-  const isAdmin = currentUser?.rol === 'admin';
+  const isAdmin = getEffectiveRole() === 'admin';
   const laos = laosDisponiblesPara(cursoId, currentUser?.username, isAdmin).filter(l => !l.isGenerico || (l.competencias || []).length);
   if (!laos.length) { notify('Este curso no tiene LAOs disponibles', '⚠️'); return; }
   _solRub = { cursoId, laoId: laoId || laos[0].id, borrador: null, archivo: '' };
@@ -8036,7 +8036,7 @@ function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
       ctx: { cursoId, tipo: 'lao', laoNombre: r.lao.nombre }, nota: 'rúbrica del LAO' });
   });
   // P4: quien no es administrador puede SOLICITAR añadir o cambiar la rúbrica de un LAO
-  const puedeSolicitar = currentUser && currentUser.rol !== 'admin' && (resueltos || []).length > 0;
+  const puedeSolicitar = currentUser && getEffectiveRole() !== 'admin' && (resueltos || []).length > 0; // con "Ver como" el admin también lo ve
   const btnSolicitar = puedeSolicitar ? `<button type="button" class="btn btn-outline btn-sm" onclick="abrirSolicitudRubrica('${cursoId}')" title="Envía al administrador una rúbrica nueva o cambiada para un LAO de este curso">📝 Solicitar añadir o cambiar una rúbrica</button>` : '';
   if (!_avRubricasDescarga.length) return puedeSolicitar ? `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div><div style="font-size:0.78rem;color:var(--muted);margin-top:4px">Este curso todavía no tiene rúbricas.</div></div>` : '';
   return `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div>${_avRubricasDescarga.map((x, i) => `
