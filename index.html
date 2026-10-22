@@ -6273,10 +6273,16 @@ function _modeloRubricaDocumento(rubrica, ctx) {
       const bc = _bancoDeCompetenciaCurso(comps[0], curso);
       dominio = bc?.dominioId ? doms.find(d => d.id === bc.dominioId) || null : null;
     }
+    // En la rúbrica de un LAO el documento dice también cuánto aporta el
+    // criterio a cada competencia y su peso en la nota (P3: así el Word
+    // descargado se puede volver a subir sin perder esos datos).
+    const esLao = ctx.tipo === 'lao';
+    const pctDe = c => (cr.competencias || []).find(cc => cc.competenciaId === c.id)?.peso;
+    const pesoNota = parseFloat(cr.peso) || 0;
     return {
-      compKey: comps.map(c => c.id).join('|') || '__na__',
-      competencia: comps.length ? comps.map(c => `${c.codigo} ${c.descripcion || ''}`.trim()).join('\n') : 'N/A (no mide competencia)',
-      componente: (cr.codigo ? `${cr.codigo}: ` : '') + (cr.nombre || '(sin nombre)'),
+      compKey: (esLao ? comps.map(c => c.id + ':' + pctDe(c)) : comps.map(c => c.id)).join('|') || '__na__',
+      competencia: comps.length ? comps.map(c => (esLao && pctDe(c) !== undefined ? `${c.codigo} (aporta ${_round2(Number(pctDe(c)))}%) ${c.descripcion || ''}` : `${c.codigo} ${c.descripcion || ''}`).trim()).join('\n') : 'N/A (no mide competencia)',
+      componente: (cr.codigo ? `${cr.codigo}: ` : '') + (cr.nombre || '(sin nombre)') + (esLao && pesoNota > 0 ? `\n${_round2(pesoNota)}% de la nota` : ''),
       celdas: niveles.map(n => String((cr.celdas || {})[n.id] || '')),
       dominio,
     };
@@ -6322,7 +6328,7 @@ function _htmlTablaModeloRubrica(m) {
   return m.bloques.map(b => `${b.titulo ? `<div class="rdp-dominio">${_alEsc(b.titulo)}</div>` : ''}
     <div style="overflow-x:auto"><table class="crit-desc-table rdp-table"><thead>${head}</thead><tbody>${b.filas.map(f => `<tr>
       ${f.continua ? '' : `<td rowspan="${f.rowspan}" style="font-weight:600;white-space:pre-line">${_alEsc(f.competencia)}</td>`}
-      <td><strong>${_alEsc(f.componente)}</strong></td>
+      <td style="white-space:pre-line"><strong>${_alEsc(f.componente)}</strong></td>
       ${f.celdas.map((t, i) => `<td${m.niveles[i].meta ? ' class="rdp-meta"' : ''}>${_alEsc(t) || '<span style="color:var(--muted)">—</span>'}</td>`).join('')}
     </tr>`).join('')}</tbody></table></div>`).join('');
 }
@@ -6803,6 +6809,7 @@ async function _leerTablasDocx(bytes) {
   };
   const body = doc.getElementsByTagNameNS(W, 'body')[0];
   const tablas = [];
+  const secuencia = []; // P3: orden del documento — {tipo:'p', texto} y {tipo:'tbl', filas}
   let receta = null;
   const visitar = node => {
     for (const ch of node.childNodes) {
@@ -6821,14 +6828,16 @@ async function _leerTablasDocx(bytes) {
           return celdas;
         });
         tablas.push(filas);
+        secuencia.push({ tipo: 'tbl', filas });
       } else if (ch.localName === 'p') {
         const t = textoParrafo(ch);
         if (t.startsWith('AVALUO-RECETA:')) { try { receta = JSON.parse(t.slice('AVALUO-RECETA:'.length)); } catch (e) {} }
+        else if (t.trim()) secuencia.push({ tipo: 'p', texto: t.trim() });
       } else if (ch.localName === 'sdt' || ch.localName === 'sdtContent') visitar(ch);
     }
   };
   visitar(body);
-  return { tablas, receta };
+  return { tablas, receta, secuencia };
 }
 
 // Encabezados → mapa de columnas (por texto, no por posición)
@@ -6928,11 +6937,16 @@ async function _borradorDesdeArchivoRubrica(bytes, nombreArchivo, ctx) {
   }
   if (ext === 'docx') {
     const { tablas, receta } = await _leerTablasDocx(bytes);
-    const t = tablas.find(tb => tb[0]?.some(c => /^\s*criteri/i.test(c.texto)));
-    if (!t) return { error: 'No se encontró en el Word una tabla con la columna "Criterio".' };
-    const headers = t[0].map(c => c.texto);
-    const b = _borradorDesdeTabla(headers, t.slice(1).map(r => r.map(c => c.texto)), ctx, 'word');
-    return _validarRecetaBorrador(b, receta, ctx);
+    // ¿Es la plantilla del sistema? (trae receta o columnas "Peso en la nota"/"Aporta a")
+    const tPlantilla = tablas.find(tb => tb[0]?.some(c => /^\s*criteri/i.test(c.texto)) &&
+      tb[0].some(c => /^\s*(aporta a|peso en la nota)/i.test(c.texto)));
+    if (tPlantilla && (receta?.tipo === 'plantilla_rubrica_lao' || !receta)) {
+      const headers = tPlantilla[0].map(c => c.texto);
+      const b = _borradorDesdeTabla(headers, tPlantilla.slice(1).map(r => r.map(c => c.texto)), ctx, 'word');
+      return _validarRecetaBorrador(b, receta, ctx);
+    }
+    // P3: rúbrica Word que no viene de la plantilla
+    return _borradorLaoDesdeWordLibre(tablas, ctx);
   }
   return { error: 'Formato no reconocido: sube la plantilla en Excel (.xlsx) o Word (.docx).' };
 }
@@ -7064,7 +7078,7 @@ function _renderRevisionRubrica() {
     <div class="rbimp-seccion"><strong>2. Criterios</strong> <span style="color:var(--muted);font-size:0.78rem">— todo es editable. "Aporta a": vacío = no la mide, número = %, X = partes iguales.</span>
       <div style="overflow-x:auto;margin-top:6px"><table class="rbimp-table"><thead><tr>
         <th style="min-width:180px">Criterio</th><th>Peso nota (%)</th>
-        ${ctx.comps.map(c => `<th title="${_alEsc(c.descripcion || '')}">Aporta a ${_alEsc(c.codigo)}</th>`).join('')}
+        ${ctx.comps.map(c => `<th title="${_alEsc(c.descripcion || '')}">Aporta a ${_alEsc(c.codigo)}<br><a href="#" style="color:#fff;font-weight:400;font-size:0.62rem" onclick="_rbImpMarcarTodos('${c.id}');return false" title="Marcar X en todos los criterios para ${_alEsc(c.codigo)} (partes iguales)">X a todos</a></th>`).join('')}
         ${nivelesDoc.map((n, i) => `<th style="min-width:200px">${_alEsc(n.label)}${mapeo[i] !== '' ? `<br><span style="font-weight:400">→ escala ${mapeo[i]}</span>` : '<br><span style="font-weight:400">(no se incorpora)</span>'}</th>`).join('')}
         <th></th></tr></thead><tbody>
         ${criterios.map((c, i) => `<tr>
@@ -7102,6 +7116,10 @@ function _rbImpMapeo(i, valor) { _rbImp.mapeo[i] = valor === '' ? '' : parseFloa
 function _rbImpQuitar(i) { _rbImp.criterios.splice(i, 1); _renderRevisionRubrica(); }
 function _rbImpAgregar() {
   _rbImp.criterios.push({ id: '', nombre: '', peso: '', aportes: {}, desc: _rbImp.nivelesDoc.map(() => '') });
+  _renderRevisionRubrica();
+}
+function _rbImpMarcarTodos(compId) {
+  _rbImp.criterios.forEach(c => { c.aportes[compId] = 'X'; });
   _renderRevisionRubrica();
 }
 function _rbImpRepartir() {
@@ -7459,7 +7477,10 @@ async function _borradorAlineamientoDesdeArchivo(bytes, nombre, ctx) {
   } else if (ext === 'docx') {
     const r = await _leerTablasDocx(bytes); receta = r.receta;
     const t = r.tablas.find(tb => tb[0]?.some(c => /^\s*c[oó]digo de competencia/i.test(c.texto)));
-    if (!t) return { error: 'No se encontró en el Word una tabla con la columna "Código de competencia".' };
+    if (!t) {
+      // P3: documento de alineamiento que no viene de la plantilla (ej. Word V.5)
+      return _borradorAlineamientoDesdeWordLibre(r.secuencia, ctx);
+    }
     b = _borradorAlineamientoDesdeTabla(t[0].map(c => c.texto), t.slice(1).map(row => row.map(c => c.texto)), ctx);
   } else return { error: 'Formato no reconocido: sube la plantilla en Excel (.xlsx) o Word (.docx).' };
   if (b.error) return b;
@@ -7648,6 +7669,194 @@ function incorporarRevisionAlineamiento() {
   _alImp = null;
   if (typeof selectPrograma === 'function' && document.getElementById('prog-detail')) selectPrograma(programaId);
   notify(`Alineamiento incorporado: ${porComp.size} competencia(s) ✓`, '✅');
+}
+
+
+// ======================== PLANTILLAS DE RÚBRICA (P3: leer rúbricas Word existentes) ========================
+// Lector "de mejor esfuerzo" para documentos Word que NO salieron de la
+// plantilla (ej. una rúbrica que viene de un PDF). El resultado entra a la
+// MISMA pantalla de revisión de P1 (LAO) o P2 (alineamiento del programa),
+// donde el administrador corrige lo que haga falta antes de incorporar.
+//
+// Rúbrica de LAO (ej. GERO 6507):
+//  - Tablas partidas entre páginas: si varias tablas tienen el mismo
+//    encabezado de niveles, se tratan como UNA sola (el encabezado repetido
+//    se salta).
+//  - Criterios cortados entre páginas: una fila sin nombre de criterio (solo
+//    el peso, o vacía, o la celda combinada verticalmente) continúa el
+//    criterio anterior; sus descriptores se añaden a los de ese criterio.
+//  - Peso: frases como "5% of Total Grade", "20% de la nota", "Peso: 10%".
+//  - Si el documento tiene una columna de competencia, los códigos que
+//    correspondan a competencias del LAO se marcan con "X".
+//  - Si el LAO mide UNA sola competencia, todos los criterios quedan
+//    marcados "X" para ella (se ajusta en la revisión).
+// Alineamiento del programa (ej. Word V.5 de MHSA):
+//  - Párrafos "Domain No. N: nombre" / "Dominio N: nombre" antes de cada tabla.
+//  - Competencia reconocida por su código al inicio ("1.1 …") o por su
+//    TEXTO comparado con el banco del programa.
+//  - Componente "C1: Nombre" → nombre del componente.
+
+function _limpiarTextoDoc(t) {
+  return String(t ?? '').replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+}
+// Encabezado de nivel en un documento libre: primera línea, sin "★ Meta"/"*Target*"
+function _nivelDesdeEncabezadoDoc(h) {
+  const t = String(h ?? '').split('\n')[0].replace(/★\s*meta/ig, '').replace(/\*?\s*target(\s*level)?\s*\*?/ig, '').trim();
+  const m = t.match(/^(.*?)\s*\(\s*([\d.,]+)\s*(%?)\s*\)\s*$/);
+  if (m) return { label: m[1].trim(), puntos: parseFloat(m[2].replace(',', '.')), pct: !!m[3] };
+  return t ? { label: t, puntos: null, pct: false } : null;
+}
+const _RE_PESO_DOC = /(\d+(?:[.,]\d+)?)\s*%\s*(?:of\s+(?:the\s+)?total(?:\s+grade)?|of\s+(?:the\s+)?grade|de\s+la\s+nota(?:\s+total)?|del\s+total|de\s+la\s+calificaci[oó]n)/i;
+const _RE_PESO_DOC2 = /\bpeso\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*%?/i;
+function _extraerPesoDoc(texto) {
+  const t = String(texto ?? '');
+  const m = t.match(_RE_PESO_DOC) || t.match(_RE_PESO_DOC2);
+  if (!m) return { peso: null, resto: t };
+  return { peso: parseFloat(m[1].replace(',', '.')), resto: t.replace(m[0], ' ') };
+}
+
+// Junta las tablas que comparten el mismo encabezado (mismas etiquetas de
+// nivel) en grupos; devuelve [{ header:[texto], filas:[{celdas:[{texto,vmerge}], inicioTabla}] }]
+function _agruparTablasDoc(tablas, esEncabezado) {
+  const grupos = [];
+  let actual = null;
+  tablas.forEach(t => {
+    if (!t.length) return;
+    const h = t[0].map(c => c.texto);
+    if (!esEncabezado(h)) { if (actual) t.forEach((r, i) => actual.filas.push({ celdas: r, inicioTabla: i === 0 })); return; }
+    const firma = h.map(x => _limpiarTextoDoc(x).toLowerCase()).join('|');
+    if (!actual || actual.firma !== firma) { actual = { firma, header: h, filas: [] }; grupos.push(actual); }
+    t.slice(1).forEach((r, i) => actual.filas.push({ celdas: r, inicioTabla: i === 0 }));
+  });
+  return grupos;
+}
+
+// ── Rúbrica de LAO desde un Word libre ──
+function _borradorLaoDesdeWordLibre(tablas, ctx) {
+  const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  // Encabezado de rúbrica: "Criteria/Criterio | niveles…", o "Competencia | Componente | niveles…"
+  const esEnc = h => {
+    if (h.length < 3) return false;
+    const a = norm(h[0]), b = norm(h[1]);
+    if (/^(criteri|componente|aspecto|elemento)/.test(a)) return true;
+    return /^competen/.test(a) && /^(componente|evaluation component|criteri)/.test(b);
+  };
+  const grupos = _agruparTablasDoc(tablas, esEnc);
+  if (!grupos.length) return { error: 'No se encontró en el Word una tabla de rúbrica (con una columna "Criteria/Criterio" y columnas de niveles).' };
+  // El grupo con más filas es la rúbrica
+  const g = grupos.slice().sort((a, b) => b.filas.length - a.filas.length)[0];
+  const h = g.header;
+  const colComp = /^competen/.test(norm(h[0])) ? 0 : -1;
+  const colCrit = colComp === 0 ? 1 : 0;
+  const colPeso = h.findIndex((x, i) => i > colCrit && /^(peso|weight)/.test(norm(x)));
+  const colsNivel = h.map((x, i) => i).filter(i => i !== colComp && i !== colCrit && i !== colPeso);
+  const nivelesDoc = colsNivel.map(i => _nivelDesdeEncabezadoDoc(h[i]) || { label: `Nivel ${i}`, puntos: null, pct: false });
+  const avisos = [`Se leyó un documento que no viene de la plantilla (${grupos.length > 1 ? grupos.length + ' tablas distintas; se usó la más larga' : 'tabla' + (tablas.length > 1 ? 's partidas unidas: ' + tablas.length : '')}). Revisa cada criterio antes de incorporar.`];
+  const criterios = [];
+  let unidos = 0;
+  g.filas.forEach(fila => {
+    const celdas = fila.celdas;
+    const crudo = celdas[colCrit]?.texto || '';
+    const { peso: pesoTxt, resto } = _extraerPesoDoc(crudo);
+    const pesoCol = colPeso >= 0 ? parseFloat(String(celdas[colPeso]?.texto || '').replace('%', '').replace(',', '.')) : NaN;
+    const peso = isFinite(pesoCol) ? pesoCol : pesoTxt;
+    const nombre = _limpiarTextoDoc(resto).replace(/^[\-–—•\s]+|[\-–—•\s]+$/g, '');
+    const desc = colsNivel.map(i => _limpiarTextoDoc(celdas[i]?.texto || ''));
+    const compTxt = colComp >= 0 ? (celdas[colComp]?.vmerge ? null : celdas[colComp]?.texto || '') : null;
+    if (!nombre && !desc.some(Boolean) && peso === null) return;
+    const prev = criterios[criterios.length - 1];
+    if (!nombre && prev) {
+      // Continuación del criterio anterior (cortado entre páginas o celda combinada)
+      prev.desc = prev.desc.map((d, k) => [d, desc[k]].filter(Boolean).join(' '));
+      if ((prev.peso === '' || prev.peso === null) && peso !== null) prev.peso = peso;
+      unidos++;
+      return;
+    }
+    const aportes = {};
+    if (ctx.comps.length === 1) aportes[ctx.comps[0].id] = 'X';
+    const codigos = compTxt !== null ? compTxt : (colComp >= 0 && prev ? prev._compTxt : '');
+    if (colComp >= 0) ctx.comps.forEach(c => {
+      const cod = String(c.codigo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const conPct = new RegExp('(^|[\\s,;/(])' + cod + '\\s*\\(\\s*aporta\\s*([\\d.,]+)\\s*%\\s*\\)', 'i');
+      const re = new RegExp('(^|[\\s,;/(])' + cod + '(?=$|[\\s,;/):.])', 'i');
+      const mp = String(codigos || '').match(conPct);
+      if (mp) aportes[c.id] = parseFloat(mp[2].replace(',', '.'));
+      else if (re.test(codigos || '')) aportes[c.id] = 'X';
+    });
+    criterios.push({ id: '', nombre: nombre || '(sin nombre)', peso: peso === null ? '' : peso, aportes, desc, _compTxt: codigos });
+  });
+  criterios.forEach(c => delete c._compTxt);
+  if (unidos) avisos.push(`Se unieron ${unidos} fila(s) que continuaban un criterio en la página siguiente.`);
+  if (criterios.some(c => c.peso === '')) avisos.push('Algunos criterios no traían peso en la nota: escríbelo en la revisión.');
+  if (ctx.comps.length > 1 && !criterios.some(c => Object.keys(c.aportes).length)) avisos.push(`El documento no dice qué competencia mide cada criterio: márcalo en las columnas "Aporta a" (${ctx.comps.map(c => c.codigo).join(', ')}).`);
+  return { origen: 'word-libre', avisos, nivelesDoc, criterios };
+}
+
+// ── Alineamiento del programa desde un Word libre ──
+function _borradorAlineamientoDesdeWordLibre(secuencia, ctx) {
+  const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const esEnc = h => h.length >= 3 && /^competen/.test(norm(h[0])) && /^(evaluation component|componente|component|criteri)/.test(norm(h[1]));
+  const avisos = ['Se leyó un documento que no viene de la plantilla. Revisa cada componente antes de incorporar.'];
+  const filas = [], noReconocidas = new Set();
+  let nivelesDoc = null, dom = { num: '', nombre: '' }, compActual = null, tablasUsadas = 0;
+  const buscarComp = txt => {
+    const t = String(txt ?? '').trim();
+    const mCod = t.match(/^\s*C?(\d+(?:\.\d+)+)\b/);
+    if (mCod) { const bc = ctx.comps.find(c => String(c.num) === mCod[1]); if (bc) return bc; }
+    // Comparación por texto, sin palabras vacías ("the", "of", "de"…) ni
+    // puntuación; si no hay igualdad, la competencia más parecida por palabras
+    // (≥ 85% en común) siempre que no haya empate.
+    const VACIAS = new Set(['the', 'a', 'an', 'of', 'and', 'to', 'in', 'for', 'on', 'with', 'by', 'its', 'el', 'la', 'los', 'las', 'de', 'del', 'y', 'en', 'para', 'con', 'por', 'un', 'una']);
+    const clave = x => norm(x).split(' ').filter(w => w && !VACIAS.has(w));
+    const kt = clave(t.replace(/^\s*C?\d+(?:\.\d+)+\s*/, ''));
+    if (!kt.length) return null;
+    const igual = ctx.comps.find(c => clave(c.texto).join(' ') === kt.join(' '));
+    if (igual) return igual;
+    const st = new Set(kt);
+    const puntuar = c => { const sc = new Set(clave(c.texto)); let com = 0; sc.forEach(w => { if (st.has(w)) com++; }); return com / Math.max(sc.size, st.size, 1); };
+    const orden = ctx.comps.map(c => ({ c, s: puntuar(c) })).sort((a, b) => b.s - a.s);
+    if (orden[0] && orden[0].s >= 0.85 && (!orden[1] || orden[1].s < orden[0].s)) return orden[0].c;
+    return null;
+  };
+  secuencia.forEach(el => {
+    if (el.tipo === 'p') {
+      const m = el.texto.match(/^\s*(?:domain|dominio)\s*(?:no\.?|n[.º°o]?)?\s*(\d+)\s*[:.\-–—]\s*(.+)$/i);
+      if (m) dom = { num: m[1], nombre: _limpiarTextoDoc(m[2]) };
+      return;
+    }
+    const t = el.filas;
+    if (!t.length) return;
+    const h = t[0].map(c => c.texto);
+    const enc = esEnc(h);
+    if (!enc && !compActual) return;
+    let cuerpo = t;
+    if (enc) {
+      cuerpo = t.slice(1); tablasUsadas++;
+      if (!nivelesDoc) nivelesDoc = h.slice(2).map(x => _nivelDesdeEncabezadoDoc(x) || { label: x, puntos: null, pct: false });
+    }
+    cuerpo.forEach(r => {
+      const compCel = r[0];
+      if (compCel && !compCel.vmerge && _limpiarTextoDoc(compCel.texto)) {
+        const bc = buscarComp(compCel.texto);
+        compActual = bc ? { bc } : { bc: null, txt: _limpiarTextoDoc(compCel.texto) };
+        if (!bc) noReconocidas.add(_limpiarTextoDoc(compCel.texto).slice(0, 70));
+      }
+      if (!compActual || !compActual.bc) return;
+      const compTxt = _limpiarTextoDoc(r[1]?.texto || '');
+      const nombre = compTxt.replace(/^C\d+\s*[:.\-–—]\s*/i, '').trim();
+      const desc = (nivelesDoc || []).map((_, k) => _limpiarTextoDoc(r[2 + k]?.texto || ''));
+      if (!nombre && !desc.some(Boolean)) return;
+      const prev = filas[filas.length - 1];
+      if (!nombre && prev && prev.compId === compActual.bc.id) { prev.desc = prev.desc.map((d, k) => [d, desc[k]].filter(Boolean).join(' ')); return; }
+      filas.push({ compId: compActual.bc.id, codigo: compActual.bc.num, id: '', domNum: dom.num, domNombre: dom.nombre, nombre, peso: '', desc });
+    });
+  });
+  if (!tablasUsadas) return { error: 'No se encontró en el Word una tabla de alineamiento (columnas "Competency/Competencia" y "Evaluation Component/Componente").' };
+  if (noReconocidas.size) avisos.push(`Competencias del documento que no se reconocieron en el banco (se ignoraron): ${[...noReconocidas].join(' · ')}.`);
+  const enArchivo = new Set(filas.map(f => f.compId));
+  const fuera = ctx.comps.filter(c => !enArchivo.has(c.id));
+  if (fuera.length) avisos.push(`No venían en el documento (no se modifican): ${fuera.map(c => c.num).join(', ')}.`);
+  return { avisos, nivelesDoc: nivelesDoc || [], filas };
 }
 
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
