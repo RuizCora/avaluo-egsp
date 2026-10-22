@@ -7125,9 +7125,16 @@ function incorporarRevisionRubrica() {
   const { ctx, mapeo, criterios, laoId } = _rbImp;
   const viejos = ctx.rub?.criterios || [];
   // Niveles = escala vigente del programa; se conservan los ids de los niveles que ya existían (mismos puntos)
+  // Si el documento traía niveles en % (ej. Satisfactory = 85%), ese % se
+  // guarda en el nivel (pctNota) para calcular la Nota LAO como en el original;
+  // el nivel por competencia sigue usando la escala del programa.
   const niveles = ctx.niveles.map(n => {
     const ex = (ctx.rub?.niveles || []).find(x => Number(x.puntos) === Number(n.puntos));
-    return { id: ex ? ex.id : String(n.puntos), label: n.label, puntos: n.puntos };
+    const nv = { id: ex ? ex.id : String(n.puntos), label: n.label, puntos: n.puntos };
+    const j = mapeo.indexOf(n.puntos);
+    if (j >= 0 && _rbImp.nivelesDoc[j]?.pct && _rbImp.nivelesDoc[j].puntos !== null) nv.pctNota = _rbImp.nivelesDoc[j].puntos;
+    else if (ex && ex.pctNota !== undefined && !_rbImp.nivelesDoc.some(x => x.pct)) nv.pctNota = ex.pctNota;
+    return nv;
   });
   const norm = s => String(s || '').trim().toLowerCase();
   const usados = new Set();
@@ -7166,6 +7173,114 @@ function handleRubricaLaoFileInput(input) {
   const f = input.files?.[0];
   if (f) procesarArchivoRubricaLao(f);
   input.value = '';
+}
+
+
+// ======================== NOTA DEL LAO EN LAOs CON RÚBRICA ========================
+// (2026-10-22, a pedido de Edgardo: "In my test the LAO grade was lost".)
+// Antes, un LAO evaluado con rúbrica NO tenía Nota LAO: la columna solo
+// existía en modo directa, y al guardar en modo rúbrica se escribía
+// notaLao = undefined (se perdía la nota puesta a mano antes de que el LAO
+// tuviera rúbrica). Ahora:
+//  - La Nota LAO se CALCULA sola en % con los criterios calificados,
+//    ponderados por su "peso en la nota": Σ peso·% del nivel / Σ peso.
+//    El % de un nivel es el que traía el documento original si se importó
+//    con niveles en % (nivel.pctNota, ej. Satisfactory = 85%), si no
+//    puntos / máximo de la rúbrica.
+//  - El profesor puede escribir otra nota (queda "manual"); ↺ vuelve a la automática.
+//  - Una nota que ya estaba guardada sin rúbrica se conserva como manual.
+function _pctNivelNota(nivel, rubrica) {
+  if (nivel.pctNota !== undefined && nivel.pctNota !== null && nivel.pctNota !== '') return Number(nivel.pctNota);
+  const max = Math.max(...rubrica.niveles.map(n => Number(n.puntos) || 0), 0);
+  return max > 0 ? (Number(nivel.puntos) / max) * 100 : 0;
+}
+function _calcNotaLaoAuto(estId, laoId) {
+  const entry = _entradaGridPorLao(laoId);
+  if (!entry || entry.modo !== 'rubrica' || entry.lao.esDirectaCurso) return null;
+  const rub = entry.rubrica;
+  let sw = 0, s = 0, total = 0, calificados = 0;
+  rub.criterios.forEach(c => {
+    const w = parseFloat(c.peso) || 0;
+    if (w <= 0) return;
+    total++;
+    const nid = avClaseData[estId]?.porLao?.[laoId]?._criterios?.[c.id];
+    const nv = nid ? rub.niveles.find(n => n.id === nid) : null;
+    if (!nv) return;
+    calificados++;
+    s += w * _pctNivelNota(nv, rub); sw += w;
+  });
+  if (!sw) return null;
+  return { valor: _round2(s / sw), parcial: calificados < total };
+}
+function _htmlInfoNotaLao(estId, laoId) {
+  const d = avClaseData[estId]?.porLao?.[laoId] || {};
+  const auto = _calcNotaLaoAuto(estId, laoId);
+  if (d._notaLaoManual) {
+    return `<span title="Nota escrita por el profesor">✏️ manual · auto: ${auto ? auto.valor : '—'}</span> <a href="#" onclick="gridRevertirNotaLao('${estId}','${laoId}');return false" title="Volver a la nota automática">↺</a>`;
+  }
+  return auto ? `auto${auto.parcial ? ' (parcial)' : ''}` : '<span title="Califica los criterios para calcularla">auto</span>';
+}
+function _celdaNotaLaoRubrica(estId, laoId) {
+  const d = avClaseData[estId]?.porLao?.[laoId] || {};
+  const auto = _calcNotaLaoAuto(estId, laoId);
+  const valor = d._notaLaoManual ? (d._notaLao ?? '') : (auto ? auto.valor : '');
+  return `<td class="grid-cell">
+    <input type="number" min="0" max="100" step="0.1" id="notalao-${estId}-${laoId}" value="${valor}"
+      oninput="gridSetNotaLaoRubrica('${estId}','${laoId}',this.value)" style="width:84px${d._notaLaoManual ? ';border-color:var(--gold);background:#fffaf0' : ''}"
+      placeholder="auto" title="Se calcula sola con los criterios y su peso en la nota. Escribe otra nota para cambiarla a mano.">
+    <div id="notalao-info-${estId}-${laoId}" style="font-size:0.6rem;color:var(--muted);margin-top:2px">${_htmlInfoNotaLao(estId, laoId)}</div>
+  </td>`;
+}
+function _porLaoRubrica(estId, laoId) {
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  if (!avClaseData[estId].porLao) avClaseData[estId].porLao = {};
+  if (!avClaseData[estId].porLao[laoId]) avClaseData[estId].porLao[laoId] = { _criterios: {} };
+  return avClaseData[estId].porLao[laoId];
+}
+// Escribir en la celda: con valor = manual; vacía = vuelve a automática
+function gridSetNotaLaoRubrica(estId, laoId, val) {
+  const d = _porLaoRubrica(estId, laoId);
+  const cruda = val === undefined || val === null ? '' : String(val).trim();
+  if (cruda === '') { d._notaLaoManual = false; d._notaLao = ''; }
+  else { const n = parseFloat(cruda); if (isNaN(n)) return; d._notaLaoManual = true; d._notaLao = Math.min(100, Math.max(0, n)); }
+  const info = document.getElementById(`notalao-info-${estId}-${laoId}`);
+  if (info) info.innerHTML = _htmlInfoNotaLao(estId, laoId);
+  const inp = document.getElementById(`notalao-${estId}-${laoId}`);
+  if (inp) {
+    inp.style.borderColor = d._notaLaoManual ? 'var(--gold)' : ''; inp.style.background = d._notaLaoManual ? '#fffaf0' : '';
+    // Si no se está escribiendo en la celda (p.ej. al importar), mostrar el valor guardado
+    if (document.activeElement !== inp) {
+      const auto = _calcNotaLaoAuto(estId, laoId);
+      inp.value = d._notaLaoManual ? d._notaLao : (auto ? auto.valor : '');
+    }
+  }
+  updateGridProgress();
+}
+function gridRevertirNotaLao(estId, laoId) {
+  const d = _porLaoRubrica(estId, laoId);
+  d._notaLaoManual = false; d._notaLao = '';
+  _refrescarNotaLao(estId, laoId, true);
+  updateGridProgress();
+}
+// Tras cambiar un criterio: actualiza la nota automática (si no es manual)
+function _refrescarNotaLao(estId, laoId, forzarValor) {
+  const inp = document.getElementById(`notalao-${estId}-${laoId}`);
+  const info = document.getElementById(`notalao-info-${estId}-${laoId}`);
+  if (!inp && !info) return;
+  const d = avClaseData[estId]?.porLao?.[laoId] || {};
+  if (inp && (!d._notaLaoManual || forzarValor)) {
+    const auto = _calcNotaLaoAuto(estId, laoId);
+    inp.value = d._notaLaoManual ? (d._notaLao ?? '') : (auto ? auto.valor : '');
+    inp.style.borderColor = d._notaLaoManual ? 'var(--gold)' : ''; inp.style.background = d._notaLaoManual ? '#fffaf0' : '';
+  }
+  if (info) info.innerHTML = _htmlInfoNotaLao(estId, laoId);
+}
+// Nota que se guarda para un LAO con rúbrica
+function _notaLaoRubricaFinal(estId, laoId) {
+  const d = avClaseData[estId]?.porLao?.[laoId] || {};
+  if (d._notaLaoManual && d._notaLao !== '' && d._notaLao !== undefined) return { nota: parseFloat(d._notaLao), manual: true };
+  const auto = _calcNotaLaoAuto(estId, laoId);
+  return { nota: auto ? auto.valor : '', manual: false };
 }
 
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
@@ -7489,6 +7604,7 @@ function _renderRubricaGrid() {
   const theadNiveles = _rbNiveles.map(n => `
     <th class="rb-nivel-header" style="min-width:170px">
       <div style="font-weight:800;font-family:'Montserrat',sans-serif">${n.puntos} · ${n.label}</div>
+      ${n.pctNota !== undefined && n.pctNota !== null ? `<div style="font-size:0.66rem;font-weight:400;opacity:0.8">${n.pctNota}% de la nota</div>` : ''}
     </th>`).join('');
 
   table.innerHTML = `
@@ -8691,7 +8807,7 @@ function buildGridCombinado(cursoId) {
     const porLao = {};
     let tieneAlgunAvaluo = false;
     entradasParaPrellenar.forEach(({ lao, modo }) => {
-      porLao[lao.id] = modo === 'rubrica' ? { _criterios: {} } : { _nivelesDirectos: {}, _notaLao: '' };
+      porLao[lao.id] = modo === 'rubrica' ? { _criterios: {}, _notaLao: '', _notaLaoManual: false } : { _nivelesDirectos: {}, _notaLao: '' };
       const existing = db.avaluos.find(a =>
         a.cursoId === cursoId && a.seccionId === avSeccionActual.id && a.laoId === lao.id &&
         (a.estudianteId === est.id || a.estudiante === est.nombre)
@@ -8699,6 +8815,12 @@ function buildGridCombinado(cursoId) {
       if (!existing) return;
       tieneAlgunAvaluo = true;
       if (modo === 'rubrica' && existing.criteriosResp) porLao[lao.id]._criterios = { ...existing.criteriosResp };
+      // Nota LAO de un LAO con rúbrica: se recupera si era manual, o si se
+      // había puesto a mano cuando el LAO todavía no tenía rúbrica (para no perderla)
+      if (modo === 'rubrica' && !lao.esDirectaCurso && existing.notaLao !== undefined && existing.notaLao !== '' && existing.notaLao !== null &&
+          (existing.notaLaoManual || existing.modoEvaluacion !== 'rubrica')) {
+        porLao[lao.id]._notaLao = existing.notaLao; porLao[lao.id]._notaLaoManual = true;
+      }
       if (modo === 'directa') {
         if (existing.notaLao !== undefined) porLao[lao.id]._notaLao = existing.notaLao;
         (existing.evaluaciones || []).forEach(ev => {
@@ -8779,7 +8901,7 @@ function _renderTheadCombinado() {
   const soloScore = !!avDirectaCursoEntry;
   const thead = document.getElementById('av-grid-thead');
   const grupoHtml = avLaosGrid.map(({ rubrica, modo, comps, lao }) => {
-    const ncols = modo === 'rubrica' ? rubrica.criterios.length + (soloScore ? 0 : 1) : (soloScore ? 1 : comps.length + 1);
+    const ncols = modo === 'rubrica' ? rubrica.criterios.length + 1 + (soloScore ? 0 : 1) : (soloScore ? 1 : comps.length + 1);
     return `<th colspan="${ncols}" style="background:#3a3a5c;color:#fff">${lao.nombre}${lao.isGenerico ? ' ⚠️' : ''}</th>`;
   }).join('') + (_directaEsRubrica()
     ? `<th colspan="${avDirectaCursoEntry.rubrica.criterios.length}" style="background:#1B365D;color:#fff">📐 Evaluación Directa del Curso — Rúbrica</th>`
@@ -8789,8 +8911,9 @@ function _renderTheadCombinado() {
       const critCols = rubrica.criterios.map(c =>
         `<th title="${c.nombre || ''}" style="min-width:190px">${c.nombre || '(sin nombre)'}<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">peso ${c.peso}%</span></th>`
       ).join('');
-      if (soloScore) return critCols;
-      return `${critCols}<th class="col-nota" style="min-width:150px">Nivel por<br>Competencia</th>`;
+      const notaCol = `<th style="min-width:110px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% · auto o manual</span></th>`;
+      if (soloScore) return critCols + notaCol;
+      return `${critCols}${notaCol}<th class="col-nota" style="min-width:150px">Nivel por<br>Competencia</th>`;
     }
     if (soloScore) return `<th style="min-width:120px">Nota LAO<br><span style="font-size:0.6rem;font-weight:400;opacity:0.75">% (0–100)</span></th>`;
     const compCols = comps.map(c =>
@@ -8947,12 +9070,13 @@ function renderGridCombinado() {
         }).join('');
         // En Evaluación Directa, el "Nivel por Competencia" que este LAO
         // calcularía no se muestra — ver nota en buildGridCombinado.
-        if (soloScore) return critCells;
+        const notaCell = _celdaNotaLaoRubrica(est.id, lao.id);
+        if (soloScore) return critCells + notaCell;
         const nivelesPreview = comps.map(c => {
           const n = _calcNivelCompGrid(est.id, lao.id, c.id);
           return `<span class="nota-chip ${n === null ? 'nc-' : 'nc-' + _nivelBucket(n)}" style="margin:1px;font-size:0.68rem" title="${c.codigo}">${c.codigo}: ${n === null ? '—' : _fmtNivel(n)}</span>`;
         }).join(' ');
-        return `${critCells}<td class="td-nota" id="prevcomp-${est.id}-${lao.id}" style="line-height:1.7">${nivelesPreview}</td>`;
+        return `${critCells}${notaCell}<td class="td-nota" id="prevcomp-${est.id}-${lao.id}" style="line-height:1.7">${nivelesPreview}</td>`;
       }
       // Modo directa (LAO real): la Nota del LAO (puntaje del instrumento).
       // Sus pastillas de nivel por competencia solo se muestran cuando el
@@ -9172,6 +9296,7 @@ function gridSetCriterioNivel(estId, laoId, critId, nivelId) {
   if (!avClaseData[estId].porLao[laoId]._criterios) avClaseData[estId].porLao[laoId]._criterios = {};
   avClaseData[estId].porLao[laoId]._criterios[critId] = nivelId;
   _refrescarPreviewNivel(estId, laoId);
+  _refrescarNotaLao(estId, laoId);
   updateGridProgress();
   // Este criterio puede alimentar varias competencias — refresca el "Nivel
   // Final por Competencia" de cada una (no-op seguro si esa celda no existe).
@@ -9226,7 +9351,7 @@ function updateGridProgress() {
     const porLao = avClaseData[est.id]?.porLao || {};
     const tieneEnLaos = avLaosGrid.some(({ lao, modo }) => {
       const resp = porLao[lao.id] || {};
-      if (modo === 'rubrica') return Object.values(resp._criterios || {}).some(v => v);
+      if (modo === 'rubrica') return Object.values(resp._criterios || {}).some(v => v) || (resp._notaLaoManual && resp._notaLao !== '');
       return Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined) ||
         (resp._notaLao !== undefined && resp._notaLao !== '');
     });
@@ -9273,7 +9398,7 @@ function guardarTodaLaClase() {
     avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
       const resp = avClaseData[est.id]?.porLao?.[lao.id] || {};
       const tieneAlgo = modo === 'rubrica'
-        ? Object.values(resp._criterios || {}).some(v => v)
+        ? Object.values(resp._criterios || {}).some(v => v) || (resp._notaLaoManual && resp._notaLao !== '' && resp._notaLao !== undefined)
         : Object.values(resp._nivelesDirectos || {}).some(v => v !== '' && v !== undefined) ||
           (resp._notaLao !== undefined && resp._notaLao !== '');
       if (!tieneAlgo) return;
@@ -9286,8 +9411,10 @@ function guardarTodaLaClase() {
       );
       if (oldIdx >= 0) db.avaluos.splice(oldIdx, 1);
 
-      let evaluaciones, notaLao;
+      let evaluaciones, notaLao, notaLaoManual = false;
       if (modo === 'rubrica') {
+        const nf = _notaLaoRubricaFinal(est.id, lao.id);
+        notaLao = nf.nota; notaLaoManual = nf.manual;
         // Por cada competencia que mide este LAO: promedio ponderado
         // DIRECTAMENTE en los puntos de la escala Likert de este LAO (ej.
         // 0-4), redondeado al entero más cercano para obtener el Nivel final
@@ -9346,6 +9473,7 @@ function guardarTodaLaClase() {
         esDirectaCurso: !!lao.esDirectaCurso,
         criteriosResp: modo === 'rubrica' ? { ...resp._criterios } : undefined,
         notaLao,
+        ...(modo === 'rubrica' ? { notaLaoManual } : {}),
         comentarioGeneral: comentario,
         notaFinal,
         notaFinalLetra: notaFinal !== '' ? gradeToLetter(parseFloat(notaFinal)) : '',
@@ -9516,6 +9644,11 @@ function _construirColumnasExportAvaluo() {
           opciones,
         });
       });
+      // Nota LAO de un LAO con rúbrica: vacía = automática; con número = manual
+      columnas.push({
+        clave: `notalaorub::${lao.id}`, tipo: 'notalao_rubrica', laoId: lao.id,
+        header: `Nota ${lao.nombre} (0-100) — vacío = automática`, min: 0, max: 100,
+      });
     } else {
       if (!soloScore) {
         const nivelesEscala = [...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles)].sort((a, b) => b.valor - a.valor);
@@ -9577,6 +9710,7 @@ function _valorActualColumnaExport(estId, col) {
   const porLao = avClaseData[estId]?.porLao || {};
   if (col.tipo === 'criterio') return porLao[col.laoId]?._criterios?.[col.criterioId] || '';
   if (col.tipo === 'notalao') { const v = porLao[col.laoId]?._notaLao; return (v === undefined || v === '') ? '' : v; }
+  if (col.tipo === 'notalao_rubrica') { const d = porLao[col.laoId] || {}; return d._notaLaoManual && d._notaLao !== '' && d._notaLao !== undefined ? d._notaLao : ''; }
   const v = porLao[col.laoId]?._nivelesDirectos?.[col.competenciaId];
   return (v === undefined) ? '' : v;
 }
@@ -9754,27 +9888,31 @@ function _construirCalculosExportAvaluo(columnas, filaPrimera, filaUltima) {
   const mapaCol = {};      // índice de columna export → { lbl, val } rangos absolutos en _puntos
   columnas.forEach((col, i) => {
     if (!col.opciones) return;
+    // Tres columnas por lista: etiqueta | puntos | % para la nota del LAO
     let pares;
     if (col.tipo === 'criterio') {
       const entry = _entradaGridPorLao(col.laoId);
-      const niveles = entry?.rubrica?.niveles || [];
-      pares = col.opciones.map(o => [o.label, Number(niveles.find(n => n.id === o.value)?.puntos ?? NaN)]);
+      const rub = entry?.rubrica;
+      const niveles = rub?.niveles || [];
+      pares = col.opciones.map(o => { const nv = niveles.find(n => n.id === o.value);
+        return [o.label, Number(nv?.puntos ?? NaN), nv && rub ? _round2(_pctNivelNota(nv, rub)) : '']; });
     } else {
-      pares = col.opciones.map(o => [o.label, Number(o.value)]);
+      pares = col.opciones.map(o => [o.label, Number(o.value), '']);
     }
     pares = pares.filter(p => isFinite(p[1]));
     const k = puntosCols.length;
-    const cL = _xlsxColLetter(2 * k + 1), cV = _xlsxColLetter(2 * k + 2);
+    const cL = _xlsxColLetter(3 * k + 1), cV = _xlsxColLetter(3 * k + 2), cP = _xlsxColLetter(3 * k + 3);
     puntosCols.push({ header: col.header, pares });
     const n = pares.length + 1;
-    mapaCol[i] = { lbl: _xlsxRefHoja('_puntos', `$${cL}$2:$${cL}$${n}`), val: _xlsxRefHoja('_puntos', `$${cV}$2:$${cV}$${n}`) };
+    mapaCol[i] = { lbl: _xlsxRefHoja('_puntos', `$${cL}$2:$${cL}$${n}`), val: _xlsxRefHoja('_puntos', `$${cV}$2:$${cV}$${n}`),
+                   pct: _xlsxRefHoja('_puntos', `$${cP}$2:$${cP}$${n}`) };
   });
   const maxFilasPuntos = Math.max(0, ...puntosCols.map(p => p.pares.length));
   const puntosHeaders = [], puntosFilas = [];
-  puntosCols.forEach(p => { puntosHeaders.push(p.header.slice(0, 200), 'puntos'); });
+  puntosCols.forEach(p => { puntosHeaders.push(p.header.slice(0, 200), 'puntos', '% nota'); });
   for (let r = 0; r < maxFilasPuntos; r++) {
     const fila = [];
-    puntosCols.forEach(p => { const par = p.pares[r]; fila.push(par ? par[0] : '', par ? par[1] : ''); });
+    puntosCols.forEach(p => { const par = p.pares[r]; fila.push(par ? par[0] : '', par ? par[1] : '', par ? par[2] : ''); });
     puntosFilas.push(fila);
   }
 
@@ -9802,6 +9940,23 @@ function _construirCalculosExportAvaluo(columnas, filaPrimera, filaUltima) {
   };
 
   const calc = []; // { header, formula (con {F}) , colRef? }
+  // Nota automática de cada LAO con rúbrica: Σ peso·% del nivel / Σ peso de los
+  // criterios calificados (igual que _calcNotaLaoAuto). Se muestra en todas
+  // las modalidades, porque la Nota LAO existe siempre.
+  avLaosGrid.forEach(({ lao, rubrica, modo }) => {
+    if (modo !== 'rubrica') return;
+    const terms = [];
+    rubrica.criterios.forEach(cr => {
+      const w = parseFloat(cr.peso) || 0; if (w <= 0) return;
+      const i = idxCol(c => c.tipo === 'criterio' && c.laoId === lao.id && c.criterioId === cr.id);
+      if (i < 0 || !mapaCol[i]) return;
+      terms.push({ i, w });
+    });
+    if (!terms.length) return;
+    const nu = terms.map(t => `${t.w}*IFERROR(INDEX(${mapaCol[t.i].pct},MATCH(${ref(t.i)},${mapaCol[t.i].lbl},0)),0)`).join('+');
+    const de = terms.map(t => `${t.w}*${ok(t.i)}`).join('+');
+    calc.push({ header: `Nota ${lao.nombre} automática (calculado, no editar)`, formula: `IF((${de})=0,"",ROUND((${nu})/(${de}),2))` });
+  });
   const soloScore = !!avDirectaCursoEntry;
   const maxEscala = Math.max(...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => n.valor), 1);
   // Columnas de la hoja (1-based): A=ID, B=Estudiante, C..=exportables,
@@ -10106,6 +10261,7 @@ function _aplicarValorColumnaImportAvaluo(estId, col, rawCelda) {
   const cruda = (rawCelda === undefined || rawCelda === null) ? '' : rawCelda;
   if (col.tipo === 'nivel_manual') gridSetNivelDirectoManual(estId, col.laoId, col.competenciaId, cruda, col.max);
   else if (col.tipo === 'notalao') gridSetNotaLao(estId, col.laoId, cruda);
+  else if (col.tipo === 'notalao_rubrica') gridSetNotaLaoRubrica(estId, col.laoId, cruda);
 }
 
 // Traduce un valor CRUDO interno (nivel.id o número) al mismo texto que se
