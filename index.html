@@ -6285,7 +6285,7 @@ function _modeloRubricaDocumento(rubrica, ctx) {
     ].filter(Boolean).join(' · '),
     niveles: niveles.map(n => ({ id: n.id, titulo: `${n.label} (${n.puntos})`, meta: n.id === metaId })),
     bloques,
-    nombreArchivo: `Rubrica_${ctx.tipo === 'directa' ? 'Directa' : 'LAO'}_${(curso.codigo || 'curso').replace(/[^\w-]+/g, '_')}${ctx.tipo === 'lao' ? '_' + String(ctx.laoNombre || '').replace(/[^\w-]+/g, '_').slice(0, 40) : ''}`,
+    nombreArchivo: `Rubrica_${ctx.tipo === 'directa' ? 'Directa' : 'LAO'}_${_nombreArchivoSeguro(curso.codigo || 'curso', 30)}${ctx.tipo === 'lao' ? '_' + _nombreArchivoSeguro(ctx.laoNombre, 40) : ''}`,
   };
 }
 
@@ -6468,6 +6468,79 @@ async function descargarRubricaPdf(m) {
     console.error(e);
     notify('No se pudo generar el PDF (¿sin conexión?). Prueba la descarga en Word.', '⚠️');
   }
+}
+
+
+// ── Fase R4b: rúbrica COMPLETA del programa (todo el alineamiento) ──
+// Se descarga desde Departamentos y Programas. Es el equivalente al
+// documento V.5: todas las competencias del banco del programa, agrupadas
+// por dominio, con sus criterios y descriptores en la escala del programa.
+// Las competencias que todavía no tienen criterios se listan igual (fila
+// "Sin criterios de evaluación") para que el documento muestre el panorama
+// completo del programa.
+// Nombre de archivo sin acentos ni símbolos ("Administración" → "Administracion")
+function _nombreArchivoSeguro(t, max) {
+  return String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max || 60);
+}
+function _ordenNumComp(a, b) {
+  const pa = String(a.num).split('.').map(x => parseFloat(x)), pb = String(b.num).split('.').map(x => parseFloat(x));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? -1, y = pb[i] ?? -1;
+    if (isNaN(x) || isNaN(y)) return String(a.num).localeCompare(String(b.num));
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+function _modeloRubricaPrograma(programa) {
+  const escala = resolverEscalaParaPrograma(programa);
+  const nivelesR = _nivelesRubricaDesdeEscala(escala);
+  const metaId = _nivelMetaId(nivelesR);
+  const comps = (db.bancoCompetencias || []).filter(c => c.programa === programa).sort(_ordenNumComp);
+  const doms = dominiosDePrograma(programa);
+  const filaDe = (bc, cr) => ({
+    compKey: bc.id,
+    competencia: `${bc.num} ${bc.texto || ''}`.trim(),
+    componente: cr ? (cr.codigo ? `${cr.codigo}: ` : '') + (cr.nombre || '') : 'Sin criterios de evaluación',
+    celdas: nivelesR.map(n => cr ? String(descriptorCriterio(cr, n.puntos) || '') : ''),
+  });
+  const filasDe = lista => lista.flatMap(bc => {
+    const crits = criteriosDeCompetencia(bc);
+    return crits.length ? crits.map(cr => filaDe(bc, cr)) : [filaDe(bc, null)];
+  });
+  let bloques = doms.map(d => ({ titulo: `Domain No. ${d.numero}: ${d.nombre}`, filas: filasDe(comps.filter(c => c.dominioId === d.id)) }))
+    .filter(b => b.filas.length);
+  const sinDom = comps.filter(c => !c.dominioId || !doms.some(d => d.id === c.dominioId));
+  if (sinDom.length) bloques.push({ titulo: doms.length ? 'Sin dominio asignado' : null, filas: filasDe(sinDom) });
+  bloques.forEach(b => b.filas.forEach((f, i) => {
+    const prev = b.filas[i - 1];
+    f.continua = !!prev && prev.compKey === f.compKey;
+    let span = 1;
+    if (!f.continua) { while (b.filas[i + span] && b.filas[i + span].compKey === f.compKey) span++; }
+    f.rowspan = f.continua ? 0 : span;
+  }));
+  const nCrit = comps.reduce((n, c) => n + criteriosDeCompetencia(c).length, 0);
+  const sinCrit = comps.filter(c => !criteriosDeCompetencia(c).length).length;
+  return {
+    programa,
+    titulo: 'Rúbrica integrada de evaluación de competencias del programa',
+    curso: `${comps.length} competencias · ${nCrit} criterios${doms.length ? ` · ${doms.length} dominios` : ''}`,
+    nota: [escala?.nombre ? `Escala: ${escala.nombre}` : null,
+           sinCrit ? `${sinCrit} competencia(s) todavía sin criterios` : null,
+           `Generada: ${new Date().toLocaleDateString('es-PR')}`].filter(Boolean).join(' · '),
+    niveles: nivelesR.map(n => ({ id: n.id, titulo: `${n.label} (${n.puntos})`, meta: n.id === metaId })),
+    bloques,
+    nombreArchivo: `Rubrica_Programa_${_nombreArchivoSeguro(programa, 60)}`,
+    vacia: !comps.length,
+  };
+}
+function accionRubricaPrograma(programaId, accion) {
+  const prog = (db.programas || []).find(p => p.id === programaId);
+  if (!prog) return;
+  const m = _modeloRubricaPrograma(prog.nombre);
+  if (m.vacia) { notify('Este programa no tiene competencias en el banco', '⚠️'); return; }
+  if (accion === 'ver') verModeloRubrica(m, '');
+  else if (accion === 'docx') descargarRubricaDocx(m);
+  else descargarRubricaPdf(m);
 }
 
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
@@ -7042,6 +7115,17 @@ function selectPrograma(programaId) {
     <div style="max-height:320px;overflow-y:auto">${cursosHtml}</div>
     <div class="prog-section-title">🎯 Competencias (${comps.length})</div>
     ${compsHtml}
+    ${comps.length ? (() => {
+      const nCrit = comps.reduce((n, c) => n + criteriosDeCompetencia(c).length, 0);
+      const nDom = dominiosDePrograma(prog.nombre).length;
+      return `<div class="prog-section-title">📐 Rúbrica del programa</div>
+      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px">Alineamiento completo: ${comps.length} competencias, ${nCrit} criterios${nDom ? `, ${nDom} dominios` : ''}. ${nCrit ? '' : 'Los criterios se agregan en Alineación Curricular → 📐 Criterios.'}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','ver')">👁 Ver</button>
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','docx')">⬇ Word</button>
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','pdf')">⬇ PDF</button>
+      </div>`;
+    })() : ''}
   `;
 }
 
