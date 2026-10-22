@@ -855,6 +855,17 @@
   .rdp-dominio { font-family: 'Montserrat', sans-serif; font-weight: 700; color: #2E74B5; font-size: 0.95rem; margin: 14px 0 6px; }
   .rdp-table td.rdp-meta { background: #e8eef5; }
   .rdp-table td { font-size: 0.76rem; }
+  .lao-plantilla-box { margin-top: 12px; padding: 10px 12px; border: 1.5px dashed #1B365D; border-radius: 8px; background: #f4f7fb; }
+  .rbimp-dropzone { border: 2px dashed var(--border); border-radius: 8px; padding: 12px; text-align: center; font-size: 0.8rem; color: var(--muted); cursor: pointer; background: #fff; }
+  .rbimp-dropzone.dz-over { border-color: #1B365D; background: #e8eef5; }
+  .rbimp-seccion { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.84rem; }
+  .rbimp-avisos { font-size: 0.78rem; background: #fff8e6; border: 1px solid #f2d48a; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px; }
+  .rbimp-table { border-collapse: collapse; font-size: 0.76rem; }
+  .rbimp-table th { padding: 5px 6px; font-size: 0.7rem; vertical-align: bottom; }
+  .rbimp-table td { border: 1px solid var(--border); padding: 3px; vertical-align: top; }
+  .rbimp-table textarea { width: 100%; min-width: 160px; min-height: 52px; font-size: 0.74rem; border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-family: inherit; }
+  .rbimp-table input { font-size: 0.76rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; }
+  .rbimp-total td { background: #f7f7f7; font-size: 0.78rem; }
   /* ── WIZARD ─────────────────────────────────────────────── */
   .wiz-step {
     flex: 1; text-align: center; padding: 10px 6px; font-size: 0.72rem;
@@ -1780,6 +1791,18 @@
             <button class="btn btn-danger btn-sm" id="lao-rubrica-eliminar-btn" style="display:none" onclick="eliminarRubricaDesdeModal()">🗑 Eliminar Rúbrica</button>
           </div>
           <span style="font-size:0.78rem;color:var(--muted);display:block;margin-top:6px">Opcional (salvo que el modo sea "Requiere Rúbrica") — sin rúbrica, este LAO se evalúa directamente por competencia.</span>
+          <div id="lao-plantilla-row" class="lao-plantilla-box" style="display:none">
+            <div style="font-weight:600;font-size:0.84rem;margin-bottom:4px">📄 Crear o actualizar la rúbrica con una plantilla</div>
+            <div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">Descarga la plantilla (ya trae las competencias del LAO, los niveles del programa y la rúbrica actual si la hay), llénala y súbela aquí. El sistema la mostrará para revisarla antes de incorporarla.</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+              <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaRubricaLao('xlsx')">📥 Plantilla Excel</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaRubricaLao('docx')">📥 Plantilla Word</button>
+            </div>
+            <div class="rbimp-dropzone" ondragover="event.preventDefault();this.classList.add('dz-over')" ondragleave="this.classList.remove('dz-over')" ondrop="handleRubricaLaoDrop(event)" onclick="document.getElementById('lao-rubrica-file').click()">
+              📤 Arrastra aquí la plantilla llena (Excel o Word), o haz clic para seleccionarla
+            </div>
+            <input type="file" id="lao-rubrica-file" accept=".xlsx,.docx" style="display:none" onchange="handleRubricaLaoFileInput(this)">
+          </div>
         </div>
       </div>
     </div>
@@ -6112,6 +6135,8 @@ function abrirEditarLao(id) {
   const rubrica = db.rubricas.find(r => r.laoId === id);
   document.getElementById('lao-rubrica-btn-label').textContent = rubrica ? 'Editar Rúbrica' : 'Configurar Rúbrica';
   document.getElementById('lao-rubrica-eliminar-btn').style.display = rubrica ? '' : 'none';
+  const plRow = document.getElementById('lao-plantilla-row');
+  if (plRow) plRow.style.display = currentUser?.rol === 'admin' ? '' : 'none';
   openModal('modal-lao');
 }
 
@@ -6541,6 +6566,606 @@ function accionRubricaPrograma(programaId, accion) {
   if (accion === 'ver') verModeloRubrica(m, '');
   else if (accion === 'docx') descargarRubricaDocx(m);
   else descargarRubricaPdf(m);
+}
+
+
+// ======================== PLANTILLAS DE RÚBRICA (P1: rúbrica de LAO) ========================
+// Flujo: descargar plantilla (Excel o Word) prellenada → llenarla fuera del
+// sistema → subirla (arrastrar o seleccionar) → pantalla de REVISIÓN editable
+// → incorporar a db.rubricas. Solo el administrador incorpora (decisión de
+// Edgardo, 2026-10-22); la solicitud del profesor es la fase P4.
+//
+// Ambas plantillas tienen la MISMA tabla: Criterio | Peso en la nota (%) |
+// "Aporta a <competencia> (%)" por cada competencia del LAO | un descriptor
+// por nivel de la escala del programa. En "Aporta a": vacío = no mide esa
+// competencia; un número = % de aporte; "X" = aporte en partes iguales entre
+// los criterios marcados. La lectura identifica las columnas por su
+// ENCABEZADO (no por posición), así que tolera columnas movidas. Cada
+// plantilla lleva una receta oculta (LAO, niveles, competencias); si se
+// pierde, se usan los encabezados.
+
+function _ctxPlantillaRubricaLao(laoId) {
+  const lao = (db.laos || []).find(l => l.id === laoId);
+  if (!lao) return null;
+  const curso = (db.cursos || []).find(c => c.id === lao.cursoId) || {};
+  const escala = resolverEscalaParaCurso(lao.cursoId);
+  const niveles = _nivelesRubricaDesdeEscala(escala);
+  const comps = (lao.competencias || []).map(cc => db.competencias.find(c => c.id === cc.competenciaId)).filter(Boolean);
+  const rub = (db.rubricas || []).find(r => r.laoId === laoId) || null;
+  // Criterios existentes, expresados en la escala vigente (celda por puntos)
+  const criterios = (rub?.criterios || []).map(cr => ({
+    id: cr.id, nombre: cr.nombre || '', peso: cr.peso ?? '',
+    aportes: Object.fromEntries(comps.map(c => {
+      const cc = (cr.competencias || []).find(x => x.competenciaId === c.id);
+      return [c.id, cc ? cc.peso : ''];
+    })),
+    desc: niveles.map(n => {
+      const nv = (rub.niveles || []).find(x => Number(x.puntos) === Number(n.puntos));
+      return nv ? String((cr.celdas || {})[nv.id] || '') : '';
+    }),
+  }));
+  return { lao, curso, escala, niveles, comps, rub, criterios,
+    receta: { tipo: 'plantilla_rubrica_lao', version: 1, laoId, cursoId: lao.cursoId, laoNombre: lao.nombre,
+      niveles: niveles.map(n => ({ label: n.label, puntos: n.puntos })), competencias: comps.map(c => ({ id: c.id, codigo: c.codigo })) } };
+}
+
+function _encabezadosPlantillaRubrica(ctx) {
+  return ['Criterio', 'Peso en la nota (%)', ...ctx.comps.map(c => `Aporta a ${c.codigo} (%)`),
+    ...ctx.niveles.map(n => `Descriptor — ${n.label} (${n.puntos})`)];
+}
+function _filasPlantillaRubrica(ctx) {
+  const filas = ctx.criterios.map(cr => [cr.nombre, cr.peso, ...ctx.comps.map(c => cr.aportes[c.id]), ...cr.desc]);
+  const vacias = Math.max(ctx.criterios.length ? 3 : 8, 10 - filas.length);
+  for (let i = 0; i < vacias; i++) filas.push([]);
+  return { filas, ids: ctx.criterios.map(cr => cr.id) };
+}
+const _INSTRUCCIONES_PLANTILLA_RUBRICA = [
+  'Cómo llenar esta plantilla:',
+  '1. Una fila por criterio. Escribe el nombre del criterio y su peso en la nota del LAO (los pesos deben sumar 100%).',
+  '2. Columnas "Aporta a …": indica qué competencia(s) mide cada criterio. Vacío = no la mide (solo cuenta para la nota). Un número = % de aporte a esa competencia (los aportes de una competencia deben sumar 100%). "X" = se reparte en partes iguales entre los criterios marcados.',
+  '3. Columnas "Descriptor": describe la ejecución esperada en cada nivel de la escala del programa.',
+  '4. No cambies los encabezados. Puedes agregar filas. Al terminar, sube el archivo en el LAO: el sistema lo mostrará para revisarlo antes de incorporarlo.',
+];
+
+function _construirXlsxPlantillaRubrica(ctx) {
+  const headers = ['ID (no borrar)', ..._encabezadosPlantillaRubrica(ctx)];
+  const { filas, ids } = _filasPlantillaRubrica(ctx);
+  const nComp = ctx.comps.length, nNiv = ctx.niveles.length;
+  const filasXml = filas.map((f, i) => [ids[i] || '', ...f.map((v, j) => {
+    const esDesc = j >= 2 + nComp;
+    return (v === '' || v === undefined || v === null) ? (esDesc ? { v: '', s: 2 } : '') : { v, s: esDesc ? 2 : 0 };
+  })]);
+  const ultimaFila = filas.length + 1;
+  const dv = [_xlsxDataValidationDecimal(`C2:C${ultimaFila}`, 0, 100)];
+  const hoja = _construirHojaXmlGenerica({
+    headers, filas: filasXml, dataValidations: dv, tabSelected: true,
+    colsHidden: [{ min: 1, max: 1, width: 12, hidden: true }, { min: 2, max: 2, width: 34 }, { min: 3, max: 3 + nComp, width: 14 },
+      { min: 4 + nComp, max: 3 + nComp + nNiv, width: 42 }],
+  });
+  const info = [
+    [{ v: `Plantilla de rúbrica — ${ctx.lao.nombre}`, s: 3 }],
+    [`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${ctx.curso.programa || ''}`],
+    [`Escala de niveles: ${ctx.escala?.nombre || ''} · Competencias que mide este LAO: ${ctx.comps.map(c => c.codigo).join(', ') || '(ninguna)'}`],
+    [],
+    ..._INSTRUCCIONES_PLANTILLA_RUBRICA.map(t => [{ v: t, s: 2 }]),
+    [],
+    ...ctx.comps.map(c => [{ v: `${c.codigo}: ${c.descripcion || ''}`, s: 2 }]),
+  ];
+  const hojaInfo = _construirHojaXmlGenerica({ headers: ['Instrucciones'], filas: info, colsHidden: [{ min: 1, max: 1, width: 120 }] });
+  const recetaJson = JSON.stringify(ctx.receta);
+  const hojaReceta = _construirHojaXmlGenerica({ headers: ['json'], filas: [[recetaJson]] });
+  return _construirXlsxMultihoja([
+    { nombre: 'Rúbrica', oculta: false, xml: hoja },
+    { nombre: 'Instrucciones', oculta: false, xml: hojaInfo },
+    { nombre: '_receta', oculta: true, xml: hojaReceta },
+  ]);
+}
+
+function _construirDocxPlantillaRubrica(ctx) {
+  const heads = _encabezadosPlantillaRubrica(ctx);
+  const { filas } = _filasPlantillaRubrica(ctx);
+  const ANCHO = 14400, nComp = ctx.comps.length, nNiv = ctx.niveles.length;
+  const wCrit = 2000, wPeso = 900, wAp = 800;
+  const wDesc = Math.max(1200, Math.floor((ANCHO - wCrit - wPeso - wAp * nComp) / Math.max(nNiv, 1)));
+  const anchos = [wCrit, wPeso, ...ctx.comps.map(() => wAp), ...ctx.niveles.map(() => wDesc)];
+  const grid = `<w:tblGrid>${anchos.map(a => `<w:gridCol w:w="${a}"/>`).join('')}</w:tblGrid>`;
+  const bordes = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(b => `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="999999"/>`).join('');
+  const rHead = '<w:b/><w:color w:val="FFFFFF"/><w:sz w:val="16"/>';
+  const head = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${heads.map((h, i) => _docxCelda(h, anchos[i], { fill: '1B365D', rPr: rHead })).join('')}</w:tr>`;
+  const body = filas.map(f => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${anchos.map((a, i) => {
+    const v = f[i]; return _docxCelda(v === undefined || v === null ? '' : String(v), a, { rPr: i === 0 ? '<w:b/><w:sz w:val="16"/>' : '<w:sz w:val="16"/>' });
+  }).join('')}</w:tr>`).join('');
+  const receta = `<w:p><w:r><w:rPr><w:vanish/><w:sz w:val="2"/></w:rPr><w:t xml:space="preserve">AVALUO-RECETA:${_docxEsc(JSON.stringify(ctx.receta))}</w:t></w:r></w:p>`;
+  const cuerpo =
+    _docxParrafos(`Plantilla de rúbrica — ${ctx.lao.nombre}`, '<w:b/><w:color w:val="1B365D"/><w:sz w:val="28"/>') +
+    _docxParrafos(`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${ctx.curso.programa || ''} · Escala: ${ctx.escala?.nombre || ''}`, '<w:sz w:val="18"/>') +
+    _docxParrafos(_INSTRUCCIONES_PLANTILLA_RUBRICA.join('\n'), '<w:i/><w:color w:val="555555"/><w:sz w:val="16"/>', '<w:spacing w:after="120"/>') +
+    (ctx.comps.length ? _docxParrafos(ctx.comps.map(c => `${c.codigo}: ${c.descripcion || ''}`).join('\n'), '<w:sz w:val="16"/>', '<w:spacing w:after="160"/>') : '') +
+    `<w:tbl><w:tblPr><w:tblW w:w="${ANCHO}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bordes}</w:tblBorders></w:tblPr>${grid}${head}${body}</w:tbl>` +
+    receta;
+  const documento = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>${cuerpo}<w:sectPr><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+  return _empaquetarDocx(documento);
+}
+
+// Empaqueta un document.xml como .docx (mismas piezas que la descarga de R4)
+function _empaquetarDocx(documento) {
+  const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="18"/><w:lang w:val="es-PR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+</w:styles>`;
+  return _construirZipStore([
+    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>` },
+    { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>` },
+    { name: 'word/_rels/document.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name: 'word/document.xml', data: documento },
+    { name: 'word/styles.xml', data: estilos },
+  ]);
+}
+
+function descargarPlantillaRubricaLao(formato) {
+  if (currentUser?.rol !== 'admin') { notify('Solo el administrador puede incorporar rúbricas', '🔒'); return; }
+  const laoId = document.getElementById('lao-edit-id')?.value;
+  if (!laoId) { notify('Guarda el LAO primero', '⚠️'); return; }
+  const ctx = _ctxPlantillaRubricaLao(laoId);
+  if (!ctx) return;
+  const base = `Plantilla_Rubrica_${_nombreArchivoSeguro(ctx.curso.codigo || 'curso', 30)}_${_nombreArchivoSeguro(ctx.lao.nombre.replace(ctx.curso.codigo || '', ''), 40)}`;
+  if (formato === 'docx') {
+    _descargarBytes(_construirDocxPlantillaRubrica(ctx), base + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  } else {
+    _descargarBytes(_construirXlsxPlantillaRubrica(ctx), base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }
+  notify('Plantilla de rúbrica descargada ✓', '📥');
+}
+
+// ── Lectura de archivos subidos ──
+// .docx: es un ZIP (normalmente comprimido con "deflate"); se descomprime con
+// DecompressionStream del propio navegador, sin librerías nuevas.
+async function _leerZip(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('El archivo no es un .docx válido');
+  const n = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const entradas = {};
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const metodo = dv.getUint16(p + 10, true), tam = dv.getUint32(p + 20, true);
+    const ln = dv.getUint16(p + 28, true), le = dv.getUint16(p + 30, true), lc = dv.getUint16(p + 32, true);
+    const off = dv.getUint32(p + 42, true);
+    const nombre = dec.decode(u8.subarray(p + 46, p + 46 + ln));
+    const inicio = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+    entradas[nombre] = { metodo, datos: u8.subarray(inicio, inicio + tam) };
+    p += 46 + ln + le + lc;
+  }
+  return {
+    async texto(nombre) {
+      const e = entradas[nombre];
+      if (!e) return null;
+      if (e.metodo === 0) return dec.decode(e.datos);
+      if (e.metodo === 8) {
+        const ds = new DecompressionStream('deflate-raw');
+        const buf = await new Response(new Blob([e.datos]).stream().pipeThrough(ds)).arrayBuffer();
+        return dec.decode(new Uint8Array(buf));
+      }
+      throw new Error('Compresión no soportada en ' + nombre);
+    },
+  };
+}
+
+// Tablas (texto por celda) y receta de un .docx
+async function _leerTablasDocx(bytes) {
+  const zip = await _leerZip(bytes);
+  const xml = await zip.texto('word/document.xml');
+  if (!xml) throw new Error('El archivo no trae word/document.xml');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const hijos = (el, tag) => [...el.childNodes].filter(x => x.nodeType === 1 && x.namespaceURI === W && x.localName === tag);
+  const textoParrafo = pEl => {
+    let t = '';
+    pEl.getElementsByTagNameNS(W, '*');
+    const recorrer = node => {
+      for (const ch of node.childNodes) {
+        if (ch.nodeType !== 1) continue;
+        if (ch.namespaceURI === W && ch.localName === 't') t += ch.textContent;
+        else if (ch.namespaceURI === W && ch.localName === 'tab') t += '\t';
+        else if (ch.namespaceURI === W && (ch.localName === 'br' || ch.localName === 'cr')) t += '\n';
+        else recorrer(ch);
+      }
+    };
+    recorrer(pEl);
+    return t;
+  };
+  const textoCelda = tc => {
+    const ps = [];
+    const juntar = node => { for (const ch of node.childNodes) { if (ch.nodeType !== 1) continue; if (ch.namespaceURI === W && ch.localName === 'p') ps.push(textoParrafo(ch)); else if (!(ch.namespaceURI === W && ch.localName === 'tbl')) juntar(ch); } };
+    juntar(tc);
+    return ps.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  };
+  const body = doc.getElementsByTagNameNS(W, 'body')[0];
+  const tablas = [];
+  let receta = null;
+  const visitar = node => {
+    for (const ch of node.childNodes) {
+      if (ch.nodeType !== 1 || ch.namespaceURI !== W) continue;
+      if (ch.localName === 'tbl') {
+        const filas = hijos(ch, 'tr').map(tr => {
+          const celdas = [];
+          hijos(tr, 'tc').forEach(tc => {
+            const tcPr = hijos(tc, 'tcPr')[0];
+            const span = parseInt(tcPr ? (hijos(tcPr, 'gridSpan')[0]?.getAttributeNS(W, 'val') || '1') : '1', 10) || 1;
+            const vm = tcPr ? hijos(tcPr, 'vMerge')[0] : null;
+            const continua = vm && (vm.getAttributeNS(W, 'val') || 'continue') === 'continue';
+            celdas.push(continua ? { texto: '', vmerge: true } : { texto: textoCelda(tc) });
+            for (let s = 1; s < span; s++) celdas.push({ texto: '', span: true });
+          });
+          return celdas;
+        });
+        tablas.push(filas);
+      } else if (ch.localName === 'p') {
+        const t = textoParrafo(ch);
+        if (t.startsWith('AVALUO-RECETA:')) { try { receta = JSON.parse(t.slice('AVALUO-RECETA:'.length)); } catch (e) {} }
+      } else if (ch.localName === 'sdt' || ch.localName === 'sdtContent') visitar(ch);
+    }
+  };
+  visitar(body);
+  return { tablas, receta };
+}
+
+// Encabezados → mapa de columnas (por texto, no por posición)
+function _mapearColumnasPlantilla(headers, comps) {
+  const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const mapa = { id: -1, criterio: -1, peso: -1, aportes: [], niveles: [], desconocidas: [] };
+  headers.forEach((h, i) => {
+    const t = norm(h);
+    if (!t) return;
+    if (/^id\b/.test(t)) mapa.id = i;
+    else if (/^criterio/.test(t) || t === 'criteria' || t === 'criterion') mapa.criterio = i;
+    else if (/^peso/.test(t)) mapa.peso = i;
+    else if (/^aporta a/.test(t)) {
+      const codigo = String(h).replace(/^\s*aporta a\s*/i, '').replace(/\(%\)|\(\s*%\s*\)/g, '').trim();
+      const comp = comps.find(c => norm(c.codigo) === norm(codigo));
+      mapa.aportes.push({ col: i, codigo, compId: comp?.id || null });
+    } else {
+      // Descriptor de nivel: "Descriptor — Competent (3)" o "Excellent (100%)"
+      const limpio = String(h).replace(/^\s*descriptor\s*[—–-]?\s*/i, '').trim();
+      const m = limpio.match(/^(.*?)\s*\(\s*([\d.,]+)\s*(%?)\s*\)\s*(\*?\s*target\s*\*?)?\s*$/i);
+      if (m) mapa.niveles.push({ col: i, label: m[1].trim(), puntos: parseFloat(m[2].replace(',', '.')), pct: !!m[3] });
+      else if (/^descriptor/.test(t)) mapa.niveles.push({ col: i, label: limpio, puntos: null, pct: false });
+      else mapa.desconocidas.push(String(h));
+    }
+  });
+  return mapa;
+}
+
+// Valor de una celda "Aporta a": número, 'X' o ''
+function _valorAporte(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (/^(x|✓|✔|si|sí|yes)$/i.test(s)) return 'X';
+  const n = parseFloat(s.replace('%', '').replace(',', '.'));
+  return isFinite(n) ? n : { invalido: s };
+}
+
+// Tabla (encabezados + filas de texto) → borrador de rúbrica para revisar
+function _borradorDesdeTabla(headers, filas, laoCtx, origen) {
+  const mapa = _mapearColumnasPlantilla(headers, laoCtx.comps);
+  const avisos = [];
+  if (mapa.criterio < 0) return { error: 'No se encontró la columna "Criterio" en la tabla.' };
+  if (!mapa.niveles.length) return { error: 'No se encontraron columnas de descriptores por nivel.' };
+  mapa.aportes.filter(a => !a.compId).forEach(a => avisos.push(`La columna "Aporta a ${a.codigo}" no corresponde a ninguna competencia de este LAO — se ignoró.`));
+  if (mapa.desconocidas.length) avisos.push(`Columnas no reconocidas (se ignoraron): ${mapa.desconocidas.join(', ')}.`);
+  const criterios = [];
+  filas.forEach(f => {
+    const nombre = String(f[mapa.criterio] ?? '').trim();
+    const desc = mapa.niveles.map(nv => String(f[nv.col] ?? '').trim());
+    if (!nombre && !desc.some(Boolean)) return;
+    const pesoTxt = mapa.peso >= 0 ? String(f[mapa.peso] ?? '').replace('%', '').replace(',', '.').trim() : '';
+    const aportes = {};
+    mapa.aportes.forEach(a => { if (a.compId) aportes[a.compId] = _valorAporte(f[a.col]); });
+    criterios.push({ id: mapa.id >= 0 ? String(f[mapa.id] ?? '').trim() : '', nombre, peso: pesoTxt === '' ? '' : parseFloat(pesoTxt), aportes, desc });
+  });
+  return {
+    origen, avisos,
+    nivelesDoc: mapa.niveles.map(n => ({ label: n.label, puntos: n.puntos, pct: n.pct })),
+    criterios,
+  };
+}
+
+// ── Subida: archivo → borrador → pantalla de revisión ──
+async function procesarArchivoRubricaLao(file) {
+  if (currentUser?.rol !== 'admin') { notify('Solo el administrador puede incorporar rúbricas', '🔒'); return; }
+  const laoId = document.getElementById('lao-edit-id')?.value;
+  if (!laoId) { notify('Guarda el LAO primero', '⚠️'); return; }
+  const ctx = _ctxPlantillaRubricaLao(laoId);
+  if (!ctx || !file) return;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const borrador = await _borradorDesdeArchivoRubrica(bytes, file.name, ctx);
+    if (borrador.error) { notify(borrador.error, '⚠️'); return; }
+    abrirRevisionRubrica(laoId, borrador, file.name);
+  } catch (e) {
+    console.error(e);
+    notify('No se pudo leer el archivo: ' + (e.message || e), '⚠️');
+  }
+}
+async function _borradorDesdeArchivoRubrica(bytes, nombreArchivo, ctx) {
+  const ext = String(nombreArchivo).toLowerCase().split('.').pop();
+  if (ext === 'xlsx' || ext === 'xls') {
+    if (typeof XLSX === 'undefined') return { error: 'No se pudo cargar el lector de Excel (¿sin conexión?).' };
+    const wb = XLSX.read(bytes, { type: 'array' });
+    let receta = null;
+    if (wb.Sheets['_receta']) {
+      const fr = XLSX.utils.sheet_to_json(wb.Sheets['_receta'], { header: 1, defval: '' });
+      try { receta = JSON.parse(fr.slice(1).map(f => f[0] || '').join('')); } catch (e) {}
+    }
+    const hoja = wb.Sheets['Rúbrica'] || wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '' });
+    // La fila de encabezados es la primera que tenga "Criterio"
+    const hi = filas.findIndex(f => f.some(v => /^\s*criteri/i.test(String(v))));
+    if (hi < 0) return { error: 'No se encontró la fila de encabezados (con "Criterio") en el Excel.' };
+    const b = _borradorDesdeTabla(filas[hi], filas.slice(hi + 1), ctx, 'excel');
+    return _validarRecetaBorrador(b, receta, ctx);
+  }
+  if (ext === 'docx') {
+    const { tablas, receta } = await _leerTablasDocx(bytes);
+    const t = tablas.find(tb => tb[0]?.some(c => /^\s*criteri/i.test(c.texto)));
+    if (!t) return { error: 'No se encontró en el Word una tabla con la columna "Criterio".' };
+    const headers = t[0].map(c => c.texto);
+    const b = _borradorDesdeTabla(headers, t.slice(1).map(r => r.map(c => c.texto)), ctx, 'word');
+    return _validarRecetaBorrador(b, receta, ctx);
+  }
+  return { error: 'Formato no reconocido: sube la plantilla en Excel (.xlsx) o Word (.docx).' };
+}
+function _validarRecetaBorrador(b, receta, ctx) {
+  if (b.error) return b;
+  if (receta && receta.tipo === 'plantilla_rubrica_lao' && receta.laoId && receta.laoId !== ctx.lao.id) {
+    b.avisos.unshift(`Esta plantilla se descargó para otro LAO ("${receta.laoNombre || receta.laoId}"). Revísala con cuidado antes de incorporarla aquí.`);
+  }
+  if (!receta) b.avisos.unshift('El archivo no trae la receta oculta de la plantilla: se leyó por los encabezados de la tabla.');
+  return b;
+}
+
+// ── Pantalla de revisión ──
+let _rbImp = null; // { laoId, ctx, archivo, nivelesDoc, mapeo:[valor|''], criterios:[...], avisos }
+
+// Propuesta de conversión de niveles del documento → escala del programa
+function _proponerMapeoNiveles(nivelesDoc, nivelesEscala) {
+  const norm = s => String(s ?? '').toLowerCase().trim();
+  const maxEsc = Math.max(...nivelesEscala.map(n => n.puntos), 1);
+  const maxDoc = Math.max(...nivelesDoc.map(n => n.puntos ?? 0), 0);
+  return nivelesDoc.map((nd, i) => {
+    const igual = nivelesEscala.find(n => norm(n.label) === norm(nd.label) && (nd.puntos === null || Number(n.puntos) === Number(nd.puntos)));
+    if (igual) return igual.puntos;
+    if (nd.puntos !== null && maxDoc > 0) {
+      if (!nd.pct && maxDoc <= maxEsc && nivelesEscala.some(n => n.puntos === nd.puntos)) return nd.puntos;
+      const v = Math.round(nd.puntos / maxDoc * maxEsc);
+      return nivelesEscala.some(n => n.puntos === v) ? v : '';
+    }
+    // Sin puntos: por posición (el primero = el más alto)
+    return nivelesEscala[i]?.puntos ?? '';
+  });
+}
+
+function abrirRevisionRubrica(laoId, borrador, archivo) {
+  const ctx = _ctxPlantillaRubricaLao(laoId);
+  _rbImp = {
+    laoId, ctx, archivo,
+    nivelesDoc: borrador.nivelesDoc,
+    mapeo: _proponerMapeoNiveles(borrador.nivelesDoc, ctx.niveles),
+    criterios: borrador.criterios.map(c => ({ ...c, aportes: { ...c.aportes }, desc: [...c.desc] })),
+    avisos: borrador.avisos || [],
+  };
+  document.getElementById('rbimp-title').textContent = `📤 Revisar rúbrica — ${ctx.lao.nombre}`;
+  _renderRevisionRubrica();
+  closeModal('modal-lao');
+  openModal('modal-rubrica-import');
+}
+
+// Aportes resueltos por competencia: números tal cual; "X" reparte lo que falte para 100 en partes iguales
+function _resolverAportesImp(criterios, comps) {
+  const res = criterios.map(() => ({}));
+  comps.forEach(c => {
+    let suma = 0; const xs = [];
+    criterios.forEach((cr, i) => {
+      const v = cr.aportes[c.id];
+      if (v === 'X') xs.push(i);
+      else if (typeof v === 'number') { res[i][c.id] = v; suma += v; }
+    });
+    if (xs.length) {
+      const parte = Math.round(Math.max(0, 100 - suma) / xs.length * 100) / 100;
+      xs.forEach(i => { res[i][c.id] = parte; });
+    }
+  });
+  return res;
+}
+
+function _validarRevisionRubrica() {
+  const { criterios, ctx, mapeo, nivelesDoc } = _rbImp;
+  const bloqueos = [], avisos = [];
+  if (!criterios.length) bloqueos.push('La rúbrica no tiene criterios.');
+  criterios.forEach((c, i) => {
+    if (!String(c.nombre || '').trim()) bloqueos.push(`La fila ${i + 1} no tiene nombre de criterio.`);
+    Object.entries(c.aportes).forEach(([cid, v]) => {
+      if (v && typeof v === 'object' && v.invalido !== undefined) bloqueos.push(`"${c.nombre || 'Fila ' + (i + 1)}": el aporte "${v.invalido}" no es un número ni una X.`);
+    });
+    if (c.peso !== '' && !(parseFloat(c.peso) >= 0)) bloqueos.push(`"${c.nombre || 'Fila ' + (i + 1)}": el peso no es válido.`);
+  });
+  const usados = mapeo.filter(v => v !== '');
+  if (new Set(usados).size !== usados.length) bloqueos.push('Dos niveles del documento quedaron convertidos al mismo nivel de la escala.');
+  nivelesDoc.forEach((n, i) => { if (mapeo[i] === '') avisos.push(`El nivel "${n.label}" no se convierte a ningún nivel de la escala: sus descriptores no se incorporarán.`); });
+  const pesoTotal = criterios.reduce((s, c) => s + (parseFloat(c.peso) || 0), 0);
+  if (Math.abs(pesoTotal - 100) > 0.5) avisos.push(`Los pesos en la nota suman ${Math.round(pesoTotal * 100) / 100}% (no 100%).`);
+  const res = _resolverAportesImp(criterios, ctx.comps);
+  ctx.comps.forEach(c => {
+    const vals = res.map(r => r[c.id]).filter(v => v !== undefined);
+    if (!vals.length) avisos.push(`Ningún criterio aporta a ${c.codigo}: esa competencia no se podrá evaluar con esta rúbrica.`);
+    else { const s = vals.reduce((a, b) => a + b, 0); if (Math.abs(s - 100) > 0.5) avisos.push(`Los aportes a ${c.codigo} suman ${Math.round(s * 100) / 100}% (no 100%).`); }
+  });
+  return { bloqueos, avisos, pesoTotal, res };
+}
+
+function _diffRevisionRubrica() {
+  const rub = _rbImp.ctx.rub;
+  if (!rub) return { nuevos: _rbImp.criterios.length, cambian: 0, eliminan: 0, existente: false };
+  const viejos = rub.criterios || [];
+  const norm = s => String(s || '').trim().toLowerCase();
+  let nuevos = 0, cambian = 0; const tocados = new Set();
+  _rbImp.criterios.forEach(c => {
+    const v = viejos.find(x => (c.id && x.id === c.id)) || viejos.find(x => norm(x.nombre) === norm(c.nombre) && !tocados.has(x.id));
+    if (!v) { nuevos++; return; }
+    tocados.add(v.id);
+    const ctxV = _rbImp.ctx.criterios.find(x => x.id === v.id);
+    const igual = ctxV && norm(ctxV.nombre) === norm(c.nombre) && String(ctxV.peso) === String(c.peso);
+    if (!igual) cambian++; else {
+      // descriptores (en la escala) y aportes
+      const descNuevo = _rbImp.ctx.niveles.map(n => { const i = _rbImp.mapeo.indexOf(n.puntos); return i >= 0 ? (c.desc[i] || '') : ''; });
+      if (descNuevo.join('¦') !== ctxV.desc.join('¦')) cambian++;
+    }
+  });
+  return { nuevos, cambian, eliminan: viejos.filter(x => !tocados.has(x.id)).length, existente: true };
+}
+
+function _renderRevisionRubrica() {
+  const { ctx, nivelesDoc, mapeo, criterios, avisos, archivo } = _rbImp;
+  const v = _validarRevisionRubrica();
+  const d = _diffRevisionRubrica();
+  const optsEscala = sel => `<option value="">— No incorporar —</option>` + ctx.niveles.map(n =>
+    `<option value="${n.puntos}" ${String(sel) === String(n.puntos) ? 'selected' : ''}>${_alEsc(n.label)} (${n.puntos})</option>`).join('');
+  const identico = nivelesDoc.length === ctx.niveles.length && nivelesDoc.every((n, i) => mapeo[i] === ctx.niveles[i].puntos && String(n.label).toLowerCase() === String(ctx.niveles[i].label).toLowerCase());
+  const html = `
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px">Archivo: <strong>${_alEsc(archivo)}</strong> · Curso ${_alEsc(ctx.curso.codigo || '')} · Escala: ${_alEsc(ctx.escala?.nombre || '')}
+      ${d.existente ? ` · Este LAO ya tiene rúbrica: <strong>${d.nuevos}</strong> criterio(s) nuevo(s), <strong>${d.cambian}</strong> con cambios, <strong>${d.eliminan}</strong> se eliminarían.` : ' · Este LAO todavía no tiene rúbrica.'}</div>
+    ${avisos.length ? `<div class="rbimp-avisos">${avisos.map(a => `<div>ℹ️ ${_alEsc(a)}</div>`).join('')}</div>` : ''}
+    <div class="rbimp-seccion"><strong>1. Niveles</strong> ${identico ? '<span style="color:#2e7d32">— coinciden con la escala del programa ✓</span>' : '— el documento trae sus propios niveles; confirma a qué nivel de la escala del programa corresponde cada uno:'}
+      ${identico ? '' : `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">${nivelesDoc.map((n, i) => `
+        <label style="font-size:0.8rem;display:flex;flex-direction:column;gap:2px">${_alEsc(n.label)}${n.puntos !== null ? ` (${n.puntos}${n.pct ? '%' : ''})` : ''} →
+          <select onchange="_rbImpMapeo(${i}, this.value)">${optsEscala(mapeo[i])}</select></label>`).join('')}</div>`}
+    </div>
+    <div class="rbimp-seccion"><strong>2. Criterios</strong> <span style="color:var(--muted);font-size:0.78rem">— todo es editable. "Aporta a": vacío = no la mide, número = %, X = partes iguales.</span>
+      <div style="overflow-x:auto;margin-top:6px"><table class="rbimp-table"><thead><tr>
+        <th style="min-width:180px">Criterio</th><th>Peso nota (%)</th>
+        ${ctx.comps.map(c => `<th title="${_alEsc(c.descripcion || '')}">Aporta a ${_alEsc(c.codigo)}</th>`).join('')}
+        ${nivelesDoc.map((n, i) => `<th style="min-width:200px">${_alEsc(n.label)}${mapeo[i] !== '' ? `<br><span style="font-weight:400">→ escala ${mapeo[i]}</span>` : '<br><span style="font-weight:400">(no se incorpora)</span>'}</th>`).join('')}
+        <th></th></tr></thead><tbody>
+        ${criterios.map((c, i) => `<tr>
+          <td><textarea rows="2" oninput="_rbImpSet(${i},'nombre',this.value)">${_alEsc(c.nombre)}</textarea></td>
+          <td><input type="number" min="0" max="100" step="any" value="${_alEsc(c.peso)}" oninput="_rbImpSet(${i},'peso',this.value)" onchange="_renderRevisionRubrica()" style="width:70px"></td>
+          ${ctx.comps.map(cp => { const a = c.aportes[cp.id]; const txt = a && typeof a === 'object' ? a.invalido : (a ?? '');
+            const res = v.res[i][cp.id];
+            return `<td><input type="text" value="${_alEsc(txt)}" style="width:58px" onchange="_rbImpAporte(${i},'${cp.id}',this.value)">${a === 'X' && res !== undefined ? `<div style="font-size:0.66rem;color:var(--muted)">= ${res}%</div>` : ''}</td>`; }).join('')}
+          ${nivelesDoc.map((n, j) => `<td><textarea rows="3" oninput="_rbImpDesc(${i},${j},this.value)">${_alEsc(c.desc[j] || '')}</textarea></td>`).join('')}
+          <td><button class="btn btn-outline btn-sm" title="Quitar criterio" onclick="_rbImpQuitar(${i})">🗑️</button></td>
+        </tr>`).join('')}
+        <tr class="rbimp-total"><td>Total</td><td><strong style="color:${Math.abs(v.pesoTotal - 100) > 0.5 ? '#dc2626' : '#2e7d32'}">${Math.round(v.pesoTotal * 100) / 100}%</strong></td>
+          ${ctx.comps.map(cp => { const s = v.res.reduce((a, r) => a + (r[cp.id] || 0), 0); const hay = v.res.some(r => r[cp.id] !== undefined);
+            return `<td><strong style="color:${!hay || Math.abs(s - 100) > 0.5 ? '#dc2626' : '#2e7d32'}">${hay ? Math.round(s * 100) / 100 + '%' : '—'}</strong></td>`; }).join('')}
+          <td colspan="${nivelesDoc.length + 1}"></td></tr>
+      </tbody></table></div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="_rbImpAgregar()">＋ Criterio</button>
+        ${ctx.comps.length ? `<button class="btn btn-outline btn-sm" onclick="_rbImpRepartir()" title="Para cada competencia, reparte el 100% en partes iguales entre los criterios que ya aportan a ella">⚖️ Repartir aportes en partes iguales</button>` : ''}
+      </div>
+    </div>
+    <div class="rbimp-seccion"><strong>3. Verificación</strong>
+      ${v.bloqueos.map(b => `<div style="color:#dc2626">⛔ ${_alEsc(b)}</div>`).join('')}
+      ${v.avisos.map(a => `<div style="color:#b45309">⚠️ ${_alEsc(a)}</div>`).join('')}
+      ${!v.bloqueos.length && !v.avisos.length ? '<div style="color:#2e7d32">✓ Todo cuadra.</div>' : ''}
+    </div>`;
+  document.getElementById('rbimp-body').innerHTML = html;
+  const btn = document.getElementById('rbimp-btn-incorporar');
+  if (btn) btn.disabled = v.bloqueos.length > 0;
+}
+function _rbImpSet(i, campo, valor) { const c = _rbImp.criterios[i]; if (c) c[campo] = campo === 'peso' ? (valor === '' ? '' : parseFloat(valor)) : valor; }
+function _rbImpDesc(i, j, valor) { const c = _rbImp.criterios[i]; if (c) c.desc[j] = valor; }
+function _rbImpAporte(i, compId, valor) { const c = _rbImp.criterios[i]; if (!c) return; c.aportes[compId] = _valorAporte(valor); _renderRevisionRubrica(); }
+function _rbImpMapeo(i, valor) { _rbImp.mapeo[i] = valor === '' ? '' : parseFloat(valor); _renderRevisionRubrica(); }
+function _rbImpQuitar(i) { _rbImp.criterios.splice(i, 1); _renderRevisionRubrica(); }
+function _rbImpAgregar() {
+  _rbImp.criterios.push({ id: '', nombre: '', peso: '', aportes: {}, desc: _rbImp.nivelesDoc.map(() => '') });
+  _renderRevisionRubrica();
+}
+function _rbImpRepartir() {
+  _rbImp.ctx.comps.forEach(cp => {
+    const conAporte = _rbImp.criterios.filter(c => c.aportes[cp.id] !== '' && c.aportes[cp.id] !== undefined);
+    conAporte.forEach(c => { c.aportes[cp.id] = 'X'; });
+  });
+  _renderRevisionRubrica();
+}
+function cancelarRevisionRubrica() {
+  closeModal('modal-rubrica-import');
+  _rbImp = null;
+  openModal('modal-lao');
+}
+
+// ── Incorporar ──
+function incorporarRevisionRubrica() {
+  if (!_rbImp || currentUser?.rol !== 'admin') return;
+  const v = _validarRevisionRubrica();
+  if (v.bloqueos.length) { _renderRevisionRubrica(); notify('Corrige lo marcado con ⛔ antes de incorporar', '⚠️'); return; }
+  if (v.avisos.length && !confirm('Atención:\n\n• ' + v.avisos.join('\n• ') + '\n\n¿Incorporar la rúbrica de todas formas?')) return;
+  const { ctx, mapeo, criterios, laoId } = _rbImp;
+  const viejos = ctx.rub?.criterios || [];
+  // Niveles = escala vigente del programa; se conservan los ids de los niveles que ya existían (mismos puntos)
+  const niveles = ctx.niveles.map(n => {
+    const ex = (ctx.rub?.niveles || []).find(x => Number(x.puntos) === Number(n.puntos));
+    return { id: ex ? ex.id : String(n.puntos), label: n.label, puntos: n.puntos };
+  });
+  const norm = s => String(s || '').trim().toLowerCase();
+  const usados = new Set();
+  const nuevos = criterios.map((c, i) => {
+    let ex = (c.id && viejos.find(x => x.id === c.id && !usados.has(x.id))) || viejos.find(x => norm(x.nombre) === norm(c.nombre) && !usados.has(x.id));
+    if (ex) usados.add(ex.id);
+    const celdas = {};
+    niveles.forEach(n => { const j = mapeo.indexOf(n.puntos); const t = j >= 0 ? String(c.desc[j] || '').trim() : ''; if (t) celdas[n.id] = t; });
+    return {
+      id: ex ? ex.id : 'crit_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + i,
+      nombre: String(c.nombre).trim(), peso: parseFloat(c.peso) || 0,
+      competencias: Object.entries(v.res[i]).map(([competenciaId, peso]) => ({ competenciaId, peso })),
+      celdas,
+    };
+  });
+  const existente = db.rubricas.find(r => r.laoId === laoId);
+  const registro = { laoId, niveles, criterios: nuevos, origenImportacion: { archivo: _rbImp.archivo, fecha: new Date().toISOString(), por: currentUser?.username || '' } };
+  if (existente) Object.assign(existente, registro);
+  else db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...registro, escalaId: ctx.escala?.id || null, fechaCreacion: new Date().toISOString() });
+  saveDB();
+  closeModal('modal-rubrica-import');
+  _rbImp = null;
+  openModal('modal-lao');
+  const lbl = document.getElementById('lao-rubrica-btn-label'); if (lbl) lbl.textContent = 'Editar Rúbrica';
+  const del = document.getElementById('lao-rubrica-eliminar-btn'); if (del) del.style.display = '';
+  notify(`Rúbrica incorporada: ${nuevos.length} criterio(s) ✓`, '✅');
+}
+
+function handleRubricaLaoDrop(ev) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('dz-over');
+  const f = ev.dataTransfer?.files?.[0];
+  if (f) procesarArchivoRubricaLao(f);
+}
+function handleRubricaLaoFileInput(input) {
+  const f = input.files?.[0];
+  if (f) procesarArchivoRubricaLao(f);
+  input.value = '';
 }
 
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
@@ -16569,6 +17194,22 @@ function dummyShowStatus(msg, type) {
         <button class="btn btn-outline" onclick="descargarRubricaVista('pdf')">⬇ Descargar PDF</button>
       </span>
       <button class="btn btn-outline" onclick="cerrarRubricaDirectaPreview()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Plantillas de rúbrica (P1): revisión de una rúbrica subida antes de incorporarla -->
+<div id="modal-rubrica-import" class="modal-overlay">
+  <div class="modal" style="max-width:min(1500px,97vw);width:97vw;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="rbimp-title">📤 Revisar rúbrica</div>
+      <button class="modal-close" onclick="cancelarRevisionRubrica()">✕</button>
+    </div>
+    <div id="rbimp-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cancelarRevisionRubrica()">❌ Cancelar</button>
+      <button class="btn btn-primary" id="rbimp-btn-incorporar" onclick="incorporarRevisionRubrica()">✅ Incorporar rúbrica</button>
     </div>
   </div>
 </div>
