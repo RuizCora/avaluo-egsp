@@ -850,6 +850,11 @@
   .crit-desc-table textarea { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 5px 7px; font-size: 0.8rem; font-family: inherit; resize: vertical; }
 
   .av-modalidad-box { padding: 8px 10px; margin-bottom: 8px; border: 1.5px solid var(--gold); border-radius: 8px; background: #fffaf0; }
+  .av-rubricas-box { padding: 8px 10px; margin-bottom: 8px; border: 1.5px solid #1B365D; border-radius: 8px; background: #f4f7fb; }
+  .av-rubrica-fila { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 0; border-top: 1px solid #dde4ee; margin-top: 5px; }
+  .rdp-dominio { font-family: 'Montserrat', sans-serif; font-weight: 700; color: #2E74B5; font-size: 0.95rem; margin: 14px 0 6px; }
+  .rdp-table td.rdp-meta { background: #e8eef5; }
+  .rdp-table td { font-size: 0.76rem; }
   /* ── WIZARD ─────────────────────────────────────────────── */
   .wiz-step {
     flex: 1; text-align: center; padding: 10px 6px; font-size: 0.72rem;
@@ -6210,6 +6215,294 @@ function guardarLao() {
 }
 
 
+
+// ======================== FASE R4: VER Y DESCARGAR RÚBRICAS (Word / PDF) ========================
+// Un solo "modelo" de documento alimenta las tres salidas (vista en pantalla,
+// .docx y .pdf), con el formato del documento MHSA V.5: carta apaisada, un
+// bloque por dominio ("Domain No. N"), columnas Competencia | Componente | un
+// nivel por columna de mayor a menor (según la escala), encabezado azul
+// marino (#1B365D) y el nivel meta resaltado. Solo la rúbrica (sin la página
+// de retroalimentación ni firmas, decisión de Edgardo).
+//
+// El .docx se arma a mano (OOXML) con el mismo empaquetador ZIP de la
+// plantilla Excel. El PDF usa jsPDF + autoTable, que se cargan desde el CDN
+// solo la primera vez que alguien pide un PDF.
+
+// Nivel "meta" de la escala: el que se llame Competent/Competente (la escala
+// estándar y el documento V.5 marcan ese como meta). Si no hay, ninguno.
+function _nivelMetaId(niveles) {
+  return (niveles.find(n => /compet(ent|ente)/i.test(String(n.label || ''))) || {}).id ?? null;
+}
+
+// rubrica: formato db.rubricas. ctx: { cursoId, tipo:'directa'|'lao', laoNombre, fuente }
+function _modeloRubricaDocumento(rubrica, ctx) {
+  const curso = (db.cursos || []).find(c => c.id === ctx.cursoId) || {};
+  const niveles = [...(rubrica.niveles || [])].sort((a, b) => b.puntos - a.puntos);
+  const metaId = _nivelMetaId(niveles);
+  const doms = dominiosDePrograma(curso.programa || '');
+  const filas = (rubrica.criterios || []).map(cr => {
+    const comps = (cr.competencias || []).map(cc => db.competencias.find(c => c.id === cc.competenciaId)).filter(Boolean);
+    let dominio = null;
+    if (comps.length === 1) {
+      const bc = _bancoDeCompetenciaCurso(comps[0], curso);
+      dominio = bc?.dominioId ? doms.find(d => d.id === bc.dominioId) || null : null;
+    }
+    return {
+      compKey: comps.map(c => c.id).join('|') || '__na__',
+      competencia: comps.length ? comps.map(c => `${c.codigo} ${c.descripcion || ''}`.trim()).join('\n') : 'N/A (no mide competencia)',
+      componente: (cr.codigo ? `${cr.codigo}: ` : '') + (cr.nombre || '(sin nombre)'),
+      celdas: niveles.map(n => String((cr.celdas || {})[n.id] || '')),
+      dominio,
+    };
+  });
+  // Bloques por dominio (solo si la rúbrica es directa y hay dominios), en el orden del programa
+  let bloques;
+  if (ctx.tipo === 'directa' && filas.some(f => f.dominio)) {
+    bloques = doms.map(d => ({ titulo: `Domain No. ${d.numero}: ${d.nombre}`, filas: filas.filter(f => f.dominio?.id === d.id) }))
+      .filter(b => b.filas.length);
+    const sinDom = filas.filter(f => !f.dominio);
+    if (sinDom.length) bloques.push({ titulo: 'Sin dominio asignado', filas: sinDom });
+  } else {
+    bloques = [{ titulo: null, filas }];
+  }
+  // Fusión vertical de la celda "Competencia" para filas seguidas de la misma competencia
+  bloques.forEach(b => b.filas.forEach((f, i) => {
+    const prev = b.filas[i - 1];
+    f.continua = !!prev && prev.compKey === f.compKey;
+    let span = 1;
+    if (!f.continua) { while (b.filas[i + span] && b.filas[i + span].compKey === f.compKey) span++; }
+    f.rowspan = f.continua ? 0 : span;
+  }));
+  const escala = resolverEscalaParaCurso(ctx.cursoId);
+  return {
+    programa: curso.programa || '',
+    titulo: ctx.tipo === 'directa' ? 'Rúbrica de evaluación directa del curso' : `Rúbrica del LAO: ${ctx.laoNombre || ''}`,
+    curso: `${curso.codigo || ''} — ${curso.nombre || ''}`,
+    nota: [
+      ctx.tipo === 'directa' ? (ctx.fuente === 'curso' ? 'Fuente: rúbrica propia del curso' : 'Fuente: alineamiento de competencias del programa') : null,
+      escala?.nombre ? `Escala: ${escala.nombre}` : null,
+      `Generada: ${new Date().toLocaleDateString('es-PR')}`,
+    ].filter(Boolean).join(' · '),
+    niveles: niveles.map(n => ({ id: n.id, titulo: `${n.label} (${n.puntos})`, meta: n.id === metaId })),
+    bloques,
+    nombreArchivo: `Rubrica_${ctx.tipo === 'directa' ? 'Directa' : 'LAO'}_${(curso.codigo || 'curso').replace(/[^\w-]+/g, '_')}${ctx.tipo === 'lao' ? '_' + String(ctx.laoNombre || '').replace(/[^\w-]+/g, '_').slice(0, 40) : ''}`,
+  };
+}
+
+// ── Vista en pantalla (reutiliza el modal de vista previa de R3) ──
+function _htmlTablaModeloRubrica(m) {
+  const head = `<tr><th>Competencia</th><th>Componente de evaluación</th>${m.niveles.map(n =>
+    `<th${n.meta ? ' class="rdp-meta"' : ''}>${_alEsc(n.titulo)}${n.meta ? '<br><span style="font-weight:400">★ Meta</span>' : ''}</th>`).join('')}</tr>`;
+  return m.bloques.map(b => `${b.titulo ? `<div class="rdp-dominio">${_alEsc(b.titulo)}</div>` : ''}
+    <div style="overflow-x:auto"><table class="crit-desc-table rdp-table"><thead>${head}</thead><tbody>${b.filas.map(f => `<tr>
+      ${f.continua ? '' : `<td rowspan="${f.rowspan}" style="font-weight:600;white-space:pre-line">${_alEsc(f.competencia)}</td>`}
+      <td><strong>${_alEsc(f.componente)}</strong></td>
+      ${f.celdas.map((t, i) => `<td${m.niveles[i].meta ? ' class="rdp-meta"' : ''}>${_alEsc(t) || '<span style="color:var(--muted)">—</span>'}</td>`).join('')}
+    </tr>`).join('')}</tbody></table></div>`).join('');
+}
+
+let _rdpModeloActual = null;
+function verModeloRubrica(m, volverA) {
+  _rdpModeloActual = m;
+  document.getElementById('rdp-title').textContent = `📐 ${m.titulo} — ${m.curso}`;
+  document.getElementById('rdp-volver').value = volverA || '';
+  document.getElementById('rdp-body').innerHTML =
+    `<div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px">${_alEsc(m.programa)} · ${_alEsc(m.nota)}</div>` + _htmlTablaModeloRubrica(m);
+  const acc = document.getElementById('rdp-descargas');
+  if (acc) acc.style.display = '';
+  if (volverA === 'modal-curso') closeModal('modal-curso');
+  openModal('modal-rubrica-directa-preview');
+}
+function descargarRubricaVista(formato) {
+  if (!_rdpModeloActual) return;
+  if (formato === 'docx') descargarRubricaDocx(_rdpModeloActual); else descargarRubricaPdf(_rdpModeloActual);
+}
+
+// ── Descarga de bytes ──
+function _descargarBytes(bytes, nombre, mime) {
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ── Word (.docx, OOXML a mano) ──
+function _docxEsc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _docxParrafos(texto, rPr, pPr) {
+  const lineas = String(texto ?? '').split('\n');
+  return lineas.map(l => `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/>${pPr || ''}</w:pPr><w:r><w:rPr>${rPr || ''}</w:rPr><w:t xml:space="preserve">${_docxEsc(l)}</w:t></w:r></w:p>`).join('');
+}
+function _docxCelda(texto, ancho, { fill, rPr, vMerge } = {}) {
+  const tcPr = `<w:tcPr><w:tcW w:w="${ancho}" w:type="dxa"/>${vMerge === 'restart' ? '<w:vMerge w:val="restart"/>' : vMerge === 'cont' ? '<w:vMerge/>' : ''}${fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>` : ''}<w:tcMar><w:top w:w="40" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tcMar></w:tcPr>`;
+  return `<w:tc>${tcPr}${vMerge === 'cont' ? '<w:p/>' : _docxParrafos(texto, rPr)}</w:tc>`;
+}
+function _construirDocxRubrica(m) {
+  const ANCHO = 14400; // carta apaisada (15840) – márgenes de 0.5"
+  const wComp = 2300, wCrit = 1900;
+  const wNivel = Math.floor((ANCHO - wComp - wCrit) / Math.max(m.niveles.length, 1));
+  const grid = `<w:tblGrid><w:gridCol w:w="${wComp}"/><w:gridCol w:w="${wCrit}"/>${m.niveles.map(() => `<w:gridCol w:w="${wNivel}"/>`).join('')}</w:tblGrid>`;
+  const bordes = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(b => `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`).join('');
+  const rHead = '<w:b/><w:color w:val="FFFFFF"/><w:sz w:val="16"/>';
+  const rBody = '<w:sz w:val="15"/>';
+  const tablas = m.bloques.map(b => {
+    const head = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${_docxCelda('Competencia', wComp, { fill: '1B365D', rPr: rHead })}${_docxCelda('Componente de evaluación', wCrit, { fill: '1B365D', rPr: rHead })}${m.niveles.map(n => _docxCelda(n.titulo + (n.meta ? '\n★ Meta' : ''), wNivel, { fill: n.meta ? '2E5A8A' : '1B365D', rPr: rHead })).join('')}</w:tr>`;
+    const filas = b.filas.map(f => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${_docxCelda(f.competencia, wComp, { rPr: '<w:b/><w:sz w:val="15"/>', vMerge: f.continua ? 'cont' : (f.rowspan > 1 ? 'restart' : null) })}${_docxCelda(f.componente, wCrit, { rPr: '<w:b/><w:sz w:val="15"/>' })}${f.celdas.map((t, i) => _docxCelda(t, wNivel, { rPr: rBody, fill: m.niveles[i].meta ? 'E8EEF5' : 'F7FAFC' })).join('')}</w:tr>`).join('');
+    const titulo = b.titulo ? _docxParrafos(b.titulo, '<w:b/><w:color w:val="2E74B5"/><w:sz w:val="24"/>', '<w:spacing w:before="200" w:after="80"/><w:keepNext/>') : '';
+    return `${titulo}<w:tbl><w:tblPr><w:tblW w:w="${ANCHO}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bordes}</w:tblBorders></w:tblPr>${grid}${head}${filas}</w:tbl><w:p/>`;
+  }).join('');
+  const encabezado =
+    _docxParrafos(String(m.programa).toUpperCase(), '<w:b/><w:color w:val="1B365D"/><w:sz w:val="30"/>', '<w:jc w:val="center"/>') +
+    _docxParrafos(m.titulo.toUpperCase(), '<w:b/><w:color w:val="1B365D"/><w:sz w:val="24"/>', '<w:jc w:val="center"/>') +
+    _docxParrafos(m.curso, '<w:sz w:val="22"/>', '<w:jc w:val="center"/>') +
+    _docxParrafos(m.nota, '<w:i/><w:color w:val="666666"/><w:sz w:val="16"/>', '<w:jc w:val="center"/><w:spacing w:after="160"/>');
+  const documento = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>${encabezado}${tablas}<w:sectPr><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+  const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="18"/><w:lang w:val="es-PR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+</w:styles>`;
+  const files = [
+    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>` },
+    { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>` },
+    { name: 'word/_rels/document.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name: 'word/document.xml', data: documento },
+    { name: 'word/styles.xml', data: estilos },
+  ];
+  return _construirZipStore(files);
+}
+function descargarRubricaDocx(m) {
+  _descargarBytes(_construirDocxRubrica(m), m.nombreArchivo + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  notify('Rúbrica descargada en Word ✓', '📄');
+}
+
+// ── PDF (jsPDF + autoTable, carga diferida desde el CDN) ──
+const _PDF_LIBS = [
+  'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js',
+];
+let _pdfLibsPromise = null;
+function _cargarLibreriasPdf() {
+  if (window.jspdf?.jsPDF && window.jspdf.jsPDF.API?.autoTable) return Promise.resolve();
+  if (_pdfLibsPromise) return _pdfLibsPromise;
+  const cargar = src => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res;
+    s.onerror = () => rej(new Error('No se pudo cargar ' + src)); document.head.appendChild(s);
+  });
+  _pdfLibsPromise = cargar(_PDF_LIBS[0]).then(() => cargar(_PDF_LIBS[1])).catch(e => { _pdfLibsPromise = null; throw e; });
+  return _pdfLibsPromise;
+}
+// Las fuentes estándar del PDF (Helvetica) solo traen Latin-1: los acentos del
+// español sí, pero comillas tipográficas, rayas o emojis no — se normalizan.
+function _pdfTexto(s) {
+  return String(s ?? '').replace(/[‘’‛]/g, "'").replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-').replace(/…/g, '...').replace(/•/g, '-').replace(/★/g, '*')
+    .replace(/[^\x00-\xFF]/g, '');
+}
+function _construirPdfRubrica(m) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
+  const W = doc.internal.pageSize.getWidth(), M = 36;
+  doc.setFont('helvetica', 'bold'); doc.setTextColor(27, 54, 93);
+  doc.setFontSize(14); doc.text(_pdfTexto(String(m.programa).toUpperCase()), W / 2, 40, { align: 'center' });
+  doc.setFontSize(11); doc.text(_pdfTexto(m.titulo.toUpperCase()), W / 2, 56, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30); doc.setFontSize(10);
+  doc.text(_pdfTexto(m.curso), W / 2, 71, { align: 'center' });
+  doc.setFontSize(7.5); doc.setTextColor(110, 110, 110);
+  doc.text(_pdfTexto(m.nota), W / 2, 83, { align: 'center' });
+  let y = 96;
+  const metaIdx = m.niveles.findIndex(n => n.meta);
+  const columnStyles = { 0: { cellWidth: 110, fontStyle: 'bold' }, 1: { cellWidth: 92, fontStyle: 'bold' } };
+  if (metaIdx >= 0) columnStyles[metaIdx + 2] = { fillColor: [232, 238, 245] };
+  m.bloques.forEach(b => {
+    // Un bloque que no tiene espacio para su título + encabezado + al menos
+    // una fila empieza en página nueva (si no, quedaría el encabezado solo al pie)
+    if (y > doc.internal.pageSize.getHeight() - 170) { doc.addPage(); y = 40; }
+    if (b.titulo) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(46, 116, 181);
+      doc.text(_pdfTexto(b.titulo), M, y + 4); y += 12;
+    }
+    doc.autoTable({
+      startY: y, margin: { left: M, right: M },
+      head: [['Competencia', 'Componente de evaluación', ...m.niveles.map(n => _pdfTexto(n.titulo + (n.meta ? '\n* Meta' : '')))]],
+      body: b.filas.map(f => {
+        const fila = [];
+        if (!f.continua) fila.push({ content: _pdfTexto(f.competencia), rowSpan: f.rowspan });
+        fila.push(_pdfTexto(f.componente), ...f.celdas.map(_pdfTexto));
+        return fila;
+      }),
+      theme: 'grid',
+      styles: { font: 'helvetica', fontSize: 6.8, cellPadding: 3, valign: 'top', lineColor: [191, 191, 191], lineWidth: 0.4, textColor: [25, 25, 25], fillColor: [247, 250, 252] },
+      headStyles: { fillColor: [27, 54, 93], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+      columnStyles,
+      rowPageBreak: 'avoid',
+    });
+    y = doc.lastAutoTable.finalY + 18;
+  });
+  return doc;
+}
+async function descargarRubricaPdf(m) {
+  try {
+    notify('Preparando el PDF…', '⏳');
+    await _cargarLibreriasPdf();
+    const doc = _construirPdfRubrica(m);
+    _descargarBytes(doc.output('arraybuffer'), m.nombreArchivo + '.pdf', 'application/pdf');
+    notify('Rúbrica descargada en PDF ✓', '📄');
+  } catch (e) {
+    console.error(e);
+    notify('No se pudo generar el PDF (¿sin conexión?). Prueba la descarga en Word.', '⚠️');
+  }
+}
+
+// ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
+let _avRubricasDescarga = [];
+function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
+  _avRubricasDescarga = [];
+  const rd = resolverRubricaDirectaCurso(cursoId);
+  if (rd.rubrica) {
+    _avRubricasDescarga.push({ nombre: 'Evaluación Directa del Curso', rubrica: rd.rubrica,
+      ctx: { cursoId, tipo: 'directa', fuente: rd.fuente },
+      nota: modalidad === 'directa_con_rubrica' ? (rd.fuente === 'curso' ? 'rúbrica propia del curso' : 'alineamiento del programa')
+        : `${rd.fuente === 'curso' ? 'rúbrica propia del curso' : 'alineamiento del programa'} — se usa si la modalidad es “directa con rúbrica”` });
+  }
+  (resueltos || []).forEach(r => {
+    if (r.rubrica?.criterios?.length) _avRubricasDescarga.push({ nombre: r.lao.nombre, rubrica: r.rubrica,
+      ctx: { cursoId, tipo: 'lao', laoNombre: r.lao.nombre }, nota: 'rúbrica del LAO' });
+  });
+  if (!_avRubricasDescarga.length) return '';
+  return `<div class="av-rubricas-box"><strong>📐 Rúbricas de este curso</strong>${_avRubricasDescarga.map((x, i) => `
+    <div class="av-rubrica-fila"><span><strong>${_alEsc(x.nombre)}</strong> <span style="color:var(--muted)">— ${_alEsc(x.nota)}</span></span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'ver')">👁 Ver</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'docx')">⬇ Word</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'pdf')">⬇ PDF</button>
+      </span></div>`).join('')}</div>`;
+}
+function accionRubricaAvaluo(i, accion) {
+  const x = _avRubricasDescarga[i];
+  if (!x) return;
+  const m = _modeloRubricaDocumento(x.rubrica, x.ctx);
+  if (accion === 'ver') verModeloRubrica(m, '');
+  else if (accion === 'docx') descargarRubricaDocx(m);
+  else descargarRubricaPdf(m);
+}
+
 // ── Fase R3: fuente y edición de la rúbrica de evaluación directa (modal Curso) ──
 function _renderFuenteRubricaCurso(curso) {
   const fuente = curso?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento';
@@ -6251,23 +6544,19 @@ function abrirRubricaDirectaCurso() {
 function verRubricaDirectaAlineamiento(cursoId, volverA) {
   const curso = db.cursos.find(c => c.id === cursoId);
   const { rubrica, compsSinCriterios } = _rubricaDirectaDesdeAlineamiento(cursoId);
-  document.getElementById('rdp-title').textContent = `📐 Rúbrica de evaluación directa — ${curso?.codigo || ''} (alineamiento del programa)`;
-  document.getElementById('rdp-volver').value = volverA || 'modal-curso';
-  const body = document.getElementById('rdp-body');
-  if (!rubrica) {
-    body.innerHTML = `<div class="empty-state" style="padding:18px"><p>Ninguna competencia vinculada a este curso tiene criterios de evaluación en el alineamiento del programa. Se agregan en Alineación Curricular → 📐 Criterios.</p></div>`;
-  } else {
-    body.innerHTML = `<div style="overflow-x:auto"><table class="crit-desc-table rdp-table"><thead><tr>
-        <th>Competencia</th><th>Componente</th>${rubrica.niveles.map(n => `<th>${_alEsc(n.label)} (${n.puntos})</th>`).join('')}
-      </tr></thead><tbody>${rubrica.criterios.map(cr => {
-        const comp = db.competencias.find(c => c.id === cr.competencias[0]?.competenciaId);
-        return `<tr><td><strong>${_alEsc(comp?.codigo || '')}</strong></td><td><strong>${_alEsc(cr.codigo)}</strong> ${_alEsc(cr.nombre)}</td>
-          ${rubrica.niveles.map(n => `<td>${_alEsc(cr.celdas[n.id] || '') || '<span style="color:var(--muted)">—</span>'}</td>`).join('')}</tr>`;
-      }).join('')}</tbody></table></div>` +
-      (compsSinCriterios.length ? `<div style="font-size:0.78rem;color:var(--rust);margin-top:8px">⚠️ Sin criterios en el alineamiento: ${compsSinCriterios.map(c => c.codigo).join(', ')}.</div>` : '') +
+  if (rubrica) {
+    verModeloRubrica(_modeloRubricaDocumento(rubrica, { cursoId, tipo: 'directa', fuente: 'alineamiento' }), volverA ?? 'modal-curso');
+    const body = document.getElementById('rdp-body');
+    body.innerHTML += (compsSinCriterios.length ? `<div style="font-size:0.78rem;color:var(--rust);margin-top:8px">⚠️ Sin criterios en el alineamiento: ${compsSinCriterios.map(c => c.codigo).join(', ')}.</div>` : '') +
       `<div style="font-size:0.74rem;color:var(--muted);margin-top:8px">Esta rúbrica se arma sola y se actualiza en vivo con el alineamiento del programa. Para cambiar un criterio, edítalo en Alineación Curricular → 📐 Criterios, o usa una rúbrica propia del curso.</div>`;
+    return;
   }
-  if (volverA !== false) closeModal('modal-curso');
+  _rdpModeloActual = null;
+  document.getElementById('rdp-title').textContent = `📐 Rúbrica de evaluación directa — ${curso?.codigo || ''} (alineamiento del programa)`;
+  document.getElementById('rdp-volver').value = volverA ?? 'modal-curso';
+  document.getElementById('rdp-body').innerHTML = `<div class="empty-state" style="padding:18px"><p>Ninguna competencia vinculada a este curso tiene criterios de evaluación en el alineamiento del programa. Se agregan en Alineación Curricular → 📐 Criterios.</p></div>`;
+  const acc = document.getElementById('rdp-descargas'); if (acc) acc.style.display = 'none';
+  if ((volverA ?? 'modal-curso') === 'modal-curso') closeModal('modal-curso');
   openModal('modal-rubrica-directa-preview');
 }
 function cerrarRubricaDirectaPreview() {
@@ -7643,7 +7932,7 @@ function onSeccionChange() {
   } : null;
 
   infoEl.style.display = '';
-  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo, comps: avDirectaCursoEntry.comps } : null]
+  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + _htmlRubricasAvaluo(cursoId, resueltos, modalidad) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo, comps: avDirectaCursoEntry.comps } : null]
     .filter(Boolean).map(r => {
     let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
     if (r.lao.isGenerico) linea += '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.';
@@ -16009,6 +16298,10 @@ function dummyShowStatus(msg, type) {
     <input type="hidden" id="rdp-volver">
     <div id="rdp-body"></div>
     <div class="modal-footer">
+      <span id="rdp-descargas" style="display:flex;gap:8px;margin-right:auto">
+        <button class="btn btn-outline" onclick="descargarRubricaVista('docx')">⬇ Descargar Word</button>
+        <button class="btn btn-outline" onclick="descargarRubricaVista('pdf')">⬇ Descargar PDF</button>
+      </span>
       <button class="btn btn-outline" onclick="cerrarRubricaDirectaPreview()">Cerrar</button>
     </div>
   </div>
