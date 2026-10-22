@@ -8926,12 +8926,19 @@ function _construirHojaXmlGenerica({ headers, filas, colsHidden, dataValidations
   filas.forEach((fila, r) => {
     const rowNum = r + 2;
     let cells = '';
-    fila.forEach((val, i) => {
+    fila.forEach((celda, i) => {
+      // Fase R5: una celda puede ser un valor simple, {v, s} (valor + estilo)
+      // o {f, s} (fórmula, sin valor en caché — el libro recalcula al abrir)
+      const esObj = celda !== null && typeof celda === 'object';
+      const val = esObj ? celda.v : celda;
+      const sAttr = esObj && celda.s ? ` s="${celda.s}"` : '';
+      const r = `${_xlsxColLetter(i + 1)}${rowNum}`;
+      if (esObj && celda.f) { cells += `<c r="${r}"${sAttr}><f>${_xlsxXmlEscape(celda.f)}</f></c>`; return; }
       if (val === undefined || val === null || val === '') return;
       if (typeof val === 'number' && isFinite(val)) {
-        cells += `<c r="${_xlsxColLetter(i + 1)}${rowNum}"><v>${val}</v></c>`;
+        cells += `<c r="${r}"${sAttr}><v>${val}</v></c>`;
       } else {
-        cells += `<c r="${_xlsxColLetter(i + 1)}${rowNum}" t="inlineStr"><is><t>${_xlsxXmlEscape(val)}</t></is></c>`;
+        cells += `<c r="${r}" t="inlineStr"${sAttr}><is><t xml:space="preserve">${_xlsxXmlEscape(val)}</t></is></c>`;
       }
     });
     rowsXml += `<row r="${rowNum}">${cells}</row>`;
@@ -8978,6 +8985,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets>${hojas.map((h, i) => `<sheet name="${_xlsxXmlEscape(h.nombre)}" sheetId="${i + 1}"${h.oculta ? ' state="hidden"' : ''} r:id="rId${i + 1}"/>`).join('')}</sheets>
+<calcPr calcId="191029" fullCalcOnLoad="1"/>
 </workbook>`;
   const stylesRelId = hojas.length + 1;
   const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -8987,11 +8995,11 @@ ${hojas.map((h, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openx
 </Relationships>`;
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
-<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="13"/><color rgb="FF1B365D"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1B365D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF4D6"/><bgColor indexed="64"/></patternFill></fill></fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="3" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="2" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyNumberFormat="1"/></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
@@ -9004,6 +9012,171 @@ ${hojas.map((h, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openx
   ];
   hojas.forEach((h, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: h.xml }));
   return _construirZipStore(files);
+}
+
+
+// ======================== FASE R5: RÚBRICAS Y NIVEL CALCULADO EN LA PLANTILLA EXCEL ========================
+// Dos añadidos a la plantilla de Avalúo (Fase 5a), sin tocar las columnas
+// editables, la receta ni la huella — así plantillas viejas siguen
+// importando y el importador genérico (5b/5c) no cambia:
+//  1) Hoja visible "Rúbricas": cada rúbrica de la plantilla (LAOs con rúbrica
+//     y la rúbrica de evaluación directa) con sus descriptores por nivel,
+//     como referencia mientras se llena.
+//  2) Columnas CALCULADAS al final de la hoja "Avalúo" (después de
+//     Comentario, para no mover las columnas que lee el importador):
+//     - "Cx — Nivel según <LAO> (calculado)" por cada LAO con rúbrica y
+//       competencia que mide (solo cuando el curso no está en evaluación
+//       directa, igual que en la cuadrícula).
+//     - "Cx — Nivel Final (calculado)" por competencia, con la misma regla
+//       que la cuadrícula: combinación ponderada de LAOs en %, o la rúbrica
+//       de evaluación directa. (Con directa SIN rúbrica el nivel final ya es
+//       la columna que se llena, así que no se calcula.)
+//     Las fórmulas leen la etiqueta escogida en cada lista y la convierten a
+//     puntos con la hoja oculta "_puntos". El libro se marca para recalcular
+//     al abrir. Al SUBIR la plantilla el sistema ignora estas columnas y
+//     recalcula con su propia lógica (no confía en lo que calculó Excel).
+
+// Fórmula de Excel: referencia segura a una hoja con nombre que empieza en "_"
+function _xlsxRefHoja(hoja, rango) { return `'${hoja}'!${rango}`; }
+
+function _construirCalculosExportAvaluo(columnas, filaPrimera, filaUltima) {
+  // 1) Tabla etiqueta → puntos por cada columna de lista (hoja _puntos)
+  const puntosCols = [];   // pares de columnas en _puntos
+  const mapaCol = {};      // índice de columna export → { lbl, val } rangos absolutos en _puntos
+  columnas.forEach((col, i) => {
+    if (!col.opciones) return;
+    let pares;
+    if (col.tipo === 'criterio') {
+      const entry = _entradaGridPorLao(col.laoId);
+      const niveles = entry?.rubrica?.niveles || [];
+      pares = col.opciones.map(o => [o.label, Number(niveles.find(n => n.id === o.value)?.puntos ?? NaN)]);
+    } else {
+      pares = col.opciones.map(o => [o.label, Number(o.value)]);
+    }
+    pares = pares.filter(p => isFinite(p[1]));
+    const k = puntosCols.length;
+    const cL = _xlsxColLetter(2 * k + 1), cV = _xlsxColLetter(2 * k + 2);
+    puntosCols.push({ header: col.header, pares });
+    const n = pares.length + 1;
+    mapaCol[i] = { lbl: _xlsxRefHoja('_puntos', `$${cL}$2:$${cL}$${n}`), val: _xlsxRefHoja('_puntos', `$${cV}$2:$${cV}$${n}`) };
+  });
+  const maxFilasPuntos = Math.max(0, ...puntosCols.map(p => p.pares.length));
+  const puntosHeaders = [], puntosFilas = [];
+  puntosCols.forEach(p => { puntosHeaders.push(p.header.slice(0, 200), 'puntos'); });
+  for (let r = 0; r < maxFilasPuntos; r++) {
+    const fila = [];
+    puntosCols.forEach(p => { const par = p.pares[r]; fila.push(par ? par[0] : '', par ? par[1] : ''); });
+    puntosFilas.push(fila);
+  }
+
+  // Términos por celda (fila "{F}" se sustituye por el número de fila)
+  const ref = i => `${_xlsxColLetter(i + 3)}{F}`;
+  const num = i => mapaCol[i] ? `IFERROR(INDEX(${mapaCol[i].val},MATCH(${ref(i)},${mapaCol[i].lbl},0)),0)` : `N(${ref(i)})`;
+  const ok  = i => mapaCol[i] ? `ISNUMBER(MATCH(${ref(i)},${mapaCol[i].lbl},0))` : `ISNUMBER(${ref(i)})`;
+  const idxCol = (pred) => columnas.findIndex(pred);
+
+  // Nivel de una competencia según una rúbrica (LAO real o directa): promedio
+  // ponderado de sus criterios que tengan valor — igual que _calcNivelCompGrid.
+  const formulaNivelRubrica = (laoId, rubrica, compId) => {
+    const terms = [];
+    rubrica.criterios.forEach(cr => {
+      const w = _rbPesoParaCompetencia(cr, compId);
+      if (w === undefined) return;
+      const i = idxCol(c => c.tipo === 'criterio' && c.laoId === laoId && c.criterioId === cr.id);
+      if (i < 0) return;
+      terms.push({ i, w: Number(w) || 0 });
+    });
+    if (!terms.length) return null;
+    const numE = terms.map(t => `${t.w}*${num(t.i)}`).join('+');
+    const denE = terms.map(t => `${t.w}*${ok(t.i)}`).join('+');
+    return `IF((${denE})=0,"",ROUND((${numE})/(${denE}),2))`;
+  };
+
+  const calc = []; // { header, formula (con {F}) , colRef? }
+  const soloScore = !!avDirectaCursoEntry;
+  const maxEscala = Math.max(...(avEscalaActual?.niveles || ESCALA_NIVELES_DEFAULT.niveles).map(n => n.valor), 1);
+  // Columnas de la hoja (1-based): A=ID, B=Estudiante, C..=exportables,
+  // luego Nota Final y Comentario; la 1.ª calculada va justo después.
+  const primeraCalc = columnas.length + 5;
+  const letraCalc = k => _xlsxColLetter(primeraCalc + k);
+
+  if (_directaEsRubrica()) {
+    const { lao, rubrica } = avDirectaCursoEntry;
+    avCompsFinal.forEach(c => {
+      const f = formulaNivelRubrica(lao.id, rubrica, c.id);
+      if (f) calc.push({ header: `${c.codigo} — Nivel Final (calculado, no editar)`, formula: f });
+    });
+  } else if (!soloScore) {
+    // Nivel por LAO con rúbrica
+    const porLaoComp = {}; // `${laoId}::${compId}` → letra de su columna calculada
+    avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
+      if (modo !== 'rubrica') return;
+      comps.forEach(c => {
+        const f = formulaNivelRubrica(lao.id, rubrica, c.id);
+        if (!f) return;
+        porLaoComp[`${lao.id}::${c.id}`] = letraCalc(calc.length);
+        calc.push({ header: `${c.codigo} — Nivel según ${lao.nombre} (calculado, no editar)`, formula: f });
+      });
+    });
+    // Nivel final por competencia: % ponderado de cada LAO → escala del curso
+    avCompsFinal.forEach(c => {
+      const contribs = [];
+      avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
+        if (!comps.some(x => x.id === c.id)) return;
+        const peso = lao.competencias?.find(cc => cc.competenciaId === c.id)?.peso ?? 100;
+        if (modo === 'rubrica') {
+          const letra = porLaoComp[`${lao.id}::${c.id}`];
+          if (!letra) return;
+          const maxLao = Math.max(...rubrica.niveles.map(n => n.puntos), 1);
+          contribs.push({ peso, okE: `ISNUMBER(${letra}{F})`, valE: `N(${letra}{F})/${maxLao}` });
+        } else {
+          const i = idxCol(x => (x.tipo === 'nivel_lista' || x.tipo === 'nivel_manual') && x.laoId === lao.id && x.competenciaId === c.id);
+          if (i < 0) return;
+          contribs.push({ peso, okE: ok(i), valE: `${num(i)}/${maxEscala}` });
+        }
+      });
+      if (!contribs.length) return;
+      const den = contribs.map(t => `${t.peso}*${t.okE}`).join('+');
+      const nu  = contribs.map(t => `${t.peso}*${t.okE}*${t.valE}`).join('+');
+      calc.push({ header: `${c.codigo} — Nivel Final (calculado, no editar)`, formula: `IF((${den})=0,"",ROUND((${nu})/(${den})*${maxEscala},2))` });
+    });
+  }
+  return { calc, puntosHeaders, puntosFilas, hayCalculos: calc.length > 0 };
+}
+
+// Hoja "Rúbricas": cada rúbrica usada en la plantilla con sus descriptores
+function _construirHojaRubricasExport(cursoId) {
+  const rubricas = [];
+  if (_directaEsRubrica()) {
+    rubricas.push({ nombre: 'Evaluación Directa del Curso', rubrica: avDirectaCursoEntry.rubrica,
+      ctx: { cursoId, tipo: 'directa', fuente: db.cursos.find(c => c.id === cursoId)?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento' } });
+  }
+  avLaosGrid.forEach(({ lao, rubrica, modo }) => {
+    if (modo === 'rubrica' && rubrica?.criterios?.length) rubricas.push({ nombre: lao.nombre, rubrica, ctx: { cursoId, tipo: 'lao', laoNombre: lao.nombre } });
+  });
+  if (!rubricas.length) return null;
+  const filas = [];
+  let maxNiveles = 0;
+  rubricas.forEach((x, k) => {
+    const m = _modeloRubricaDocumento(x.rubrica, x.ctx);
+    maxNiveles = Math.max(maxNiveles, m.niveles.length);
+    if (k) filas.push([]);
+    filas.push([{ v: `${m.titulo} — ${m.curso}`, s: 3 }]);
+    filas.push([{ v: m.nota, s: 0 }]);
+    m.bloques.forEach(b => {
+      if (b.titulo) filas.push([{ v: b.titulo, s: 1 }]);
+      filas.push(['Competencia', 'Componente de evaluación', ...m.niveles.map(n => n.titulo + (n.meta ? ' ★ Meta' : ''))].map(v => ({ v, s: 4 })));
+      b.filas.forEach(f => filas.push([
+        { v: f.continua ? '' : f.competencia, s: 2 }, { v: f.componente, s: 2 },
+        ...f.celdas.map(t => ({ v: t, s: 2 })),
+      ]));
+    });
+  });
+  const xml = _construirHojaXmlGenerica({
+    headers: ['Rúbricas usadas en esta plantilla — descriptores por nivel (solo referencia, no se importa)'], filas,
+    colsHidden: [{ min: 1, max: 1, width: 38 }, { min: 2, max: 2, width: 30 }, { min: 3, max: 2 + maxNiveles, width: 42 }],
+  });
+  return xml;
 }
 
 // Arma los bytes del .xlsx de la sección actualmente cargada en el grid de
@@ -9024,8 +9197,11 @@ function _construirBytesPlantillaAvaluo(cursoId) {
 
   const columnas = _construirColumnasExportAvaluo();
   const receta = _construirRecetaExportAvaluo(cursoId, columnas);
+  // Fase R5: columnas calculadas (al final, fuera de la receta/huella)
+  const calculos = _construirCalculosExportAvaluo(columnas);
 
-  const headers = ['ID (no borrar)', 'Estudiante', ...columnas.map(c => c.header), 'Nota Final del Curso (0-100)', 'Comentario'];
+  const headers = ['ID (no borrar)', 'Estudiante', ...columnas.map(c => c.header), 'Nota Final del Curso (0-100)', 'Comentario',
+    ...calculos.calc.map(c => c.header)];
   const filas = avEstudiantesActuales.map(est => {
     const fila = [est.id, est.nombre];
     columnas.forEach(col => {
@@ -9040,6 +9216,8 @@ function _construirBytesPlantillaAvaluo(cursoId) {
     const notaFinal = avClaseData[est.id]?._finalGrade;
     fila.push(notaFinal === undefined || notaFinal === '' ? '' : Number(notaFinal));
     fila.push(avClaseData[est.id]?._comentario || '');
+    const rowNum = avEstudiantesActuales.indexOf(est) + 2;
+    calculos.calc.forEach(c => fila.push({ f: c.formula.split('{F}').join(String(rowNum)), s: 5 }));
     return fila;
   });
 
@@ -9115,10 +9293,14 @@ function _construirBytesPlantillaAvaluo(cursoId) {
   for (let i = 0; i < recetaJson.length; i += CHUNK) recetaFilas.push([recetaJson.slice(i, i + CHUNK)]);
   const hojaRecetaXml = _construirHojaXmlGenerica({ headers: ['json'], filas: recetaFilas });
 
+  const hojaRubricasXml = _construirHojaRubricasExport(cursoId);
+  const hojaPuntosXml = calculos.hayCalculos ? _construirHojaXmlGenerica({ headers: calculos.puntosHeaders, filas: calculos.puntosFilas }) : null;
   const bytes = _construirXlsxMultihoja([
     { nombre: 'Avalúo', oculta: false, xml: hojaAvaluoXml },
+    ...(hojaRubricasXml ? [{ nombre: 'Rúbricas', oculta: false, xml: hojaRubricasXml }] : []),
     { nombre: '_listas', oculta: true, xml: hojaListasXml },
     { nombre: '_receta', oculta: true, xml: hojaRecetaXml },
+    ...(hojaPuntosXml ? [{ nombre: '_puntos', oculta: true, xml: hojaPuntosXml }] : []),
   ]);
 
   const curso = db.cursos.find(c => c.id === cursoId);
