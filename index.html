@@ -851,6 +851,7 @@
 
   .av-modalidad-box { padding: 8px 10px; margin-bottom: 8px; border: 1.5px solid var(--gold); border-radius: 8px; background: #fffaf0; }
   .av-rubricas-box { padding: 8px 10px; margin-bottom: 8px; border: 1.5px solid #1B365D; border-radius: 8px; background: #f4f7fb; }
+  .av-rubrica-programa { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0 2px; border-top: 1px dashed #1B365D; margin-top: 6px; }
   .av-rubrica-fila { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 0; border-top: 1px solid #dde4ee; margin-top: 5px; }
   .rdp-dominio { font-family: 'Montserrat', sans-serif; font-weight: 700; color: #2E74B5; font-size: 0.95rem; margin: 14px 0 6px; }
   .rdp-table td.rdp-meta { background: #e8eef5; }
@@ -1825,7 +1826,10 @@
     <div id="rb-escala-info" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;padding:8px 12px;background:var(--cream);border-radius:6px"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:0.82rem;color:var(--muted)">Filas = criterios de evaluación · Columnas = niveles de la escala · Cada celda describe la ejecución esperada en ese nivel para ese criterio.</div>
-      <button class="btn btn-outline btn-sm" onclick="rbAgregarCriterio()">+ Criterio (fila)</button>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" id="rb-btn-partir-alineamiento" onclick="rbPartirDelAlineamiento()" title="Añade un criterio por cada componente del alineamiento del programa para las competencias que mide este LAO">🔗 Partir del alineamiento</button>
+        <button class="btn btn-outline btn-sm" onclick="rbAgregarCriterio()">+ Criterio (fila)</button>
+      </span>
     </div>
     <div style="overflow-x:auto;max-height:60vh;border:1px solid var(--border);border-radius:8px">
       <table id="rb-grid-table" class="rb-grid-table"></table>
@@ -6055,6 +6059,12 @@ function renderLaos() {
         </div>
       </div>
       <div style="margin-top:8px">${comps || '<span style="font-size:0.78rem;color:var(--muted)">Sin competencias asignadas</span>'}</div>
+      ${rubrica?.criterios?.length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:0.76rem;color:var(--muted)">📐 Rúbrica (${rubrica.criterios.length} criterio${rubrica.criterios.length === 1 ? '' : 's'}):</span>
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaLao('${l.id}','ver')">👁 Ver</button>
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaLao('${l.id}','docx')">⬇ Word</button>
+        <button class="btn btn-outline btn-sm" onclick="accionRubricaLao('${l.id}','pdf')">⬇ PDF</button>
+      </div>` : ''}
       ${isAdmin ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="abrirEditarLao('${l.id}')">✏️ Editar</button>
         ${!l.esOficial && !l.compartido ? `<button class="btn btn-outline btn-sm" onclick="compartirLao('${l.id}')">🔗 Compartir con todos</button>` : ''}
@@ -7350,12 +7360,13 @@ function _nivelDesdeEncabezado(h) {
   return null;
 }
 
-function _ctxPlantillaAlineamiento(programaId) {
+function _ctxPlantillaAlineamiento(programaId, soloCompIds) {
   const prog = (db.programas || []).find(p => p.id === programaId);
   if (!prog) return null;
   const escala = resolverEscalaParaPrograma(prog.nombre);
   const niveles = _nivelesRubricaDesdeEscala(escala);
-  const comps = (db.bancoCompetencias || []).filter(c => c.programa === prog.nombre).sort(_ordenNumComp);
+  // P8: la plantilla del profesor trae solo las competencias que mide su curso
+  const comps = (db.bancoCompetencias || []).filter(c => c.programa === prog.nombre && (!soloCompIds || soloCompIds.has(c.id))).sort(_ordenNumComp);
   const doms = dominiosDePrograma(prog.nombre);
   const filas = [];
   comps.forEach(bc => {
@@ -7437,6 +7448,9 @@ function descargarPlantillaAlineamiento(programaId, formato) {
   const ctx = _ctxPlantillaAlineamiento(programaId);
   if (!ctx) return;
   if (!ctx.comps.length) { notify('Este programa no tiene competencias en el banco', '⚠️'); return; }
+  _descargarPlantillaAlineamientoCtx(ctx, formato);
+}
+function _descargarPlantillaAlineamientoCtx(ctx, formato) {
   const base = `Plantilla_Alineamiento_${_nombreArchivoSeguro(ctx.prog.nombre, 60)}`;
   if (formato === 'docx') _descargarBytes(_construirDocxPlantillaAlineamiento(ctx), base + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   else _descargarBytes(_construirXlsxPlantillaAlineamiento(ctx), base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -7531,11 +7545,13 @@ function handleAlineamientoFileInput(input, programaId) {
 
 // ── Revisión ──
 let _alImp = null; // { programaId, ctx, archivo, nivelesDoc, mapeo, filas, avisos }
-function abrirRevisionAlineamiento(programaId, b, archivo) {
+function abrirRevisionAlineamiento(programaId, b, archivo, opts) {
   const ctx = _ctxPlantillaAlineamiento(programaId);
-  _alImp = { programaId, ctx, archivo, nivelesDoc: b.nivelesDoc, mapeo: _proponerMapeoNiveles(b.nivelesDoc, ctx.niveles),
+  _alImp = { programaId, ctx, archivo, solicitudId: opts?.solicitudId || null, nivelesDoc: b.nivelesDoc, mapeo: _proponerMapeoNiveles(b.nivelesDoc, ctx.niveles),
     filas: b.filas.map(f => ({ ...f, desc: [...f.desc] })), avisos: b.avisos || [] };
-  document.getElementById('alimp-title').textContent = `📤 Revisar alineamiento — ${ctx.prog.nombre}`;
+  document.getElementById('alimp-title').textContent = `${opts?.solicitudId ? '📨 Revisar solicitud de alineamiento' : '📤 Revisar alineamiento'} — ${ctx.prog.nombre}`;
+  const solBox = document.getElementById('alimp-sol-box');
+  if (solBox) { solBox.style.display = opts?.solicitudId ? '' : 'none'; const ta = document.getElementById('alimp-sol-comentario'); if (ta) ta.value = ''; }
   _renderRevisionAlineamiento();
   openModal('modal-alineamiento-import');
 }
@@ -7686,10 +7702,20 @@ function incorporarRevisionAlineamiento() {
     const domRow = rows.find(r => r.domNum !== '');
     if (domRow) { const d = domPorNumero(domRow.domNum); if (d) bc.dominioId = d.id; }
   });
+  // P8: si viene de una solicitud del profesor, queda aprobada
+  const solId = _alImp.solicitudId;
+  if (solId) {
+    const sol = db.solicitudes.find(x => x.id === solId);
+    if (sol) {
+      sol.estado = 'aprobada'; sol.revisadoPor = currentUser.nombre; sol.fechaRevision = new Date().toISOString();
+      sol.comentarioAdmin = document.getElementById('alimp-sol-comentario')?.value.trim() || 'Alineamiento incorporado';
+    }
+  }
   saveDB();
   closeModal('modal-alineamiento-import');
   _alImp = null;
-  if (typeof selectPrograma === 'function' && document.getElementById('prog-detail')) selectPrograma(programaId);
+  if (solId) { if (typeof renderSolicitudes === 'function') renderSolicitudes(); if (typeof applyRoleUI === 'function') applyRoleUI(); }
+  else if (typeof selectPrograma === 'function' && document.getElementById('prog-detail')) selectPrograma(programaId);
   notify(`Alineamiento incorporado: ${porComp.size} competencia(s) ✓`, '✅');
 }
 
@@ -8020,6 +8046,218 @@ function revisarSolicitudRubrica(id) {
   abrirRevisionRubrica(s.registroId, b, s.archivoNombre || 'solicitud', { solicitudId: id });
 }
 
+
+// ======================== P5: descargar la rúbrica de un LAO desde la pestaña LAOs ========================
+function accionRubricaLao(laoId, accion) {
+  const lao = (db.laos || []).find(l => l.id === laoId);
+  const rubrica = (db.rubricas || []).find(r => r.laoId === laoId);
+  if (!lao || !rubrica?.criterios?.length) { notify('Este LAO no tiene rúbrica', '⚠️'); return; }
+  const m = _modeloRubricaDocumento(rubrica, { cursoId: lao.cursoId, tipo: 'lao', laoNombre: lao.nombre });
+  if (accion === 'ver') verModeloRubrica(m, '');
+  else if (accion === 'docx') descargarRubricaDocx(m);
+  else descargarRubricaPdf(m);
+}
+
+// ======================== P6: "Partir del alineamiento" en el constructor de rúbrica de LAO ========================
+// Añade al constructor un criterio por cada componente del alineamiento del
+// programa que corresponde a las competencias que mide el LAO. Cada criterio
+// queda vinculado a su competencia; el aporte a la competencia sale del peso
+// relativo del componente (normalizado a 100% por competencia) y los
+// descriptores se toman del alineamiento para cada nivel de la escala. Los
+// criterios que ya tienen nombre se conservan (se AÑADE, no se reemplaza);
+// los vacíos (los que trae una rúbrica nueva) se quitan.
+function _criteriosLaoDesdeAlineamiento(laoId, niveles) {
+  const lao = (db.laos || []).find(l => l.id === laoId);
+  const curso = (db.cursos || []).find(c => c.id === lao?.cursoId);
+  const res = { criterios: [], sinCriterios: [], sinBanco: [] };
+  if (!lao || !curso) return res;
+  (lao.competencias || []).forEach(cc => {
+    const comp = db.competencias.find(c => c.id === cc.competenciaId);
+    if (!comp) return;
+    const bc = _bancoDeCompetenciaCurso(comp, curso);
+    if (!bc) { res.sinBanco.push(comp.codigo); return; }
+    const crits = criteriosDeCompetencia(bc);
+    if (!crits.length) { res.sinCriterios.push(comp.codigo); return; }
+    const pesos = crits.map(cr => parseFloat(cr.peso) > 0 ? parseFloat(cr.peso) : 1);
+    const total = pesos.reduce((a, b) => a + b, 0);
+    let acumulado = 0;
+    crits.forEach((cr, i) => {
+      // el último absorbe el redondeo para que la competencia sume exactamente 100
+      const aporte = i === crits.length - 1 ? _round2(100 - acumulado) : _round2(pesos[i] / total * 100);
+      acumulado += aporte;
+      res.criterios.push({
+        id: 'crit_' + Math.random().toString(36).slice(2, 8),
+        nombre: `${comp.codigo}${cr.codigo ? ' · ' + cr.codigo : ''}: ${cr.nombre || ''}`.trim(),
+        peso: 0,
+        competencias: [{ competenciaId: comp.id, peso: aporte }],
+        celdas: Object.fromEntries(niveles.map(n => [n.id, String(descriptorCriterio(cr, n.puntos) || '')])),
+      });
+    });
+  });
+  return res;
+}
+function rbPartirDelAlineamiento() {
+  if (_rbContexto) return; // solo para rúbricas de LAO
+  const laoId = document.getElementById('rb-lao-id').value;
+  const r = _criteriosLaoDesdeAlineamiento(laoId, _rbNiveles);
+  const faltan = [...r.sinBanco.map(c => `${c} (no está en el banco del programa)`), ...r.sinCriterios.map(c => `${c} (sin componentes en el alineamiento)`)];
+  if (!r.criterios.length) { notify('El alineamiento del programa no tiene componentes para las competencias de este LAO' + (faltan.length ? ': ' + faltan.join(', ') : ''), '⚠️'); return; }
+  const conNombre = _rbCriterios.filter(c => String(c.nombre || '').trim());
+  // Las competencias que ahora cubre el alineamiento se miden con sus componentes:
+  // los criterios que se conservan dejan de aportar a ellas (siguen contando para la nota)
+  const cubiertas = new Set(r.criterios.map(c => c.competencias[0].competenciaId));
+  const desvinculados = conNombre.filter(c => (c.competencias || []).some(x => cubiertas.has(x.competenciaId)));
+  if (!confirm(`Se añadirán ${r.criterios.length} criterio(s) tomados del alineamiento del programa, con sus descriptores y su aporte a cada competencia.` +
+    (conNombre.length ? `\n\nLos ${conNombre.length} criterio(s) que ya tienen nombre se conservan.` : '') +
+    (desvinculados.length ? ` ${desvinculados.length} de ellos dejarán de aportar a ${[...cubiertas].map(id => db.competencias.find(c => c.id === id)?.codigo).filter(Boolean).join(', ')} (seguirán contando para la nota), para que cada competencia sume 100%.` : '') +
+    (faltan.length ? `\n\nSin componentes: ${faltan.join(', ')}.` : '') +
+    '\n\nRevisa luego el peso de cada criterio en la nota del LAO. ¿Continuar?')) return;
+  // Peso en la nota: lo que falte para 100, repartido entre los nuevos
+  const usado = conNombre.reduce((s, c) => s + (parseFloat(c.peso) || 0), 0);
+  const resto = Math.max(0, 100 - usado);
+  let acum = 0;
+  r.criterios.forEach((c, i) => {
+    c.peso = i === r.criterios.length - 1 ? _round2(resto - acum) : _round2(resto / r.criterios.length);
+    acum += c.peso;
+  });
+  desvinculados.forEach(c => { c.competencias = c.competencias.filter(x => !cubiertas.has(x.competenciaId)); });
+  _rbCriterios = [...conNombre, ...r.criterios];
+  _renderRubricaGrid();
+  notify(`${r.criterios.length} criterio(s) añadidos desde el alineamiento${resto ? '' : ' — los pesos en la nota ya sumaban 100%: ajústalos'}`, '🔗');
+}
+
+// ======================== P8: solicitud de cambio al alineamiento del programa ========================
+// Igual que P4, pero para el alineamiento. El profesor, desde Avalúo, baja la
+// plantilla del alineamiento con las competencias de SU curso (o usa un Word
+// propio), la sube, ve lo que se leyó y la envía con un comentario. También
+// puede enviar solo un comentario, sin archivo. El administrador la abre en
+// la revisión de P2; al incorporarla queda aprobada.
+let _solAl = null; // { cursoId, programaId, borrador, archivo }
+
+function _programaDeCurso(cursoId) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (!curso) return null;
+  return (db.programas || []).find(p => p.id === curso.programaId) ||
+    (db.programas || []).find(p => p.nombre === curso.programa) || null;
+}
+function _compIdsBancoDeCurso(cursoId) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  return new Set((db.competencias || []).filter(c => c.cursoId === cursoId)
+    .map(c => _bancoDeCompetenciaCurso(c, curso)?.id).filter(Boolean));
+}
+
+function abrirSolicitudAlineamiento(cursoId) {
+  const prog = _programaDeCurso(cursoId);
+  if (!prog) { notify('No se encontró el programa de este curso', '⚠️'); return; }
+  _solAl = { cursoId, programaId: prog.id, borrador: null, archivo: '' };
+  const curso = db.cursos.find(c => c.id === cursoId);
+  document.getElementById('solal-title').textContent = `📝 Solicitar cambio al alineamiento — ${prog.nombre}`;
+  document.getElementById('solal-sub').textContent = `La plantilla trae las competencias del programa que mide ${curso?.codigo || 'este curso'}, con sus componentes y descriptores actuales.`;
+  document.getElementById('solal-comentario').value = '';
+  _renderSolicitudAlineamientoEstado();
+  openModal('modal-solicitud-alineamiento');
+}
+function _renderSolicitudAlineamientoEstado() {
+  const el = document.getElementById('solal-estado');
+  const b = _solAl?.borrador;
+  _actualizarBotonSolicitudAlineamiento();
+  if (!el) return;
+  if (!b) { el.innerHTML = '<span style="color:var(--muted)">Sin archivo (puedes enviar solo el comentario).</span>'; return; }
+  const porComp = new Map();
+  b.filas.forEach(f => { if (!porComp.has(f.codigo)) porComp.set(f.codigo, 0); if (f.nombre) porComp.set(f.codigo, porComp.get(f.codigo) + 1); });
+  el.innerHTML = `<div style="color:#2e7d32;font-weight:600">✓ ${_alEsc(_solAl.archivo)} — ${porComp.size} competencia(s), ${b.filas.filter(f => f.nombre).length} componente(s).</div>
+    <div style="font-size:0.76rem;margin:4px 0">${[...porComp].map(([cod, n]) => `• ${_alEsc(cod)}: ${n} componente(s)`).join('<br>')}</div>
+    ${(b.avisos || []).filter(a => !/^No venían en el archivo/.test(a)).length ? `<div class="rbimp-avisos">${b.avisos.filter(a => !/^No venían en el archivo/.test(a)).map(a => `<div>ℹ️ ${_alEsc(a)}</div>`).join('')}</div>` : ''}
+    <div style="font-size:0.74rem;color:var(--muted)">Solo cambian las competencias que vienen en el archivo. El administrador revisará antes de incorporar.</div>`;
+}
+function _actualizarBotonSolicitudAlineamiento() {
+  const btn = document.getElementById('solal-btn-enviar');
+  if (btn) btn.disabled = !(_solAl?.borrador || document.getElementById('solal-comentario')?.value.trim());
+}
+function descargarPlantillaSolicitudAlineamiento(formato) {
+  if (!_solAl) return;
+  const ctx = _ctxPlantillaAlineamiento(_solAl.programaId, _compIdsBancoDeCurso(_solAl.cursoId));
+  if (!ctx) return;
+  if (!ctx.comps.length) { notify('Las competencias de este curso no están en el banco del programa', '⚠️'); return; }
+  _descargarPlantillaAlineamientoCtx(ctx, formato);
+}
+async function procesarArchivoSolicitudAlineamiento(file) {
+  if (!_solAl || !file) return;
+  const ctx = _ctxPlantillaAlineamiento(_solAl.programaId);
+  try {
+    const b = await _borradorAlineamientoDesdeArchivo(new Uint8Array(await file.arrayBuffer()), file.name, ctx);
+    if (b.error) { notify(b.error, '⚠️'); return; }
+    if (!b.filas.length) { notify('No se encontraron competencias del programa en el archivo', '⚠️'); return; }
+    _solAl.borrador = b; _solAl.archivo = file.name;
+    _renderSolicitudAlineamientoEstado();
+  } catch (e) { console.error(e); notify('No se pudo leer el archivo: ' + (e.message || e), '⚠️'); }
+}
+function handleSolicitudAlineamientoDrop(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('dz-over');
+  const f = ev.dataTransfer?.files?.[0]; if (f) procesarArchivoSolicitudAlineamiento(f);
+}
+function handleSolicitudAlineamientoFileInput(input) {
+  const f = input.files?.[0]; if (f) procesarArchivoSolicitudAlineamiento(f); input.value = '';
+}
+// Firebase no guarda null/undefined
+function _borradorAlineamientoParaGuardar(b) {
+  return {
+    nivelesDoc: b.nivelesDoc.map(n => ({ label: n.label || '', puntos: n.puntos === null || n.puntos === undefined ? -1 : n.puntos, pct: !!n.pct })),
+    filas: b.filas.map(f => ({ compId: f.compId || '', codigo: String(f.codigo ?? ''), id: f.id || '', domNum: String(f.domNum ?? ''), domNombre: f.domNombre || '',
+      nombre: f.nombre || '', peso: f.peso === '' || f.peso === null || f.peso === undefined || isNaN(f.peso) ? '' : f.peso, desc: (f.desc || []).map(d => d || '') })),
+    avisos: (b.avisos || []).slice(0, 20),
+  };
+}
+function _borradorAlineamientoDesdeGuardado(g) {
+  const nNiv = (g.nivelesDoc || []).length;
+  return {
+    nivelesDoc: (g.nivelesDoc || []).map(n => ({ label: n.label || '', puntos: n.puntos === -1 || n.puntos === undefined ? null : n.puntos, pct: !!n.pct })),
+    filas: (g.filas || []).map(f => ({ compId: f.compId || '', codigo: f.codigo || '', id: f.id || '', domNum: f.domNum ?? '', domNombre: f.domNombre || '',
+      nombre: f.nombre || '', peso: f.peso === '' || f.peso === undefined ? '' : parseFloat(f.peso), desc: Array.from({ length: nNiv }, (_, i) => (f.desc || [])[i] || '') })),
+    avisos: g.avisos || [],
+  };
+}
+function enviarSolicitudAlineamiento() {
+  if (!_solAl) return;
+  const comentario = document.getElementById('solal-comentario')?.value.trim() || '';
+  const b = _solAl.borrador;
+  if (!b && !comentario) { notify('Sube el archivo o escribe qué cambio propones', '⚠️'); return; }
+  const prog = (db.programas || []).find(p => p.id === _solAl.programaId);
+  const curso = db.cursos.find(c => c.id === _solAl.cursoId);
+  const nComps = b ? new Set(b.filas.map(f => f.compId)).size : 0;
+  const solicitud = {
+    id: 'sol_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    coleccion: 'alineamiento',
+    registroId: _solAl.programaId,
+    registroLabel: `${prog?.nombre || ''}${curso ? ' (desde ' + curso.codigo + ')' : ''}`,
+    descripcion: `${b ? `Cambiar el alineamiento de ${nComps} competencia(s) (archivo ${_solAl.archivo})` : 'Cambio al alineamiento'}${comentario ? ' — ' + comentario : ''}`,
+    cursoId: _solAl.cursoId,
+    archivoNombre: _solAl.archivo || '',
+    solicitante: currentUser.username,
+    solicitanteNombre: currentUser.nombre,
+    fecha: new Date().toISOString(),
+    estado: 'pendiente', revisadoPor: '', fechaRevision: '', comentarioAdmin: '',
+  };
+  if (b) solicitud.borradorAlineamiento = _borradorAlineamientoParaGuardar(b);
+  db.solicitudes.push(solicitud);
+  saveDB();
+  closeModal('modal-solicitud-alineamiento');
+  _solAl = null;
+  notify('Solicitud de cambio al alineamiento enviada — el administrador la revisará', '📨');
+  notificarAdminPorEmail(solicitud);
+  if (typeof applyRoleUI === 'function') applyRoleUI();
+}
+function revisarSolicitudAlineamiento(id) {
+  if (currentUser?.rol !== 'admin') return;
+  const s = db.solicitudes.find(x => x.id === id);
+  if (!s || s.coleccion !== 'alineamiento' || !s.borradorAlineamiento) return;
+  if (!(db.programas || []).find(p => p.id === s.registroId)) { notify('El programa de esta solicitud ya no existe', '⚠️'); return; }
+  const b = _borradorAlineamientoDesdeGuardado(s.borradorAlineamiento);
+  b.filas = b.filas.filter(f => db.bancoCompetencias.some(c => c.id === f.compId));
+  b.avisos = [`Solicitud de ${s.solicitanteNombre || s.solicitante} (${new Date(s.fecha).toLocaleDateString('es-PR')}): ${s.descripcion}`, ...b.avisos];
+  abrirRevisionAlineamiento(s.registroId, b, s.archivoNombre || 'solicitud', { solicitudId: id });
+}
+
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
 let _avRubricasDescarga = [];
 function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
@@ -8036,16 +8274,31 @@ function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
       ctx: { cursoId, tipo: 'lao', laoNombre: r.lao.nombre }, nota: 'rúbrica del LAO' });
   });
   // P4: quien no es administrador puede SOLICITAR añadir o cambiar la rúbrica de un LAO
-  const puedeSolicitar = currentUser && getEffectiveRole() !== 'admin' && (resueltos || []).length > 0; // con "Ver como" el admin también lo ve
+  const noAdmin = currentUser && getEffectiveRole() !== 'admin'; // con "Ver como" el admin también lo ve
+  const puedeSolicitar = noAdmin && (resueltos || []).length > 0;
   const btnSolicitar = puedeSolicitar ? `<button type="button" class="btn btn-outline btn-sm" onclick="abrirSolicitudRubrica('${cursoId}')" title="Envía al administrador una rúbrica nueva o cambiada para un LAO de este curso">📝 Solicitar añadir o cambiar una rúbrica</button>` : '';
-  if (!_avRubricasDescarga.length) return puedeSolicitar ? `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div><div style="font-size:0.78rem;color:var(--muted);margin-top:4px">Este curso todavía no tiene rúbricas.</div></div>` : '';
-  return `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div>${_avRubricasDescarga.map((x, i) => `
+  // P7: rúbrica completa del programa · P8: solicitar cambio al alineamiento
+  const prog = _programaDeCurso(cursoId);
+  const tieneBancoProg = !!prog && (db.bancoCompetencias || []).some(c => c.programa === prog.nombre);
+  const btnSolAl = noAdmin && tieneBancoProg && _compIdsBancoDeCurso(cursoId).size
+    ? `<button type="button" class="btn btn-outline btn-sm" onclick="abrirSolicitudAlineamiento('${cursoId}')" title="Propón al administrador cambios a los componentes y descriptores del alineamiento para las competencias de este curso">📝 Solicitar cambio al alineamiento</button>` : '';
+  const filaPrograma = tieneBancoProg ? `
+    <div class="av-rubrica-programa"><span><strong>Rúbrica completa del programa</strong> <span style="color:var(--muted)">— ${_alEsc(prog.nombre)}: todas las competencias y su alineamiento</span></span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${prog.id}','ver')">👁 Ver</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${prog.id}','docx')">⬇ Word</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${prog.id}','pdf')">⬇ PDF</button>
+        ${btnSolAl}
+      </span></div>` : '';
+  const encabezado = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div>`;
+  if (!_avRubricasDescarga.length) return (puedeSolicitar || filaPrograma) ? `<div class="av-rubricas-box">${encabezado}<div style="font-size:0.78rem;color:var(--muted);margin-top:4px">Este curso todavía no tiene rúbricas propias ni de LAO.</div>${filaPrograma}</div>` : '';
+  return `<div class="av-rubricas-box">${encabezado}${_avRubricasDescarga.map((x, i) => `
     <div class="av-rubrica-fila"><span><strong>${_alEsc(x.nombre)}</strong> <span style="color:var(--muted)">— ${_alEsc(x.nota)}</span></span>
       <span style="display:flex;gap:6px;flex-wrap:wrap">
         <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'ver')">👁 Ver</button>
         <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'docx')">⬇ Word</button>
         <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'pdf')">⬇ PDF</button>
-      </span></div>`).join('')}</div>`;
+      </span></div>`).join('')}${filaPrograma}</div>`;
 }
 function accionRubricaAvaluo(i, accion) {
   const x = _avRubricasDescarga[i];
@@ -8316,7 +8569,7 @@ function _rbActualizarPesoTotal() {
     const comp = db.competencias.find(c => c.id === compId);
     const total = grupos[compId].reduce((s, g) => s + (g.peso || 0), 0);
     const ok = Math.abs(total - 100) < 0.5;
-    return `<div>🎯 Contribución a ${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${total}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
+    return `<div>🎯 Contribución a ${comp ? comp.codigo : '—'}: <strong style="color:${ok ? '#2e7d32' : '#dc2626'}">${Math.round(total * 100) / 100}%</strong>${ok ? ' ✓' : ' — debe sumar 100%'}</div>`;
   });
   html += lineas.join('');
   if (sinCompetencia) html += _rbContexto?.tipo === 'directa'
@@ -8326,6 +8579,8 @@ function _rbActualizarPesoTotal() {
 }
 
 function _renderRubricaGrid() {
+  const _btnPartir = document.getElementById('rb-btn-partir-alineamiento');
+  if (_btnPartir) _btnPartir.style.display = _rbContexto ? 'none' : ''; // solo en rúbricas de LAO
   const laoId = document.getElementById('rb-lao-id').value;
   const lao = _rbLaoParaGrid(laoId);
   const esDirecta = _rbContexto?.tipo === 'directa';
@@ -16566,7 +16821,7 @@ async function enviarSolicitudEdicion() {
 }
 
 function _solTipoLabel(tipo) {
-  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos', rubrica_lao:'Rúbrica de LAO' }[tipo] || tipo;
+  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos', rubrica_lao:'Rúbrica de LAO', alineamiento:'Alineamiento del programa' }[tipo] || tipo;
 }
 function _solEstadoBadge(estado) {
   if (estado === 'aprobada')  return '<span class="badge badge-green">✓ Aprobada</span>';
@@ -16617,8 +16872,8 @@ async function renderSolicitudes() {
         <td>${_solEstadoBadge(s.estado)}</td>
         <td style="font-size:0.78rem">${s.revisadoPor ? `${s.revisadoPor}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${s.comentarioAdmin}"</span>` : ''}` : '—'}</td>
         <td class="actions-cell">
-          ${isAdmin && s.estado === 'pendiente' ? (s.coleccion === 'rubrica_lao' ? `
-            <button class="btn btn-primary btn-sm" onclick="revisarSolicitudRubrica('${s.id}')">🔍 Revisar e incorporar</button>
+          ${isAdmin && s.estado === 'pendiente' ? (s.coleccion === 'rubrica_lao' || (s.coleccion === 'alineamiento' && s.borradorAlineamiento) ? `
+            <button class="btn btn-primary btn-sm" onclick="${s.coleccion === 'rubrica_lao' ? 'revisarSolicitudRubrica' : 'revisarSolicitudAlineamiento'}('${s.id}')">🔍 Revisar e incorporar</button>
             <button class="btn btn-danger btn-sm" onclick="rechazarSolicitud('${s.id}')">✕ Rechazar</button>
           ` : `
             <button class="btn btn-primary btn-sm" onclick="aprobarSolicitud('${s.id}')">✓ Aprobar</button>
@@ -18173,6 +18428,11 @@ function dummyShowStatus(msg, type) {
       <button class="modal-close" onclick="cancelarRevisionAlineamiento()">✕</button>
     </div>
     <div id="alimp-body"></div>
+    <div id="alimp-sol-box" class="rbimp-seccion" style="display:none">
+      <label style="font-weight:600;font-size:0.84rem">Comentario para el profesor (opcional)</label>
+      <textarea id="alimp-sol-comentario" rows="2" style="width:100%" placeholder="ej. Incorporado; uní dos componentes de 2.1"></textarea>
+      <div style="font-size:0.74rem;color:var(--muted)">Al incorporar, la solicitud queda aprobada. Para rechazarla, cierra esta pantalla y usa “✕ Rechazar” en Solicitudes.</div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="cancelarRevisionAlineamiento()">❌ Cancelar</button>
       <button class="btn btn-primary" id="alimp-btn-incorporar" onclick="incorporarRevisionAlineamiento()">✅ Incorporar alineamiento</button>
@@ -18215,6 +18475,42 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-solicitud-rubrica')">Cancelar</button>
       <button class="btn btn-primary" id="solrub-btn-enviar" onclick="enviarSolicitudRubrica()" disabled>📨 Enviar solicitud</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- P8: solicitud de cambio al alineamiento del programa -->
+<div id="modal-solicitud-alineamiento" class="modal-overlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title" id="solal-title">📝 Solicitar cambio al alineamiento</div>
+      <button class="modal-close" onclick="closeModal('modal-solicitud-alineamiento')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>1. Descarga la plantilla y haz tus cambios</label>
+      <div id="solal-sub" style="font-size:0.76rem;color:var(--muted);margin-bottom:6px"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaSolicitudAlineamiento('xlsx')">📥 Plantilla Excel</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaSolicitudAlineamiento('docx')">📥 Plantilla Word</button>
+      </div>
+      <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">También puedes subir un Word propio con el formato de la rúbrica del programa, o enviar solo un comentario.</div>
+    </div>
+    <div class="form-group">
+      <label>2. Sube el archivo <span style="font-weight:400;color:var(--muted)">(opcional)</span></label>
+      <div class="rbimp-dropzone" ondragover="event.preventDefault();this.classList.add('dz-over')" ondragleave="this.classList.remove('dz-over')" ondrop="handleSolicitudAlineamientoDrop(event)" onclick="document.getElementById('solal-file').click()">
+        📤 Arrastra aquí el alineamiento (Excel o Word), o haz clic para seleccionarlo
+      </div>
+      <input type="file" id="solal-file" accept=".xlsx,.docx" style="display:none" onchange="handleSolicitudAlineamientoFileInput(this)">
+      <div id="solal-estado" style="margin-top:8px;font-size:0.8rem"></div>
+    </div>
+    <div class="form-group">
+      <label>3. Comentario para el administrador</label>
+      <textarea id="solal-comentario" rows="3" oninput="_actualizarBotonSolicitudAlineamiento()" placeholder="ej. Propongo separar el componente C1 de 2.1 en dos: análisis y presentación"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-solicitud-alineamiento')">Cancelar</button>
+      <button class="btn btn-primary" id="solal-btn-enviar" onclick="enviarSolicitudAlineamiento()" disabled>📨 Enviar solicitud</button>
     </div>
   </div>
 </div>
