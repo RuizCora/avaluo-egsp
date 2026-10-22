@@ -866,6 +866,7 @@
   .rbimp-table textarea { width: 100%; min-width: 160px; min-height: 52px; font-size: 0.74rem; border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-family: inherit; }
   .rbimp-table input { font-size: 0.76rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; }
   .rbimp-total td { background: #f7f7f7; font-size: 0.78rem; }
+  .rbimp-table tr.alimp-primera td { border-top: 2.5px solid #1B365D; }
   /* ── WIZARD ─────────────────────────────────────────────── */
   .wiz-step {
     flex: 1; text-align: center; padding: 10px 6px; font-size: 0.72rem;
@@ -7283,6 +7284,372 @@ function _notaLaoRubricaFinal(estId, laoId) {
   return { nota: auto ? auto.valor : '', manual: false };
 }
 
+
+// ======================== PLANTILLAS DE RÚBRICA (P2: alineamiento del programa) ========================
+// Mismo flujo que la plantilla de LAO (P1), pero para TODO el alineamiento de
+// criterios de un programa (R1): una fila por componente de evaluación de
+// cada competencia del banco, con su dominio, peso relativo y descriptores por
+// nivel de la escala del programa. Se descarga y se sube desde Departamentos y
+// Programas (solo administrador).
+// Reglas al incorporar:
+//  - Una competencia que aparece en el archivo queda con EXACTAMENTE los
+//    componentes de sus filas (las filas sin nombre de componente = sin criterios).
+//  - Una competencia que no aparece en el archivo no se toca.
+//  - Códigos que no están en el banco se ignoran (las competencias se crean
+//    en Alineación Curricular, no desde aquí).
+//  - Dominio: si la fila trae número de dominio, la competencia queda en ese
+//    dominio (se crea si no existe; si trae otro nombre, se renombra).
+//  - Los criterios conservan su id (columna ID oculta, o por nombre dentro de
+//    la competencia), así las evaluaciones ya guardadas siguen casando.
+
+function _nivelDesdeEncabezado(h) {
+  const limpio = String(h ?? '').replace(/^\s*descriptor\s*[—–-]?\s*/i, '').trim();
+  const m = limpio.match(/^(.*?)\s*\(\s*([\d.,]+)\s*(%?)\s*\)\s*(\*?\s*target\s*\*?)?\s*$/i);
+  if (m) return { label: m[1].trim(), puntos: parseFloat(m[2].replace(',', '.')), pct: !!m[3] };
+  if (/^\s*descriptor/i.test(String(h))) return { label: limpio, puntos: null, pct: false };
+  return null;
+}
+
+function _ctxPlantillaAlineamiento(programaId) {
+  const prog = (db.programas || []).find(p => p.id === programaId);
+  if (!prog) return null;
+  const escala = resolverEscalaParaPrograma(prog.nombre);
+  const niveles = _nivelesRubricaDesdeEscala(escala);
+  const comps = (db.bancoCompetencias || []).filter(c => c.programa === prog.nombre).sort(_ordenNumComp);
+  const doms = dominiosDePrograma(prog.nombre);
+  const filas = [];
+  comps.forEach(bc => {
+    const dom = doms.find(d => d.id === bc.dominioId) || null;
+    const crits = criteriosDeCompetencia(bc);
+    const base = { codigo: bc.num, texto: bc.texto || '', domNum: dom ? dom.numero : '', domNombre: dom ? dom.nombre : '' };
+    if (!crits.length) filas.push({ ...base, id: '', nombre: '', peso: '', desc: niveles.map(() => '') });
+    crits.forEach(cr => filas.push({ ...base, id: cr.id, nombre: cr.nombre || '', peso: cr.peso ?? 1,
+      desc: niveles.map(n => String(descriptorCriterio(cr, n.puntos) || '')) }));
+  });
+  return { prog, escala, niveles, comps, doms, filas,
+    receta: { tipo: 'plantilla_alineamiento', version: 1, programaId, programa: prog.nombre,
+      niveles: niveles.map(n => ({ label: n.label, puntos: n.puntos })) } };
+}
+function _encabezadosPlantillaAlineamiento(ctx) {
+  return ['Código de competencia', 'Competencia (referencia, no se importa)', 'Dominio N.º', 'Dominio', 'Componente de evaluación', 'Peso relativo',
+    ...ctx.niveles.map(n => `Descriptor — ${n.label} (${n.puntos})`)];
+}
+const _INSTRUCCIONES_PLANTILLA_ALINEAMIENTO = [
+  'Cómo llenar esta plantilla:',
+  '1. Una fila por componente (criterio) de evaluación de cada competencia. Para agregar un componente a una competencia, copia una de sus filas y cambia el nombre y los descriptores.',
+  '2. "Código de competencia" debe ser el código del banco del programa (ej. 1.1). La columna "Competencia" es solo de referencia: el texto de la competencia se edita en Alineación Curricular.',
+  '3. "Dominio N.º" y "Dominio": el dominio de la competencia. Si escribes un número nuevo, se crea ese dominio.',
+  '4. "Peso relativo": cuánto pesa el componente dentro de su competencia (todos en 1 = partes iguales).',
+  '5. Una competencia que aparece en el archivo quedará exactamente con los componentes de sus filas. Si dejas el nombre del componente vacío, la competencia queda sin criterios. Las competencias que borres por completo del archivo no se modifican.',
+  '6. Al terminar, sube el archivo en Departamentos y Programas: el sistema lo mostrará para revisarlo antes de incorporarlo.',
+];
+function _construirXlsxPlantillaAlineamiento(ctx) {
+  const headers = ['ID (no borrar)', ..._encabezadosPlantillaAlineamiento(ctx)];
+  const filas = ctx.filas.map(f => [f.id, f.codigo, { v: f.texto, s: 2 }, f.domNum === '' ? '' : (isFinite(Number(f.domNum)) ? Number(f.domNum) : f.domNum),
+    f.domNombre, f.nombre === '' ? '' : { v: f.nombre, s: 2 }, f.peso === '' ? '' : Number(f.peso), ...f.desc.map(t => ({ v: t, s: 2 }))]);
+  for (let i = 0; i < 6; i++) filas.push([]);
+  const nNiv = ctx.niveles.length;
+  const hoja = _construirHojaXmlGenerica({
+    headers, filas, tabSelected: true,
+    dataValidations: [_xlsxDataValidationDecimal(`G2:G${filas.length + 1}`, 0, 1000)],
+    colsHidden: [{ min: 1, max: 1, width: 12, hidden: true }, { min: 2, max: 2, width: 12 }, { min: 3, max: 3, width: 40 },
+      { min: 4, max: 4, width: 10 }, { min: 5, max: 5, width: 26 }, { min: 6, max: 6, width: 32 }, { min: 7, max: 7, width: 10 },
+      { min: 8, max: 7 + nNiv, width: 40 }],
+  });
+  const info = [
+    [{ v: `Plantilla del alineamiento de competencias — ${ctx.prog.nombre}`, s: 3 }],
+    [`Escala de niveles: ${ctx.escala?.nombre || ''} · ${ctx.comps.length} competencias · ${ctx.doms.length} dominios`],
+    [], ..._INSTRUCCIONES_PLANTILLA_ALINEAMIENTO.map(t => [{ v: t, s: 2 }]),
+  ];
+  return _construirXlsxMultihoja([
+    { nombre: 'Alineamiento', oculta: false, xml: hoja },
+    { nombre: 'Instrucciones', oculta: false, xml: _construirHojaXmlGenerica({ headers: ['Instrucciones'], filas: info, colsHidden: [{ min: 1, max: 1, width: 120 }] }) },
+    { nombre: '_receta', oculta: true, xml: _construirHojaXmlGenerica({ headers: ['json'], filas: [[JSON.stringify(ctx.receta)]] }) },
+  ]);
+}
+function _construirDocxPlantillaAlineamiento(ctx) {
+  const heads = _encabezadosPlantillaAlineamiento(ctx);
+  const ANCHO = 14400, nNiv = ctx.niveles.length;
+  const fijos = [800, 1800, 600, 1300, 1500, 600];
+  const wDesc = Math.max(1000, Math.floor((ANCHO - fijos.reduce((a, b) => a + b, 0)) / Math.max(nNiv, 1)));
+  const anchos = [...fijos, ...ctx.niveles.map(() => wDesc)];
+  const grid = `<w:tblGrid>${anchos.map(a => `<w:gridCol w:w="${a}"/>`).join('')}</w:tblGrid>`;
+  const bordes = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(b => `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="999999"/>`).join('');
+  const rHead = '<w:b/><w:color w:val="FFFFFF"/><w:sz w:val="14"/>';
+  const head = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${heads.map((h, i) => _docxCelda(h, anchos[i], { fill: '1B365D', rPr: rHead })).join('')}</w:tr>`;
+  const filas = [...ctx.filas.map(f => [f.codigo, f.texto, String(f.domNum), f.domNombre, f.nombre, f.peso === '' ? '' : String(f.peso), ...f.desc]),
+    ...Array.from({ length: 4 }, () => [])];
+  const body = filas.map(f => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${anchos.map((a, i) =>
+    _docxCelda(f[i] ?? '', a, { rPr: i === 0 || i === 4 ? '<w:b/><w:sz w:val="14"/>' : '<w:sz w:val="14"/>', fill: i === 1 ? 'F2F2F2' : null })).join('')}</w:tr>`).join('');
+  const receta = `<w:p><w:r><w:rPr><w:vanish/><w:sz w:val="2"/></w:rPr><w:t xml:space="preserve">AVALUO-RECETA:${_docxEsc(JSON.stringify(ctx.receta))}</w:t></w:r></w:p>`;
+  const cuerpo =
+    _docxParrafos(`Plantilla del alineamiento de competencias — ${ctx.prog.nombre}`, '<w:b/><w:color w:val="1B365D"/><w:sz w:val="28"/>') +
+    _docxParrafos(`Escala: ${ctx.escala?.nombre || ''} · ${ctx.comps.length} competencias · ${ctx.doms.length} dominios`, '<w:sz w:val="18"/>') +
+    _docxParrafos(_INSTRUCCIONES_PLANTILLA_ALINEAMIENTO.join('\n') + '\nEn Word, la identificación de cada componente es por su nombre dentro de la competencia.', '<w:i/><w:color w:val="555555"/><w:sz w:val="16"/>', '<w:spacing w:after="160"/>') +
+    `<w:tbl><w:tblPr><w:tblW w:w="${ANCHO}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bordes}</w:tblBorders></w:tblPr>${grid}${head}${body}</w:tbl>` + receta;
+  return _empaquetarDocx(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>${cuerpo}<w:sectPr><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`);
+}
+function descargarPlantillaAlineamiento(programaId, formato) {
+  if (currentUser?.rol !== 'admin') { notify('Solo el administrador puede incorporar el alineamiento', '🔒'); return; }
+  const ctx = _ctxPlantillaAlineamiento(programaId);
+  if (!ctx) return;
+  if (!ctx.comps.length) { notify('Este programa no tiene competencias en el banco', '⚠️'); return; }
+  const base = `Plantilla_Alineamiento_${_nombreArchivoSeguro(ctx.prog.nombre, 60)}`;
+  if (formato === 'docx') _descargarBytes(_construirDocxPlantillaAlineamiento(ctx), base + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  else _descargarBytes(_construirXlsxPlantillaAlineamiento(ctx), base + '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  notify('Plantilla del alineamiento descargada ✓', '📥');
+}
+
+// ── Lectura ──
+function _borradorAlineamientoDesdeTabla(headers, filas, ctx) {
+  const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const m = { id: -1, codigo: -1, domNum: -1, domNombre: -1, comp: -1, peso: -1, niveles: [] };
+  headers.forEach((h, i) => {
+    const t = norm(h);
+    if (!t) return;
+    if (/^id\b/.test(t)) m.id = i;
+    else if (/^codigo/.test(t)) m.codigo = i;
+    else if (/^dominio n/.test(t)) m.domNum = i;
+    else if (/^dominio/.test(t)) m.domNombre = i;
+    else if (/^componente/.test(t)) m.comp = i;
+    else if (/^peso/.test(t)) m.peso = i;
+    else if (/^competencia/.test(t)) { /* referencia */ }
+    else { const nv = _nivelDesdeEncabezado(h); if (nv) m.niveles.push({ col: i, ...nv }); }
+  });
+  if (m.codigo < 0) return { error: 'No se encontró la columna "Código de competencia".' };
+  if (m.comp < 0) return { error: 'No se encontró la columna "Componente de evaluación".' };
+  if (!m.niveles.length) return { error: 'No se encontraron columnas de descriptores por nivel.' };
+  const avisos = [];
+  const desconocidos = new Set();
+  const filasOk = [];
+  filas.forEach(f => {
+    const codigo = String(f[m.codigo] ?? '').trim();
+    const nombre = String(f[m.comp] ?? '').trim();
+    const desc = m.niveles.map(nv => String(f[nv.col] ?? '').trim());
+    if (!codigo && !nombre && !desc.some(Boolean)) return;
+    const bc = ctx.comps.find(c => String(c.num).trim().toLowerCase() === codigo.toLowerCase().replace(/^c(?=\d)/, ''));
+    if (!bc) { desconocidos.add(codigo || '(vacío)'); return; }
+    const pesoTxt = m.peso >= 0 ? String(f[m.peso] ?? '').replace(',', '.').trim() : '';
+    filasOk.push({
+      compId: bc.id, codigo: bc.num, id: m.id >= 0 ? String(f[m.id] ?? '').trim() : '',
+      domNum: m.domNum >= 0 ? String(f[m.domNum] ?? '').trim() : '', domNombre: m.domNombre >= 0 ? String(f[m.domNombre] ?? '').trim() : '',
+      nombre, peso: pesoTxt === '' ? '' : parseFloat(pesoTxt), desc,
+    });
+  });
+  if (desconocidos.size) avisos.push(`Códigos que no están en el banco de ${ctx.prog.nombre} (se ignoraron): ${[...desconocidos].join(', ')}.`);
+  const enArchivo = new Set(filasOk.map(f => f.compId));
+  const fuera = ctx.comps.filter(c => !enArchivo.has(c.id));
+  if (fuera.length) avisos.push(`No venían en el archivo (no se modifican): ${fuera.map(c => c.num).join(', ')}.`);
+  return { avisos, nivelesDoc: m.niveles.map(n => ({ label: n.label, puntos: n.puntos, pct: n.pct })), filas: filasOk };
+}
+async function _borradorAlineamientoDesdeArchivo(bytes, nombre, ctx) {
+  const ext = String(nombre).toLowerCase().split('.').pop();
+  let receta = null, b;
+  if (ext === 'xlsx' || ext === 'xls') {
+    if (typeof XLSX === 'undefined') return { error: 'No se pudo cargar el lector de Excel (¿sin conexión?).' };
+    const wb = XLSX.read(bytes, { type: 'array' });
+    if (wb.Sheets['_receta']) { const fr = XLSX.utils.sheet_to_json(wb.Sheets['_receta'], { header: 1, defval: '' }); try { receta = JSON.parse(fr.slice(1).map(f => f[0] || '').join('')); } catch (e) {} }
+    const filas = XLSX.utils.sheet_to_json(wb.Sheets['Alineamiento'] || wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    const hi = filas.findIndex(f => f.some(v => /^\s*c[oó]digo de competencia/i.test(String(v))));
+    if (hi < 0) return { error: 'No se encontró la fila de encabezados (con "Código de competencia").' };
+    b = _borradorAlineamientoDesdeTabla(filas[hi], filas.slice(hi + 1), ctx);
+  } else if (ext === 'docx') {
+    const r = await _leerTablasDocx(bytes); receta = r.receta;
+    const t = r.tablas.find(tb => tb[0]?.some(c => /^\s*c[oó]digo de competencia/i.test(c.texto)));
+    if (!t) return { error: 'No se encontró en el Word una tabla con la columna "Código de competencia".' };
+    b = _borradorAlineamientoDesdeTabla(t[0].map(c => c.texto), t.slice(1).map(row => row.map(c => c.texto)), ctx);
+  } else return { error: 'Formato no reconocido: sube la plantilla en Excel (.xlsx) o Word (.docx).' };
+  if (b.error) return b;
+  if (!receta) b.avisos.unshift('El archivo no trae la receta oculta de la plantilla: se leyó por los encabezados.');
+  else if (receta.tipo !== 'plantilla_alineamiento') b.avisos.unshift('Este archivo no es una plantilla de alineamiento de programa.');
+  else if (receta.programaId && receta.programaId !== ctx.prog.id) b.avisos.unshift(`Esta plantilla se descargó para otro programa ("${receta.programa}"). Revísala con cuidado.`);
+  return b;
+}
+async function procesarArchivoAlineamiento(programaId, file) {
+  if (currentUser?.rol !== 'admin') { notify('Solo el administrador puede incorporar el alineamiento', '🔒'); return; }
+  const ctx = _ctxPlantillaAlineamiento(programaId);
+  if (!ctx || !file) return;
+  try {
+    const b = await _borradorAlineamientoDesdeArchivo(new Uint8Array(await file.arrayBuffer()), file.name, ctx);
+    if (b.error) { notify(b.error, '⚠️'); return; }
+    abrirRevisionAlineamiento(programaId, b, file.name);
+  } catch (e) { console.error(e); notify('No se pudo leer el archivo: ' + (e.message || e), '⚠️'); }
+}
+function handleAlineamientoDrop(ev, programaId) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('dz-over');
+  const f = ev.dataTransfer?.files?.[0]; if (f) procesarArchivoAlineamiento(programaId, f);
+}
+function handleAlineamientoFileInput(input, programaId) {
+  const f = input.files?.[0]; if (f) procesarArchivoAlineamiento(programaId, f); input.value = '';
+}
+
+// ── Revisión ──
+let _alImp = null; // { programaId, ctx, archivo, nivelesDoc, mapeo, filas, avisos }
+function abrirRevisionAlineamiento(programaId, b, archivo) {
+  const ctx = _ctxPlantillaAlineamiento(programaId);
+  _alImp = { programaId, ctx, archivo, nivelesDoc: b.nivelesDoc, mapeo: _proponerMapeoNiveles(b.nivelesDoc, ctx.niveles),
+    filas: b.filas.map(f => ({ ...f, desc: [...f.desc] })), avisos: b.avisos || [] };
+  document.getElementById('alimp-title').textContent = `📤 Revisar alineamiento — ${ctx.prog.nombre}`;
+  _renderRevisionAlineamiento();
+  openModal('modal-alineamiento-import');
+}
+// Agrupa las filas por competencia → lo que quedaría
+function _planAlineamiento() {
+  const { ctx, filas, mapeo } = _alImp;
+  const norm = s => String(s || '').trim().toLowerCase();
+  const porComp = new Map();
+  filas.forEach((f, i) => { if (!porComp.has(f.compId)) porComp.set(f.compId, []); porComp.get(f.compId).push({ ...f, idx: i }); });
+  const cambios = [], dominios = [];
+  const domPlan = new Map(); // numero → nombre
+  porComp.forEach((rows, compId) => {
+    const bc = ctx.comps.find(c => c.id === compId);
+    const viejos = criteriosDeCompetencia(bc);
+    const usados = new Set();
+    const nuevos = rows.filter(r => r.nombre).map(r => {
+      const ex = (r.id && viejos.find(x => x.id === r.id && !usados.has(x.id))) || viejos.find(x => norm(x.nombre) === norm(r.nombre) && !usados.has(x.id));
+      if (ex) usados.add(ex.id);
+      return { r, ex };
+    });
+    const eliminados = viejos.filter(x => !usados.has(x.id));
+    const modificados = nuevos.filter(({ r, ex }) => {
+      if (!ex) return false;
+      const descNuevo = ctx.niveles.map(n => { const j = mapeo.indexOf(n.puntos); return j >= 0 ? (r.desc[j] || '') : ''; });
+      const descViejo = ctx.niveles.map(n => String(descriptorCriterio(ex, n.puntos) || ''));
+      return norm(ex.nombre) !== norm(r.nombre) || String(ex.peso ?? 1) !== String(r.peso === '' ? 1 : r.peso) || descNuevo.join('¦') !== descViejo.join('¦');
+    });
+    const domRow = rows.find(r => r.domNum !== '');
+    if (domRow && !domPlan.has(domRow.domNum)) domPlan.set(domRow.domNum, domRow.domNombre);
+    const domActual = ctx.doms.find(d => d.id === bc.dominioId);
+    const cambiaDom = domRow ? String(domActual?.numero ?? '') !== String(domRow.domNum) : false;
+    cambios.push({ bc, nuevos: nuevos.filter(x => !x.ex).length, modificados: modificados.length, eliminados, cambiaDom, domNum: domRow?.domNum });
+  });
+  domPlan.forEach((nombre, numero) => {
+    const ex = ctx.doms.find(d => String(d.numero) === String(numero));
+    if (!ex) dominios.push({ tipo: 'nuevo', numero, nombre: nombre || `Dominio ${numero}` });
+    else if (nombre && nombre !== ex.nombre) dominios.push({ tipo: 'renombra', numero, nombre, antes: ex.nombre });
+  });
+  return { cambios, dominios };
+}
+function _validarRevisionAlineamiento() {
+  const { filas, mapeo, nivelesDoc } = _alImp;
+  const bloqueos = [], avisos = [];
+  filas.forEach((f, i) => {
+    if (!f.nombre && f.desc.some(Boolean)) bloqueos.push(`${f.codigo}: hay una fila con descriptores pero sin nombre de componente.`);
+    if (f.peso !== '' && !(parseFloat(f.peso) > 0)) bloqueos.push(`${f.codigo} — "${f.nombre}": el peso relativo debe ser mayor que 0.`);
+  });
+  const usados = mapeo.filter(v => v !== '');
+  if (new Set(usados).size !== usados.length) bloqueos.push('Dos niveles del documento quedaron convertidos al mismo nivel de la escala.');
+  nivelesDoc.forEach((n, i) => { if (mapeo[i] === '') avisos.push(`El nivel "${n.label}" no se convierte a ningún nivel de la escala: sus descriptores no se incorporarán.`); });
+  const plan = _planAlineamiento();
+  plan.cambios.forEach(c => {
+    const conUso = c.eliminados.map(x => ({ x, n: _usosCriterioAlineamiento(x.id) })).filter(y => y.n);
+    conUso.forEach(y => avisos.push(`${c.bc.num}: se elimina "${y.x.nombre}", que ya usaron ${y.n} evaluación(es) guardada(s) (sus niveles guardados no cambian).`));
+  });
+  return { bloqueos, avisos, plan };
+}
+function _renderRevisionAlineamiento() {
+  const { ctx, nivelesDoc, mapeo, filas, avisos, archivo } = _alImp;
+  const v = _validarRevisionAlineamiento();
+  const tot = v.plan.cambios.reduce((a, c) => ({ n: a.n + c.nuevos, m: a.m + c.modificados, e: a.e + c.eliminados.length, d: a.d + (c.cambiaDom ? 1 : 0) }), { n: 0, m: 0, e: 0, d: 0 });
+  const optsEscala = sel => `<option value="">— No incorporar —</option>` + ctx.niveles.map(n => `<option value="${n.puntos}" ${String(sel) === String(n.puntos) ? 'selected' : ''}>${_alEsc(n.label)} (${n.puntos})</option>`).join('');
+  const identico = nivelesDoc.length === ctx.niveles.length && nivelesDoc.every((n, i) => mapeo[i] === ctx.niveles[i].puntos);
+  let compPrevio = null;
+  document.getElementById('alimp-body').innerHTML = `
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:8px">Archivo: <strong>${_alEsc(archivo)}</strong> · Escala: ${_alEsc(ctx.escala?.nombre || '')} ·
+      ${v.plan.cambios.length} competencia(s) en el archivo: <strong>${tot.n}</strong> componente(s) nuevo(s), <strong>${tot.m}</strong> con cambios, <strong>${tot.e}</strong> se eliminarían${tot.d ? `, <strong>${tot.d}</strong> cambian de dominio` : ''}.
+      ${v.plan.dominios.map(d => d.tipo === 'nuevo' ? ` Dominio nuevo: ${_alEsc(d.numero)} ${_alEsc(d.nombre)}.` : ` Dominio ${_alEsc(d.numero)} se renombra a "${_alEsc(d.nombre)}".`).join('')}</div>
+    ${avisos.length ? `<div class="rbimp-avisos">${avisos.map(a => `<div>ℹ️ ${_alEsc(a)}</div>`).join('')}</div>` : ''}
+    <div class="rbimp-seccion"><strong>1. Niveles</strong> ${identico ? '<span style="color:#2e7d32">— coinciden con la escala del programa ✓</span>' : `— confirma la conversión a la escala del programa:
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px">${nivelesDoc.map((n, i) => `<label style="font-size:0.8rem;display:flex;flex-direction:column;gap:2px">${_alEsc(n.label)}${n.puntos !== null ? ` (${n.puntos}${n.pct ? '%' : ''})` : ''} →
+        <select onchange="_alImpMapeo(${i}, this.value)">${optsEscala(mapeo[i])}</select></label>`).join('')}</div>`}</div>
+    <div class="rbimp-seccion"><strong>2. Componentes por competencia</strong> <span style="color:var(--muted);font-size:0.78rem">— todo es editable.</span>
+      <div style="overflow-x:auto;margin-top:6px"><table class="rbimp-table"><thead><tr>
+        <th>Comp.</th><th>Dominio</th><th style="min-width:170px">Componente</th><th>Peso</th>
+        ${nivelesDoc.map((n, i) => `<th style="min-width:190px">${_alEsc(n.label)}<br><span style="font-weight:400">${mapeo[i] !== '' ? '→ escala ' + mapeo[i] : '(no se incorpora)'}</span></th>`).join('')}<th></th>
+      </tr></thead><tbody>${filas.map((f, i) => {
+        const primera = f.compId !== compPrevio; compPrevio = f.compId;
+        const ch = v.plan.cambios.find(c => c.bc.id === f.compId);
+        return `<tr${primera ? ' class="alimp-primera"' : ''}>
+          <td><strong>${_alEsc(f.codigo)}</strong>${primera && ch ? `<div style="font-size:0.64rem;color:var(--muted)">${ch.nuevos ? ch.nuevos + ' nuevo ' : ''}${ch.modificados ? ch.modificados + ' cambia ' : ''}${ch.eliminados.length ? ch.eliminados.length + ' elimina' : ''}</div>` : ''}</td>
+          <td><input type="text" value="${_alEsc(f.domNum)}" style="width:38px" title="Número de dominio" onchange="_alImpSet(${i},'domNum',this.value)"></td>
+          <td><textarea rows="2" oninput="_alImpSet(${i},'nombre',this.value,true)" placeholder="(sin criterios)">${_alEsc(f.nombre)}</textarea></td>
+          <td><input type="number" min="0" step="any" value="${_alEsc(f.peso)}" placeholder="1" style="width:56px" onchange="_alImpSet(${i},'peso',this.value)"></td>
+          ${nivelesDoc.map((n, j) => `<td><textarea rows="3" oninput="_alImp.filas[${i}].desc[${j}]=this.value">${_alEsc(f.desc[j] || '')}</textarea></td>`).join('')}
+          <td style="white-space:nowrap"><button class="btn btn-outline btn-sm" title="Agregar otro componente a ${_alEsc(f.codigo)}" onclick="_alImpAgregar(${i})">＋</button>
+            <button class="btn btn-outline btn-sm" title="Quitar fila" onclick="_alImpQuitar(${i})">🗑️</button></td>
+        </tr>`; }).join('')}</tbody></table></div></div>
+    <div class="rbimp-seccion"><strong>3. Verificación</strong>
+      ${v.bloqueos.map(b => `<div style="color:#dc2626">⛔ ${_alEsc(b)}</div>`).join('')}
+      ${v.avisos.map(a => `<div style="color:#b45309">⚠️ ${_alEsc(a)}</div>`).join('')}
+      ${!v.bloqueos.length && !v.avisos.length ? '<div style="color:#2e7d32">✓ Todo cuadra.</div>' : ''}</div>`;
+  const btn = document.getElementById('alimp-btn-incorporar'); if (btn) btn.disabled = v.bloqueos.length > 0;
+}
+function _alImpSet(i, campo, valor, sinRender) {
+  const f = _alImp.filas[i]; if (!f) return;
+  f[campo] = campo === 'peso' ? (valor === '' ? '' : parseFloat(valor)) : String(valor);
+  if (!sinRender) _renderRevisionAlineamiento();
+}
+function _alImpMapeo(i, valor) { _alImp.mapeo[i] = valor === '' ? '' : parseFloat(valor); _renderRevisionAlineamiento(); }
+function _alImpQuitar(i) {
+  const f = _alImp.filas[i];
+  // Si es la única fila de esa competencia, queda una fila vacía (= sin criterios), no desaparece la competencia del archivo
+  if (_alImp.filas.filter(x => x.compId === f.compId).length === 1) { f.nombre = ''; f.id = ''; f.peso = ''; f.desc = f.desc.map(() => ''); }
+  else _alImp.filas.splice(i, 1);
+  _renderRevisionAlineamiento();
+}
+function _alImpAgregar(i) {
+  const f = _alImp.filas[i];
+  _alImp.filas.splice(i + 1, 0, { compId: f.compId, codigo: f.codigo, id: '', domNum: f.domNum, domNombre: f.domNombre, nombre: '', peso: '', desc: _alImp.nivelesDoc.map(() => '') });
+  _renderRevisionAlineamiento();
+}
+function cancelarRevisionAlineamiento() { closeModal('modal-alineamiento-import'); _alImp = null; }
+
+function incorporarRevisionAlineamiento() {
+  if (!_alImp || currentUser?.rol !== 'admin') return;
+  const v = _validarRevisionAlineamiento();
+  if (v.bloqueos.length) { _renderRevisionAlineamiento(); notify('Corrige lo marcado con ⛔ antes de incorporar', '⚠️'); return; }
+  if (v.avisos.length && !confirm('Atención:\n\n• ' + v.avisos.join('\n• ') + '\n\n¿Incorporar el alineamiento de todas formas?')) return;
+  const { ctx, mapeo, filas, programaId } = _alImp;
+  const programa = ctx.prog.nombre;
+  if (!db.dominiosCompetencias) db.dominiosCompetencias = [];
+  // Dominios: crear o renombrar
+  const domPorNumero = num => db.dominiosCompetencias.find(d => d.programa === programa && String(d.numero) === String(num));
+  v.plan.dominios.forEach(d => {
+    if (d.tipo === 'nuevo') db.dominiosCompetencias.push({ id: 'dom_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), programa, numero: String(d.numero), nombre: d.nombre, fechaCreacion: new Date().toISOString() });
+    else { const ex = domPorNumero(d.numero); if (ex) ex.nombre = d.nombre; }
+  });
+  const norm = s => String(s || '').trim().toLowerCase();
+  const porComp = new Map();
+  filas.forEach(f => { if (!porComp.has(f.compId)) porComp.set(f.compId, []); porComp.get(f.compId).push(f); });
+  porComp.forEach((rows, compId) => {
+    const bc = db.bancoCompetencias.find(c => c.id === compId);
+    if (!bc) return;
+    const viejos = criteriosDeCompetencia(bc);
+    const usados = new Set();
+    const lista = rows.filter(r => r.nombre).map((r, i) => {
+      const ex = (r.id && viejos.find(x => x.id === r.id && !usados.has(x.id))) || viejos.find(x => norm(x.nombre) === norm(r.nombre) && !usados.has(x.id));
+      if (ex) usados.add(ex.id);
+      // Descriptores en la escala; se conservan los de niveles que no están en la escala actual
+      const descriptores = {};
+      if (ex) Object.entries(ex.descriptores || {}).forEach(([k, t]) => { if (!ctx.niveles.some(n => 'n' + n.puntos === k) && String(t || '').trim()) descriptores[k] = t; });
+      ctx.niveles.forEach(n => { const j = mapeo.indexOf(n.puntos); const t = j >= 0 ? String(r.desc[j] || '').trim() : ''; if (t) descriptores['n' + n.puntos] = t; });
+      return { id: ex ? ex.id : 'crit_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + i,
+        codigo: 'C' + (i + 1), nombre: r.nombre.trim(), peso: r.peso === '' ? 1 : parseFloat(r.peso), descriptores };
+    });
+    if (lista.length) bc.criteriosEvaluacion = lista; else delete bc.criteriosEvaluacion;
+    const domRow = rows.find(r => r.domNum !== '');
+    if (domRow) { const d = domPorNumero(domRow.domNum); if (d) bc.dominioId = d.id; }
+  });
+  saveDB();
+  closeModal('modal-alineamiento-import');
+  _alImp = null;
+  if (typeof selectPrograma === 'function' && document.getElementById('prog-detail')) selectPrograma(programaId);
+  notify(`Alineamiento incorporado: ${porComp.size} competencia(s) ✓`, '✅');
+}
+
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
 let _avRubricasDescarga = [];
 function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
@@ -7865,7 +8232,19 @@ function selectPrograma(programaId) {
         <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','ver')">👁 Ver</button>
         <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','docx')">⬇ Word</button>
         <button class="btn btn-outline btn-sm" onclick="accionRubricaPrograma('${programaId}','pdf')">⬇ PDF</button>
-      </div>`;
+      </div>
+      ${isAdmin ? `<div class="lao-plantilla-box">
+        <div style="font-weight:600;font-size:0.84rem;margin-bottom:4px">📄 Llenar o actualizar el alineamiento con una plantilla</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:6px">La plantilla trae todas las competencias del programa, sus dominios y los criterios actuales. Llénala, súbela aquí y revísala antes de incorporarla.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+          <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaAlineamiento('${programaId}','xlsx')">📥 Plantilla Excel</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaAlineamiento('${programaId}','docx')">📥 Plantilla Word</button>
+        </div>
+        <div class="rbimp-dropzone" ondragover="event.preventDefault();this.classList.add('dz-over')" ondragleave="this.classList.remove('dz-over')" ondrop="handleAlineamientoDrop(event,'${programaId}')" onclick="document.getElementById('prog-alineamiento-file').click()">
+          📤 Arrastra aquí la plantilla llena (Excel o Word), o haz clic para seleccionarla
+        </div>
+        <input type="file" id="prog-alineamiento-file" accept=".xlsx,.docx" style="display:none" onchange="handleAlineamientoFileInput(this,'${programaId}')">
+      </div>` : ''}`;
     })() : ''}
   `;
 }
@@ -17366,6 +17745,22 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="cancelarRevisionRubrica()">❌ Cancelar</button>
       <button class="btn btn-primary" id="rbimp-btn-incorporar" onclick="incorporarRevisionRubrica()">✅ Incorporar rúbrica</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Plantillas de rúbrica (P2): revisión del alineamiento de un programa antes de incorporarlo -->
+<div id="modal-alineamiento-import" class="modal-overlay">
+  <div class="modal" style="max-width:min(1500px,97vw);width:97vw;max-height:92vh;overflow-y:auto">
+    <div class="modal-header">
+      <div class="modal-title" id="alimp-title">📤 Revisar alineamiento</div>
+      <button class="modal-close" onclick="cancelarRevisionAlineamiento()">✕</button>
+    </div>
+    <div id="alimp-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cancelarRevisionAlineamiento()">❌ Cancelar</button>
+      <button class="btn btn-primary" id="alimp-btn-incorporar" onclick="incorporarRevisionAlineamiento()">✅ Incorporar alineamiento</button>
     </div>
   </div>
 </div>
