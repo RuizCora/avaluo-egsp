@@ -6729,6 +6729,10 @@ function descargarPlantillaRubricaLao(formato) {
   if (currentUser?.rol !== 'admin') { notify('Solo el administrador puede incorporar rúbricas', '🔒'); return; }
   const laoId = document.getElementById('lao-edit-id')?.value;
   if (!laoId) { notify('Guarda el LAO primero', '⚠️'); return; }
+  _descargarPlantillaRubricaLaoId(laoId, formato);
+}
+// La plantilla en sí no tiene datos sensibles: la usa también el profesor para su solicitud (P4)
+function _descargarPlantillaRubricaLaoId(laoId, formato) {
   const ctx = _ctxPlantillaRubricaLao(laoId);
   if (!ctx) return;
   const base = `Plantilla_Rubrica_${_nombreArchivoSeguro(ctx.curso.codigo || 'curso', 30)}_${_nombreArchivoSeguro(ctx.lao.nombre.replace(ctx.curso.codigo || '', ''), 40)}`;
@@ -6980,16 +6984,18 @@ function _proponerMapeoNiveles(nivelesDoc, nivelesEscala) {
   });
 }
 
-function abrirRevisionRubrica(laoId, borrador, archivo) {
+function abrirRevisionRubrica(laoId, borrador, archivo, opts) {
   const ctx = _ctxPlantillaRubricaLao(laoId);
   _rbImp = {
-    laoId, ctx, archivo,
+    laoId, ctx, archivo, solicitudId: opts?.solicitudId || null,
     nivelesDoc: borrador.nivelesDoc,
     mapeo: _proponerMapeoNiveles(borrador.nivelesDoc, ctx.niveles),
     criterios: borrador.criterios.map(c => ({ ...c, aportes: { ...c.aportes }, desc: [...c.desc] })),
     avisos: borrador.avisos || [],
   };
-  document.getElementById('rbimp-title').textContent = `📤 Revisar rúbrica — ${ctx.lao.nombre}`;
+  document.getElementById('rbimp-title').textContent = `${opts?.solicitudId ? '📨 Revisar solicitud de rúbrica' : '📤 Revisar rúbrica'} — ${ctx.lao.nombre}`;
+  const solBox = document.getElementById('rbimp-sol-box');
+  if (solBox) { solBox.style.display = opts?.solicitudId ? '' : 'none'; const ta = document.getElementById('rbimp-sol-comentario'); if (ta) ta.value = ''; }
   _renderRevisionRubrica();
   closeModal('modal-lao');
   openModal('modal-rubrica-import');
@@ -7131,8 +7137,9 @@ function _rbImpRepartir() {
 }
 function cancelarRevisionRubrica() {
   closeModal('modal-rubrica-import');
+  const deSolicitud = !!_rbImp?.solicitudId;
   _rbImp = null;
-  openModal('modal-lao');
+  if (!deSolicitud) openModal('modal-lao'); // una solicitud sigue pendiente; se vuelve a Solicitudes
 }
 
 // ── Incorporar ──
@@ -7173,9 +7180,24 @@ function incorporarRevisionRubrica() {
   const registro = { laoId, niveles, criterios: nuevos, origenImportacion: { archivo: _rbImp.archivo, fecha: new Date().toISOString(), por: currentUser?.username || '' } };
   if (existente) Object.assign(existente, registro);
   else db.rubricas.push({ id: 'rub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...registro, escalaId: ctx.escala?.id || null, fechaCreacion: new Date().toISOString() });
+  // P4: si viene de una solicitud del profesor, queda aprobada
+  const solId = _rbImp.solicitudId;
+  if (solId) {
+    const s = db.solicitudes.find(x => x.id === solId);
+    if (s) {
+      s.estado = 'aprobada'; s.revisadoPor = currentUser.nombre; s.fechaRevision = new Date().toISOString();
+      s.comentarioAdmin = document.getElementById('rbimp-sol-comentario')?.value.trim() || 'Rúbrica incorporada';
+    }
+  }
   saveDB();
   closeModal('modal-rubrica-import');
   _rbImp = null;
+  if (solId) {
+    if (typeof renderSolicitudes === 'function') renderSolicitudes();
+    if (typeof applyRoleUI === 'function') applyRoleUI();
+    notify(`Rúbrica incorporada y solicitud aprobada: ${nuevos.length} criterio(s) ✓`, '✅');
+    return;
+  }
   openModal('modal-lao');
   const lbl = document.getElementById('lao-rubrica-btn-label'); if (lbl) lbl.textContent = 'Editar Rúbrica';
   const del = document.getElementById('lao-rubrica-eliminar-btn'); if (del) del.style.display = '';
@@ -7859,6 +7881,145 @@ function _borradorAlineamientoDesdeWordLibre(secuencia, ctx) {
   return { avisos, nivelesDoc: nivelesDoc || [], filas };
 }
 
+
+// ======================== PLANTILLAS DE RÚBRICA (P4: solicitud del profesor) ========================
+// El profesor no incorpora rúbricas (decisión de Edgardo): las SOLICITA.
+// Desde Avalúo escoge el LAO, baja la plantilla (o usa su propio Word), la
+// sube — el sistema la lee en ese momento para que vea si quedó bien — y la
+// envía con un comentario. Se guarda en db.solicitudes (coleccion
+// 'rubrica_lao') con el BORRADOR ya leído; el administrador la abre desde
+// Solicitudes en la misma pantalla de revisión de P1, la edita si hace falta
+// y al incorporarla la solicitud queda aprobada; o la rechaza con comentario.
+
+let _solRub = null; // { cursoId, laoId, borrador, archivo }
+
+function abrirSolicitudRubrica(cursoId, laoId) {
+  const isAdmin = currentUser?.rol === 'admin';
+  const laos = laosDisponiblesPara(cursoId, currentUser?.username, isAdmin).filter(l => !l.isGenerico || (l.competencias || []).length);
+  if (!laos.length) { notify('Este curso no tiene LAOs disponibles', '⚠️'); return; }
+  _solRub = { cursoId, laoId: laoId || laos[0].id, borrador: null, archivo: '' };
+  const curso = db.cursos.find(c => c.id === cursoId);
+  document.getElementById('solrub-title').textContent = `📝 Solicitar rúbrica — ${curso?.codigo || ''}`;
+  document.getElementById('solrub-lao').innerHTML = laos.map(l => {
+    const tiene = (db.rubricas || []).some(r => r.laoId === l.id && r.criterios?.length);
+    return `<option value="${l.id}" ${l.id === _solRub.laoId ? 'selected' : ''}>${_alEsc(l.nombre)} — ${tiene ? 'tiene rúbrica (solicitar cambio)' : 'sin rúbrica (solicitar añadir)'}</option>`;
+  }).join('');
+  document.getElementById('solrub-comentario').value = '';
+  _renderSolicitudRubricaEstado();
+  openModal('modal-solicitud-rubrica');
+}
+function solRubCambiarLao(laoId) { if (!_solRub) return; _solRub.laoId = laoId; _solRub.borrador = null; _solRub.archivo = ''; _renderSolicitudRubricaEstado(); }
+
+function _renderSolicitudRubricaEstado() {
+  const el = document.getElementById('solrub-estado');
+  const btn = document.getElementById('solrub-btn-enviar');
+  const b = _solRub?.borrador;
+  if (btn) btn.disabled = !b;
+  if (!el) return;
+  if (!b) { el.innerHTML = '<span style="color:var(--muted)">Todavía no has subido el archivo.</span>'; return; }
+  const sumaPeso = b.criterios.reduce((s, c) => s + (parseFloat(c.peso) || 0), 0);
+  el.innerHTML = `<div style="color:#2e7d32;font-weight:600">✓ ${_alEsc(_solRub.archivo)} — se leyeron ${b.criterios.length} criterio(s)${sumaPeso ? ` (pesos: ${_round2(sumaPeso)}%)` : ''}.</div>
+    <div style="font-size:0.76rem;margin:4px 0">${b.criterios.map(c => `• ${_alEsc(c.nombre)}${c.peso !== '' ? ` — ${_alEsc(c.peso)}%` : ''}`).join('<br>')}</div>
+    ${(b.avisos || []).length ? `<div class="rbimp-avisos">${b.avisos.map(a => `<div>ℹ️ ${_alEsc(a)}</div>`).join('')}</div>` : ''}
+    <div style="font-size:0.74rem;color:var(--muted)">El administrador revisará la rúbrica (y podrá ajustarla) antes de incorporarla.</div>`;
+}
+
+function descargarPlantillaSolicitudRubrica(formato) {
+  if (!_solRub) return;
+  _descargarPlantillaRubricaLaoId(_solRub.laoId, formato);
+}
+
+async function procesarArchivoSolicitudRubrica(file) {
+  if (!_solRub || !file) return;
+  const ctx = _ctxPlantillaRubricaLao(_solRub.laoId);
+  if (!ctx) return;
+  try {
+    const b = await _borradorDesdeArchivoRubrica(new Uint8Array(await file.arrayBuffer()), file.name, ctx);
+    if (b.error) { notify(b.error, '⚠️'); return; }
+    if (!b.criterios.length) { notify('No se encontraron criterios en el archivo', '⚠️'); return; }
+    _solRub.borrador = b; _solRub.archivo = file.name;
+    _renderSolicitudRubricaEstado();
+  } catch (e) { console.error(e); notify('No se pudo leer el archivo: ' + (e.message || e), '⚠️'); }
+}
+function handleSolicitudRubricaDrop(ev) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('dz-over');
+  const f = ev.dataTransfer?.files?.[0]; if (f) procesarArchivoSolicitudRubrica(f);
+}
+function handleSolicitudRubricaFileInput(input) {
+  const f = input.files?.[0]; if (f) procesarArchivoSolicitudRubrica(f); input.value = '';
+}
+
+// Firebase no guarda null/undefined: el borrador se guarda "limpio" y se normaliza al leerlo
+function _borradorParaGuardar(b) {
+  return {
+    nivelesDoc: b.nivelesDoc.map(n => ({ label: n.label || '', puntos: n.puntos === null || n.puntos === undefined ? -1 : n.puntos, pct: !!n.pct })),
+    criterios: b.criterios.map(c => ({
+      id: c.id || '', nombre: c.nombre || '', peso: c.peso === '' || c.peso === null || c.peso === undefined ? '' : c.peso,
+      aportes: Object.fromEntries(Object.entries(c.aportes || {}).map(([k, v]) => [k, v && typeof v === 'object' ? String(v.invalido ?? '') : (v === undefined || v === null ? '' : v)])),
+      desc: (c.desc || []).map(d => d || ''),
+    })),
+    avisos: (b.avisos || []).slice(0, 20),
+  };
+}
+function _borradorDesdeGuardado(g) {
+  return {
+    nivelesDoc: (g.nivelesDoc || []).map(n => ({ label: n.label || '', puntos: n.puntos === -1 || n.puntos === undefined ? null : n.puntos, pct: !!n.pct })),
+    criterios: (g.criterios || []).map(c => {
+      const aportes = {};
+      Object.entries(c.aportes || {}).forEach(([k, v]) => { aportes[k] = _valorAporte(v); });
+      const nNiv = (g.nivelesDoc || []).length;
+      const desc = Array.from({ length: nNiv }, (_, i) => (c.desc || [])[i] || '');
+      return { id: c.id || '', nombre: c.nombre || '', peso: c.peso === '' || c.peso === undefined ? '' : parseFloat(c.peso), aportes, desc };
+    }),
+    avisos: g.avisos || [],
+  };
+}
+
+function enviarSolicitudRubrica() {
+  if (!_solRub?.borrador) { notify('Sube primero el archivo de la rúbrica', '⚠️'); return; }
+  const lao = db.laos.find(l => l.id === _solRub.laoId);
+  const curso = db.cursos.find(c => c.id === _solRub.cursoId);
+  const tiene = (db.rubricas || []).some(r => r.laoId === _solRub.laoId && r.criterios?.length);
+  const comentario = document.getElementById('solrub-comentario')?.value.trim() || '';
+  const n = _solRub.borrador.criterios.length;
+  const solicitud = {
+    id: 'sol_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    coleccion: 'rubrica_lao',
+    registroId: _solRub.laoId,
+    registroLabel: `${lao?.nombre || ''}${curso ? ' (' + curso.codigo + ')' : ''}`,
+    descripcion: `${tiene ? 'Cambiar la rúbrica' : 'Añadir rúbrica'} (${n} criterio${n === 1 ? '' : 's'}, archivo ${_solRub.archivo})${comentario ? ' — ' + comentario : ''}`,
+    tipoRubrica: tiene ? 'cambiar' : 'añadir',
+    cursoId: _solRub.cursoId,
+    archivoNombre: _solRub.archivo,
+    borradorRubrica: _borradorParaGuardar(_solRub.borrador),
+    solicitante: currentUser.username,
+    solicitanteNombre: currentUser.nombre,
+    fecha: new Date().toISOString(),
+    estado: 'pendiente',
+    revisadoPor: '',
+    fechaRevision: '',
+    comentarioAdmin: '',
+  };
+  db.solicitudes.push(solicitud);
+  saveDB();
+  closeModal('modal-solicitud-rubrica');
+  _solRub = null;
+  notify('Solicitud de rúbrica enviada — el administrador la revisará', '📨');
+  notificarAdminPorEmail(solicitud);
+  if (typeof applyRoleUI === 'function') applyRoleUI();
+}
+
+// Admin: abrir una solicitud de rúbrica en la pantalla de revisión
+function revisarSolicitudRubrica(id) {
+  if (currentUser?.rol !== 'admin') return;
+  const s = db.solicitudes.find(x => x.id === id);
+  if (!s || s.coleccion !== 'rubrica_lao') return;
+  if (!db.laos.find(l => l.id === s.registroId)) { notify('El LAO de esta solicitud ya no existe', '⚠️'); return; }
+  const b = _borradorDesdeGuardado(s.borradorRubrica || {});
+  b.avisos = [`Solicitud de ${s.solicitanteNombre || s.solicitante} (${new Date(s.fecha).toLocaleDateString('es-PR')}): ${s.descripcion}`, ...b.avisos];
+  abrirRevisionRubrica(s.registroId, b, s.archivoNombre || 'solicitud', { solicitudId: id });
+}
+
 // ── Rúbricas del curso en la pantalla de Avalúo (para el profesor) ──
 let _avRubricasDescarga = [];
 function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
@@ -7874,8 +8035,11 @@ function _htmlRubricasAvaluo(cursoId, resueltos, modalidad) {
     if (r.rubrica?.criterios?.length) _avRubricasDescarga.push({ nombre: r.lao.nombre, rubrica: r.rubrica,
       ctx: { cursoId, tipo: 'lao', laoNombre: r.lao.nombre }, nota: 'rúbrica del LAO' });
   });
-  if (!_avRubricasDescarga.length) return '';
-  return `<div class="av-rubricas-box"><strong>📐 Rúbricas de este curso</strong>${_avRubricasDescarga.map((x, i) => `
+  // P4: quien no es administrador puede SOLICITAR añadir o cambiar la rúbrica de un LAO
+  const puedeSolicitar = currentUser && currentUser.rol !== 'admin' && (resueltos || []).length > 0;
+  const btnSolicitar = puedeSolicitar ? `<button type="button" class="btn btn-outline btn-sm" onclick="abrirSolicitudRubrica('${cursoId}')" title="Envía al administrador una rúbrica nueva o cambiada para un LAO de este curso">📝 Solicitar añadir o cambiar una rúbrica</button>` : '';
+  if (!_avRubricasDescarga.length) return puedeSolicitar ? `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div><div style="font-size:0.78rem;color:var(--muted);margin-top:4px">Este curso todavía no tiene rúbricas.</div></div>` : '';
+  return `<div class="av-rubricas-box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong>📐 Rúbricas de este curso</strong>${btnSolicitar}</div>${_avRubricasDescarga.map((x, i) => `
     <div class="av-rubrica-fila"><span><strong>${_alEsc(x.nombre)}</strong> <span style="color:var(--muted)">— ${_alEsc(x.nota)}</span></span>
       <span style="display:flex;gap:6px;flex-wrap:wrap">
         <button type="button" class="btn btn-outline btn-sm" onclick="accionRubricaAvaluo(${i},'ver')">👁 Ver</button>
@@ -16402,7 +16566,7 @@ async function enviarSolicitudEdicion() {
 }
 
 function _solTipoLabel(tipo) {
-  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos' }[tipo] || tipo;
+  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos', rubrica_lao:'Rúbrica de LAO' }[tipo] || tipo;
 }
 function _solEstadoBadge(estado) {
   if (estado === 'aprobada')  return '<span class="badge badge-green">✓ Aprobada</span>';
@@ -16416,8 +16580,8 @@ async function renderSolicitudes() {
   const el = document.getElementById('solicitudes-list');
   const sub = document.getElementById('sol-section-sub');
   if (sub) sub.textContent = isAdmin
-    ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba o rechaza cada una'
-    : 'Historial de tus solicitudes de edición y su estado';
+    ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba, rechaza o elimina cada una'
+    : 'Historial de tus solicitudes de edición y su estado — puedes retirar las que siguen pendientes';
 
   let solicitudes = [...(db.solicitudes||[])];
   if (!isAdmin) solicitudes = solicitudes.filter(s => s.solicitante === currentUser.username);
@@ -16434,7 +16598,10 @@ async function renderSolicitudes() {
     return new Date(b.fecha) - new Date(a.fecha);
   });
 
-  el.innerHTML = `<div class="table-wrap"><table>
+  const nResueltas = solicitudes.filter(s => s.estado !== 'pendiente').length;
+  const barra = isAdmin && nResueltas ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+    <button class="btn btn-outline btn-sm" onclick="eliminarSolicitudesResueltas()" title="Borra todas las solicitudes aprobadas o rechazadas; las pendientes se quedan">🗑 Eliminar resueltas (${nResueltas})</button></div>` : '';
+  el.innerHTML = `${barra}<div class="table-wrap"><table>
     <thead><tr>
       <th>Fecha</th><th>Tipo</th><th>Registro</th><th>Descripción</th>
       ${isAdmin ? '<th>Solicitante</th>' : ''}
@@ -16450,10 +16617,15 @@ async function renderSolicitudes() {
         <td>${_solEstadoBadge(s.estado)}</td>
         <td style="font-size:0.78rem">${s.revisadoPor ? `${s.revisadoPor}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${s.comentarioAdmin}"</span>` : ''}` : '—'}</td>
         <td class="actions-cell">
-          ${isAdmin && s.estado === 'pendiente' ? `
+          ${isAdmin && s.estado === 'pendiente' ? (s.coleccion === 'rubrica_lao' ? `
+            <button class="btn btn-primary btn-sm" onclick="revisarSolicitudRubrica('${s.id}')">🔍 Revisar e incorporar</button>
+            <button class="btn btn-danger btn-sm" onclick="rechazarSolicitud('${s.id}')">✕ Rechazar</button>
+          ` : `
             <button class="btn btn-primary btn-sm" onclick="aprobarSolicitud('${s.id}')">✓ Aprobar</button>
             <button class="btn btn-danger btn-sm" onclick="rechazarSolicitud('${s.id}')">✕ Rechazar</button>
-          ` : '—'}
+          `) : ''}
+          ${_puedeEliminarSolicitud(s) ? `<button class="btn btn-outline btn-sm" onclick="eliminarSolicitud('${s.id}')" title="${isAdmin ? 'Eliminar esta solicitud' : 'Retirar esta solicitud (todavía está pendiente)'}">🗑 ${isAdmin ? 'Eliminar' : 'Retirar'}</button>` : ''}
+          ${!(isAdmin && s.estado === 'pendiente') && !_puedeEliminarSolicitud(s) ? '—' : ''}
         </td>
       </tr>
     `).join('')}</tbody>
@@ -16470,6 +16642,35 @@ function aprobarSolicitud(id) {
   s.comentarioAdmin = comentario;
   saveDB(); renderSolicitudes(); applyRoleUI();
   notify('Solicitud aprobada — recuerda hacer el cambio correspondiente', '✓');
+}
+
+// Eliminar solicitudes: el administrador, cualquiera; el solicitante, solo las
+// suyas que siguen pendientes (las retira antes de que se revisen).
+function _puedeEliminarSolicitud(s) {
+  if (!currentUser || !s) return false;
+  if (getEffectiveRole() === 'admin') return true;
+  return s.solicitante === currentUser.username && s.estado === 'pendiente';
+}
+function eliminarSolicitud(id) {
+  const s = (db.solicitudes || []).find(x => x.id === id);
+  if (!s || !_puedeEliminarSolicitud(s)) { notify('No puedes eliminar esta solicitud', '🔒'); return; }
+  const esAdmin = getEffectiveRole() === 'admin';
+  const msg = esAdmin
+    ? `¿Eliminar esta solicitud (${_solTipoLabel(s.coleccion)} — ${s.registroLabel || ''})?${s.estado === 'pendiente' ? '\n\nTodavía está pendiente: el solicitante dejará de verla.' : ''}\n\nEsta acción no se puede deshacer.`
+    : `¿Retirar tu solicitud (${_solTipoLabel(s.coleccion)} — ${s.registroLabel || ''})?\n\nEl administrador ya no la verá.`;
+  if (!confirm(msg)) return;
+  db.solicitudes = db.solicitudes.filter(x => x.id !== id);
+  saveDB(); renderSolicitudes(); applyRoleUI();
+  notify(esAdmin ? 'Solicitud eliminada' : 'Solicitud retirada', '🗑');
+}
+function eliminarSolicitudesResueltas() {
+  if (getEffectiveRole() !== 'admin') return;
+  const n = (db.solicitudes || []).filter(x => x.estado !== 'pendiente').length;
+  if (!n) return;
+  if (!confirm(`¿Eliminar las ${n} solicitud(es) aprobadas o rechazadas?\n\nLas pendientes se quedan. Esta acción no se puede deshacer.`)) return;
+  db.solicitudes = db.solicitudes.filter(x => x.estado === 'pendiente');
+  saveDB(); renderSolicitudes(); applyRoleUI();
+  notify(`${n} solicitud(es) eliminada(s)`, '🗑');
 }
 
 function rechazarSolicitud(id) {
@@ -17951,6 +18152,11 @@ function dummyShowStatus(msg, type) {
       <button class="modal-close" onclick="cancelarRevisionRubrica()">✕</button>
     </div>
     <div id="rbimp-body"></div>
+    <div id="rbimp-sol-box" class="rbimp-seccion" style="display:none">
+      <label style="font-weight:600;font-size:0.84rem">Comentario para el profesor (opcional)</label>
+      <textarea id="rbimp-sol-comentario" rows="2" style="width:100%" placeholder="ej. Incorporada; ajusté el aporte a G5"></textarea>
+      <div style="font-size:0.74rem;color:var(--muted)">Al incorporar, la solicitud queda aprobada. Para rechazarla, cierra esta pantalla y usa “✕ Rechazar” en Solicitudes.</div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="cancelarRevisionRubrica()">❌ Cancelar</button>
       <button class="btn btn-primary" id="rbimp-btn-incorporar" onclick="incorporarRevisionRubrica()">✅ Incorporar rúbrica</button>
@@ -17970,6 +18176,45 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="cancelarRevisionAlineamiento()">❌ Cancelar</button>
       <button class="btn btn-primary" id="alimp-btn-incorporar" onclick="incorporarRevisionAlineamiento()">✅ Incorporar alineamiento</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Plantillas de rúbrica (P4): solicitud del profesor -->
+<div id="modal-solicitud-rubrica" class="modal-overlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title" id="solrub-title">📝 Solicitar rúbrica</div>
+      <button class="modal-close" onclick="closeModal('modal-solicitud-rubrica')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>LAO</label>
+      <select id="solrub-lao" onchange="solRubCambiarLao(this.value)"></select>
+    </div>
+    <div class="form-group">
+      <label>1. Descarga la plantilla y llénala <span style="font-weight:400;color:var(--muted)">(trae la rúbrica actual del LAO, si tiene)</span></label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaSolicitudRubrica('xlsx')">📥 Plantilla Excel</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaSolicitudRubrica('docx')">📥 Plantilla Word</button>
+      </div>
+      <div style="font-size:0.74rem;color:var(--muted);margin-top:4px">También puedes subir tu propia rúbrica en Word (tabla con criterios y niveles).</div>
+    </div>
+    <div class="form-group">
+      <label>2. Sube el archivo</label>
+      <div class="rbimp-dropzone" ondragover="event.preventDefault();this.classList.add('dz-over')" ondragleave="this.classList.remove('dz-over')" ondrop="handleSolicitudRubricaDrop(event)" onclick="document.getElementById('solrub-file').click()">
+        📤 Arrastra aquí la rúbrica (Excel o Word), o haz clic para seleccionarla
+      </div>
+      <input type="file" id="solrub-file" accept=".xlsx,.docx" style="display:none" onchange="handleSolicitudRubricaFileInput(this)">
+      <div id="solrub-estado" style="margin-top:8px;font-size:0.8rem"></div>
+    </div>
+    <div class="form-group">
+      <label>3. Comentario para el administrador (opcional)</label>
+      <textarea id="solrub-comentario" rows="2" placeholder="ej. Actualicé los descriptores del criterio de Recomendaciones"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-solicitud-rubrica')">Cancelar</button>
+      <button class="btn btn-primary" id="solrub-btn-enviar" onclick="enviarSolicitudRubrica()" disabled>📨 Enviar solicitud</button>
     </div>
   </div>
 </div>
