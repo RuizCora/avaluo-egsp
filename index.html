@@ -2392,6 +2392,7 @@
       <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">
         Cuando alguien envía una solicitud de edición, se le notificará por correo a la dirección configurada aquí.
         Necesitas una cuenta gratuita en <a href="https://www.emailjs.com" target="_blank" rel="noopener">emailjs.com</a> con un servicio y una plantilla ya creados.
+        Para que el correo traiga el enlace directo al registro de la solicitud, añade <code>{{enlace}}</code> a la plantilla en EmailJS.
       </p>
       <div class="form-row">
         <div class="form-group"><label>Service ID</label><input type="text" id="cfg-emailjs-service" placeholder="ej. service_abc123"></div>
@@ -3031,6 +3032,7 @@
   <div class="ficha-head">
     <button type="button" id="ficha-volver" class="btn btn-outline btn-sm" onclick="fichaVolver()" style="display:none">← Volver</button>
     <div id="ficha-head-title" class="ficha-head-title"></div>
+    <button type="button" class="btn btn-outline btn-sm" onclick="fichaCopiarEnlace()" title="Copiar el enlace directo a esta ficha (para correo o Teams)">🔗 Copiar enlace</button>
     <button type="button" class="modal-close" onclick="cerrarFicha()" title="Cerrar (Esc)">✕</button>
   </div>
   <div id="ficha-body" class="ficha-body"></div>
@@ -15011,6 +15013,7 @@ async function doLogin() {
   document.getElementById('login-pwd').value = '';
   applyRoleUI();
   renderDashboard();
+  _fichaTrasLogin(); // I4: si se entró con un enlace a una ficha, se abre ahora
 
   if (user.mustChangePwd) {
     setTimeout(() => {
@@ -17162,6 +17165,9 @@ async function notificarAdminPorEmail(solicitud) {
       solicitante: solicitud.solicitanteNombre || solicitud.solicitante,
       descripcion: solicitud.descripcion,
       fecha: new Date(solicitud.fecha).toLocaleString('es-PR'),
+      // I4: enlace directo a la ficha del registro (o a la app). La plantilla
+      // de EmailJS debe incluir {{enlace}} para que aparezca en el correo.
+      enlace: (() => { const r = _fichaRefSolicitud(solicitud); return r ? urlFicha(r.tipo, r.id) : _urlBaseApp(); })(),
     }, { publicKey: cfg.emailjsPublicKey });
   } catch (e) {
     console.error('No se pudo notificar por email (la solicitud sí se guardó):', e);
@@ -17209,9 +17215,10 @@ function abrirFicha(tipo, id) {
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
   _renderFichaActual(false);
+  _fichaSincronizarHash('push'); // I4: la ficha queda en la URL y en el historial
 }
 function fichaVolver() {
-  if (_fichaStack.length > 1) { _fichaStack.pop(); _renderFichaActual(false); }
+  if (_fichaStack.length > 1) { _fichaStack.pop(); _renderFichaActual(false); _fichaSincronizarHash('replace'); }
 }
 function cerrarFicha() {
   const panel = document.getElementById('ficha-panel');
@@ -17219,6 +17226,7 @@ function cerrarFicha() {
   panel.classList.remove('open');
   panel.setAttribute('aria-hidden', 'true');
   _fichaStack = [];
+  _fichaSincronizarHash('replace');
 }
 // Re-pinta la ficha visible conservando el scroll (después de guardar o de un cambio remoto)
 function _fichaRefrescar() {
@@ -17824,6 +17832,7 @@ function _renderFichaSeccion(secId) {
 
   const acciones = [];
   if (authCan('avaluo') && curso) acciones.push(`<button class="btn btn-primary btn-sm" onclick="fichaEvaluarSeccion('${idA}')">▶ Evaluar</button>`);
+  if (curso) acciones.push(`<button class="btn btn-outline btn-sm" onclick="fichaCopiarEnlaceEvaluar('${idA}')" title="Copia un enlace que lleva directo a Avalúo con esta sección — para enviárselo al profesor">🔗 Enlace para evaluar</button>`);
   if (isAdmin) {
     acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarSeccion('${idA}')">✏️ Editar sección</button>`);
     acciones.push(`<button class="btn btn-outline btn-sm" onclick="openAddEstudiante('${idA}')">＋ Estudiante</button>`);
@@ -18043,17 +18052,105 @@ function _renderFichaEstudiante(num) {
 // Enlace al registro de una solicitud (pestaña Solicitudes)
 function _fichaLinkSolicitud(s) {
   const label = s.registroLabel || '';
-  if (!s.registroId || !label) return '';
+  if (!label) return '';
+  const ref = _fichaRefSolicitud(s);
+  return ref ? fichaLink(ref.tipo, ref.id, label) : '';
+}
+
+// ════════════════════════════════════════════════════════════
+//  FICHAS — Interoperabilidad, Fase I4: enlaces directos por URL.
+//    #ficha=<tipo>/<id>   abre esa ficha (p. ej. #ficha=curso/1712345678)
+//    #evaluar=<secId>     abre Avalúo con esa sección (como ▶ Evaluar)
+//  Se usa el id interno (no el código), para que el enlace no se rompa si el
+//  código cambia. El enlace NO da acceso por sí mismo: se aplican los mismos
+//  permisos, y sin sesión se pide entrar primero. Abrir fichas va quedando en
+//  el historial del navegador, así que "Atrás" regresa a la anterior.
+// ════════════════════════════════════════════════════════════
+let _fichaHashPendiente = null;   // enlace recibido antes de iniciar sesión
+let _fichaAplicandoHash = false;  // evita escribir el hash mientras se lee
+
+function _urlBaseApp() { return location.href.split('#')[0]; }
+function _hashFicha(tipo, id) { return '#ficha=' + tipo + '/' + encodeURIComponent(id); }
+function urlFicha(tipo, id) { return _urlBaseApp() + _hashFicha(tipo, id); }
+function urlEvaluarSeccion(secId) { return _urlBaseApp() + '#evaluar=' + encodeURIComponent(secId); }
+
+function _leerHashFicha(hash) {
+  const h = String(hash || '').replace(/^#/, '');
+  let m = h.match(/^ficha=([a-z]+)\/(.+)$/);
+  if (m && FICHA_TIPOS[m[1]]) { try { return { accion: 'ficha', tipo: m[1], id: decodeURIComponent(m[2]) }; } catch (e) { return null; } }
+  m = h.match(/^evaluar=(.+)$/);
+  if (m) { try { return { accion: 'evaluar', id: decodeURIComponent(m[1]) }; } catch (e) { return null; } }
+  return null;
+}
+// Escribe en la barra de direcciones la ficha visible (o la quita al cerrar)
+function _fichaSincronizarHash(modo) {
+  if (_fichaAplicandoHash) return;
+  try {
+    const top = _fichaStack[_fichaStack.length - 1];
+    const nuevo = top ? _hashFicha(top.tipo, top.id) : '';
+    if ((location.hash || '') === nuevo) return;
+    const url = _urlBaseApp() + nuevo;
+    if (modo === 'push' && nuevo) history.pushState({ ficha: true }, '', url);
+    else history.replaceState(history.state, '', url);
+  } catch (e) { /* algunos entornos (iframes) no permiten tocar el historial */ }
+}
+// Aplica el enlace de la barra de direcciones (al cargar, tras iniciar sesión, o con Atrás/Adelante)
+function _fichaAplicarHash() {
+  const ref = _leerHashFicha(location.hash);
+  if (!currentUser) { _fichaHashPendiente = ref; return; }
+  _fichaAplicandoHash = true;
+  try {
+    if (!ref) { if (_fichaAbierta()) cerrarFicha(); return; }
+    if (ref.accion === 'ficha') abrirFicha(ref.tipo, ref.id);
+    else if (ref.accion === 'evaluar') {
+      fichaEvaluarSeccion(ref.id);
+      try { history.replaceState(history.state, '', _urlBaseApp()); } catch (e) {}
+    }
+  } finally { _fichaAplicandoHash = false; }
+}
+// Llamar justo después de iniciar sesión
+function _fichaTrasLogin() {
+  const ref = _fichaHashPendiente || _leerHashFicha(location.hash);
+  _fichaHashPendiente = null;
+  if (ref) setTimeout(_fichaAplicarHash, 0);
+}
+window.addEventListener('popstate', _fichaAplicarHash);
+window.addEventListener('hashchange', _fichaAplicarHash);
+(function () { const ref = _leerHashFicha(location.hash); if (ref) _fichaHashPendiente = ref; })();
+
+// Copia un texto al portapapeles; si el navegador no lo permite, lo muestra para copiarlo a mano
+async function _copiarTexto(texto, mensaje) {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(texto); notify(mensaje || 'Enlace copiado', '🔗'); return true; }
+  } catch (e) {}
+  try {
+    const ta = document.createElement('textarea'); ta.value = texto; ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove();
+    if (ok) { notify(mensaje || 'Enlace copiado', '🔗'); return true; }
+  } catch (e) {}
+  window.prompt('Copia este enlace:', texto);
+  return false;
+}
+function fichaCopiarEnlace() {
+  const top = _fichaStack[_fichaStack.length - 1];
+  if (top) _copiarTexto(urlFicha(top.tipo, top.id), 'Enlace a esta ficha copiado');
+}
+function fichaCopiarEnlaceEvaluar(secId) {
+  _copiarTexto(urlEvaluarSeccion(secId), 'Enlace para evaluar copiado — al abrirlo, el profesor entra directo a Avalúo con esta sección');
+}
+// Ficha del registro de una solicitud ({ tipo, id } o null)
+function _fichaRefSolicitud(s) {
+  if (!s?.registroId) return null;
   const id = s.registroId;
-  const map = { cursos: 'curso', programas: 'programa', departamentos: 'departamento', rubrica_lao: 'lao', alineamiento: 'programa' };
   if (s.coleccion === 'competencias') {
     const bc = _bancoDeCompCurso((db.competencias || []).find(c => c.id === id));
-    return bc ? fichaLink('competencia', bc.id, label) : '';
+    return bc ? { tipo: 'competencia', id: bc.id } : null;
   }
-  const tipo = map[s.coleccion];
-  if (!tipo) return '';
-  const existe = { curso: db.cursos, programa: db.programas, departamento: db.departamentos, lao: db.laos }[tipo] || [];
-  return existe.some(x => x.id === id) ? fichaLink(tipo, id, label) : '';
+  const tipo = { cursos: 'curso', programas: 'programa', departamentos: 'departamento', rubrica_lao: 'lao', alineamiento: 'programa' }[s.coleccion];
+  if (!tipo) return null;
+  const lista = { curso: db.cursos, programa: db.programas, departamento: db.departamentos, lao: db.laos }[tipo] || [];
+  return lista.some(x => x.id === id) ? { tipo, id } : null;
 }
 
 // ── Ancho de la ficha: se arrastra el borde izquierdo; doble clic lo restablece.
