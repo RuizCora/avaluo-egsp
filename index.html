@@ -1136,6 +1136,46 @@
   }
   .rpt-pane { padding-top:14px; }
 
+  /* Autocompletar genérico (buscador "al estilo R3" para Programa/Curso/
+     Dominio/Competencia/Criterio en los reportes reconceptualizados) */
+  .ac-wrap { position:relative; }
+  .ac-dropdown {
+    display:none; position:absolute; top:100%; left:0; right:0; z-index:40;
+    background:var(--white); border:1.5px solid var(--border); border-radius:8px;
+    margin-top:4px; max-height:240px; overflow-y:auto;
+    box-shadow:0 8px 20px rgba(0,0,0,0.12);
+  }
+  .ac-item { padding:8px 12px; font-size:0.82rem; cursor:pointer; }
+  .ac-item:hover, .ac-item.ac-active { background:var(--cream); }
+  .ac-empty { padding:8px 12px; font-size:0.78rem; color:var(--muted); }
+
+  /* Sub-tabs dentro de un reporte (ej. R1: Vista General / Informe Focalizado) */
+  .rpt-subtabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .rpt-subtab {
+    font-family:'Montserrat',sans-serif; font-size:0.74rem; font-weight:700;
+    padding:7px 14px; border:1.5px solid var(--border); background:var(--white);
+    color:var(--muted); border-radius:20px; cursor:pointer; transition:all 0.15s;
+  }
+  .rpt-subtab:hover { color:var(--ink); background:var(--cream); }
+  .rpt-subtab.active { color:#fff; background:var(--egsp-coral); border-color:var(--egsp-coral); }
+
+  /* Control de re-agrupar niveles ad-hoc (R1-c) */
+  .rpt-agrup-box {
+    background:var(--paper); border:1.5px solid var(--border); border-radius:10px;
+    padding:12px 16px; margin-bottom:16px;
+  }
+  .rpt-agrup-title { font-weight:800; font-size:0.82rem; margin-bottom:8px; }
+  .rpt-agrup-rows { display:flex; flex-wrap:wrap; gap:10px; }
+  .rpt-agrup-row { display:flex; align-items:center; gap:6px; font-size:0.78rem; }
+  .rpt-agrup-row select, .rpt-agrup-row input { font-size:0.78rem; padding:4px 8px; }
+  .rpt-agrup-nombres { display:flex; flex-wrap:wrap; gap:14px; margin-top:8px; }
+
+  .rpt-empty-hint {
+    text-align:center; padding:40px 20px; color:var(--muted);
+    background:var(--paper); border-radius:10px; font-size:0.9rem;
+  }
+  .rpt-empty-hint .dash-empty-icon { font-size:2rem; margin-bottom:8px; }
+
   /* Report table */
   .rpt-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
   .rpt-table th {
@@ -2090,10 +2130,11 @@
   <div class="rpt-export-bar" id="rpt-export-bar" style="display:none">
     <span id="rpt-export-title" style="font-weight:700;font-size:0.88rem;flex:1"></span>
     <button class="btn btn-outline btn-sm" onclick="exportReportCSV()">⬇ CSV</button>
-    <button class="btn btn-outline btn-sm" onclick="exportReportPDF()">🖨 PDF</button>
+    <button class="btn btn-outline btn-sm" onclick="exportReportWord()">⬇ Word</button>
+    <button class="btn btn-outline btn-sm" onclick="exportReportPDF()">⬇ PDF</button>
   </div>
 
-  <!-- R1 — Attainment by Program -->
+  <!-- R1 — Informe de Programa General / Informe Focalizado -->
   <div id="rpt-r1" class="rpt-pane">
     <div class="rpt-filter-bar">
       <div class="dash-filter-group"><label class="dash-filter-label">Año Acad.</label>
@@ -2103,10 +2144,32 @@
           <option value="">Todos</option><option value="T1">T1</option>
           <option value="T2">T2</option><option value="T3">T3</option><option value="V">V</option>
         </select></div>
-      <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
-        <select id="r1-prog" class="dash-select" onchange="renderR1()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group" style="flex:1;min-width:220px"><label class="dash-filter-label">Programa (escribe para buscar)</label>
+        <div class="ac-wrap" id="r1-prog-wrap"><input id="r1-prog" class="dash-select" style="width:100%"></div></div>
     </div>
-    <div id="r1-body"></div>
+    <div class="rpt-subtabs">
+      <button class="rpt-subtab active" id="r1-sub-general" onclick="r1SetSubview('general')">📊 Informe de Programa General</button>
+      <button class="rpt-subtab" id="r1-sub-focal" onclick="r1SetSubview('focal')">🔎 Informe Focalizado</button>
+    </div>
+    <div id="r1-general-pane">
+      <div id="r1-agrup-control"></div>
+      <div id="r1-body"></div>
+    </div>
+    <div id="r1-focal-pane" style="display:none">
+      <div class="rpt-filter-bar">
+        <div class="dash-filter-group"><label class="dash-filter-label">Enfocar en</label>
+          <select id="r1-focal-tipo" class="dash-select" onchange="r1FocalTipoChange()">
+            <option value="dominio">Dominio de competencias</option>
+            <option value="competencia">Una competencia</option>
+            <option value="criterio">Un criterio de la rúbrica</option>
+          </select></div>
+        <div class="dash-filter-group" style="flex:1;min-width:220px"><label class="dash-filter-label" id="r1-focal-obj-label">Dominio (escribe para buscar)</label>
+          <div class="ac-wrap" id="r1-focal-obj-wrap"><input id="r1-focal-obj" class="dash-select" style="width:100%"></div></div>
+        <div class="dash-filter-group" style="flex:1;min-width:200px"><label class="dash-filter-label">Nivel/grupo a comparar por año</label>
+          <select id="r1-focal-nivel" class="dash-select" onchange="renderR1Focal()"><option value="">— Escoge un nivel/grupo —</option></select></div>
+      </div>
+      <div id="r1-focal-body"></div>
+    </div>
   </div>
 
   <!-- R2 — Attainment by Course -->
@@ -12135,6 +12198,89 @@ function _progOptions(scopedAvaluos) {
   return [...progs].sort();
 }
 
+// ======================== AUTOCOMPLETAR GENÉRICO ========================
+// Componente reusable: un <input de texto> + una lista de sugerencias que
+// aparecen al escribir (estilo del buscador que ya usaba R3 — Estudiante),
+// pedido para todo buscador al inicio de cada reporte. No depende de nada
+// global: recibe sus opciones ya armadas y notifica la selección por callback.
+// A diferencia de un <select>, no hay ningún valor escogido hasta que el
+// usuario elige una opción de la lista (lo cual incluye, cuando se permite,
+// elegir explícitamente "Todos" como una opción más) — así se cumple la
+// regla de "no mostrar nada automático" en los reportes que lo usan como
+// único criterio de entrada.
+//
+// options: [{value, label}]
+// cfg: { allowAll, allLabel, placeholder, initialValue, onSelect(value,label), onTyping() }
+const _acState = {};
+
+function autocompleteBuild(inputId, options, cfg = {}) {
+  const wrap = document.getElementById(inputId + '-wrap');
+  const input = document.getElementById(inputId);
+  if (!wrap || !input) return;
+  const allOpts = cfg.allowAll
+    ? [{ value: '', label: cfg.allLabel || 'Todos' }, ...options]
+    : options;
+  input.placeholder = cfg.placeholder || 'Escribe para buscar…';
+  input.setAttribute('autocomplete', 'off');
+  let listEl = document.getElementById(inputId + '-ac-list');
+  if (!listEl) {
+    listEl = document.createElement('div');
+    listEl.id = inputId + '-ac-list';
+    listEl.className = 'ac-dropdown';
+    wrap.appendChild(listEl);
+  }
+  let currentMatches = [];
+  function renderList(q) {
+    const query = String(q || '').trim().toLowerCase();
+    currentMatches = allOpts.filter(o => !query || String(o.label).toLowerCase().includes(query)).slice(0, 50);
+    listEl.innerHTML = currentMatches.length
+      ? currentMatches.map((o, i) => `<div class="ac-item" data-idx="${i}">${_alEsc(o.label)}</div>`).join('')
+      : '<div class="ac-empty">Sin coincidencias</div>';
+    listEl.style.display = 'block';
+    listEl.querySelectorAll('.ac-item').forEach(it => {
+      it.onclick = () => selectOpt(currentMatches[+it.dataset.idx]);
+    });
+  }
+  function selectOpt(o) {
+    if (!o) return;
+    _acState[inputId] = { value: o.value, label: o.label };
+    input.value = o.label;
+    listEl.style.display = 'none';
+    if (cfg.onSelect) cfg.onSelect(o.value, o.label);
+  }
+  input.oninput = () => { renderList(input.value); if (cfg.onTyping) cfg.onTyping(); };
+  input.onfocus = () => renderList(input.value);
+  input.onblur = () => setTimeout(() => { listEl.style.display = 'none'; }, 150);
+  input.onkeydown = (e) => {
+    const items = [...listEl.querySelectorAll('.ac-item')];
+    let idx = items.findIndex(i => i.classList.contains('ac-active'));
+    if (e.key === 'ArrowDown') {
+      e.preventDefault(); idx = Math.min(items.length - 1, idx + 1);
+      items.forEach(i => i.classList.remove('ac-active')); items[idx]?.classList.add('ac-active');
+      items[idx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault(); idx = Math.max(0, idx - 1);
+      items.forEach(i => i.classList.remove('ac-active')); items[idx]?.classList.add('ac-active');
+      items[idx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); selectOpt(currentMatches[idx] ?? currentMatches[0]);
+    } else if (e.key === 'Escape') {
+      listEl.style.display = 'none';
+    }
+  };
+  if (cfg.initialValue !== undefined && cfg.initialValue !== null) {
+    const found = allOpts.find(o => String(o.value) === String(cfg.initialValue));
+    if (found) { _acState[inputId] = { value: found.value, label: found.label }; input.value = found.label; }
+  }
+}
+// Valor escogido (string) o null si el usuario todavía no ha elegido nada.
+function autocompleteValue(inputId) { return _acState[inputId] ? _acState[inputId].value : null; }
+function autocompleteClear(inputId) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = '';
+  delete _acState[inputId];
+}
+
 function _populateSelect(id, values, labelFn) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -12236,7 +12382,16 @@ function renderReportes() {
   const scoped = _filterAvaluosByRole(db.avaluos||[]);
   const progs  = _progOptions(scoped);
   const cursos = db.cursos.filter(c=>scoped.some(a=>a.cursoId===c.id));
-  ['r1-prog','r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id=>_populateSelect(id,progs));
+  // R1 — Programa es un autocompletar (no un <select>): nada se muestra
+  // hasta que el usuario elija una opción de la lista, "Todos los
+  // programas" incluida como una opción más a escoger.
+  autocompleteBuild('r1-prog', progs.map(p => ({ value: p, label: p })), {
+    allowAll: true, allLabel: 'Todos los programas',
+    placeholder: 'Escribe para buscar un programa…',
+    initialValue: autocompleteValue('r1-prog'),
+    onSelect: () => renderR1(),
+  });
+  ['r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id=>_populateSelect(id,progs));
   ['r2-curso','r5-curso','r8-curso'].forEach(id=>_populateSelect(id,cursos.map(c=>c.id),id=>db.cursos.find(c=>c.id===id)?.codigo||id));
   // R6 threshold global default
   const saved = localStorage.getItem('r6_threshold_global');
@@ -12261,26 +12416,210 @@ function renderReportes() {
 
 function exportReportCSV() { _exportCSV(_reportCSVName, _reportCSVData); }
 
-function exportReportPDF() {
-  const title = document.getElementById('rpt-export-title')?.textContent || 'Reporte';
-  // Inject print header
-  document.querySelectorAll('.rpt-print-header').forEach(e=>e.remove());
-  const pane = document.getElementById('rpt-'+_activeReport);
-  if (pane) {
-    const h = document.createElement('div');
-    h.className = 'rpt-print-header';
-    h.innerHTML = `<h2>EGSP · ${title}</h2><p>Generado: ${new Date().toLocaleString('es-PR')} · Usuario: ${currentUser?.nombre||'—'}</p>`;
-    pane.prepend(h);
-  }
-  window.print();
+// Datos tabulares vigentes del reporte activo, listos para exportar (la
+// primera fila de _reportCSVData es siempre el encabezado — mismo patrón
+// que usa exportReportCSV). null si el reporte no tiene nada en pantalla.
+function _reportExportTabla() {
+  if (!_reportCSVData || _reportCSVData.length < 1) return null;
+  return { headers: _reportCSVData[0].map(h => h ?? ''), rows: _reportCSVData.slice(1) };
+}
+function _reportExportSubtitulo() {
+  return 'EGSP · Generado: ' + new Date().toLocaleString('es-PR') + ' · Usuario: ' + (currentUser?.nombre || '—');
 }
 
-// ── R1 — Attainment by Program ────────────────────────────────
+// ── Word (.docx) — tabla genérica a partir de lo que esté en pantalla ──
+// Reutiliza los mismos constructores OOXML de _construirDocxRubrica
+// (_docxCelda/_docxParrafos/_construirZipStore), pero con una sola tabla
+// de encabezados+filas en vez del formato fijo de rúbrica.
+function _construirDocxTabla(titulo, subtitulo, headers, rows) {
+  const nCols = Math.max(headers.length, 1);
+  const landscape = nCols > 6;
+  const anchoTotal = landscape ? 14400 : 9360;
+  const anchoCol = Math.floor(anchoTotal / nCols);
+  const grid = `<w:tblGrid>${headers.map(() => `<w:gridCol w:w="${anchoCol}"/>`).join('')}</w:tblGrid>`;
+  const bordes = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(b => `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`).join('');
+  const rHead = '<w:b/><w:color w:val="FFFFFF"/><w:sz w:val="16"/>';
+  const rBody = '<w:sz w:val="15"/>';
+  const head = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${headers.map(h => _docxCelda(h, anchoCol, { fill: '1B365D', rPr: rHead })).join('')}</w:tr>`;
+  const filas = rows.map(r => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${headers.map((_, i) => _docxCelda(r[i], anchoCol, { rPr: rBody })).join('')}</w:tr>`).join('');
+  const encabezado =
+    _docxParrafos(titulo, '<w:b/><w:color w:val="1B365D"/><w:sz w:val="26"/>', '<w:jc w:val="center"/>') +
+    (subtitulo ? _docxParrafos(subtitulo, '<w:i/><w:color w:val="666666"/><w:sz w:val="16"/>', '<w:jc w:val="center"/><w:spacing w:after="160"/>') : '');
+  const pgW = landscape ? 15840 : 12240, pgH = landscape ? 12240 : 15840;
+  const documento = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>${encabezado}<w:tbl><w:tblPr><w:tblW w:w="${anchoTotal}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bordes}</w:tblBorders></w:tblPr>${grid}${head}${filas}</w:tbl><w:sectPr><w:pgSz w:w="${pgW}" w:h="${pgH}" w:orient="${landscape ? 'landscape' : 'portrait'}"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+  const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="18"/><w:lang w:val="es-PR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+</w:styles>`;
+  const files = [
+    { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>` },
+    { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>` },
+    { name: 'word/_rels/document.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name: 'word/document.xml', data: documento },
+    { name: 'word/styles.xml', data: estilos },
+  ];
+  return _construirZipStore(files);
+}
+function exportReportWord() {
+  const tabla = _reportExportTabla();
+  if (!tabla) { notify('No hay datos en pantalla para exportar en este reporte.', '⚠️'); return; }
+  const titulo = document.getElementById('rpt-export-title')?.textContent || 'Reporte';
+  const nombre = _nombreArchivoSeguro((_reportCSVName || 'reporte.csv').replace(/\.csv$/i, ''));
+  _descargarBytes(_construirDocxTabla(titulo, _reportExportSubtitulo(), tabla.headers, tabla.rows), nombre + '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  notify('Reporte descargado en Word ✓', '📄');
+}
+
+// ── PDF (jsPDF + autoTable) — tabla genérica a partir de lo que esté en pantalla ──
+function _construirPdfTabla(titulo, subtitulo, headers, rows) {
+  const { jsPDF } = window.jspdf;
+  const landscape = headers.length > 6;
+  const doc = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'pt', format: 'letter' });
+  const W = doc.internal.pageSize.getWidth(), M = 30;
+  doc.setFont('helvetica', 'bold'); doc.setTextColor(27, 54, 93); doc.setFontSize(13);
+  doc.text(_pdfTexto(titulo), W / 2, 34, { align: 'center' });
+  if (subtitulo) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110, 110, 110);
+    doc.text(_pdfTexto(subtitulo), W / 2, 48, { align: 'center' });
+  }
+  doc.autoTable({
+    startY: 58, margin: { left: M, right: M },
+    head: [headers.map(_pdfTexto)],
+    body: rows.map(r => r.map(_pdfTexto)),
+    theme: 'grid',
+    styles: { font: 'helvetica', fontSize: 7, cellPadding: 3, valign: 'top', lineColor: [191, 191, 191], lineWidth: 0.4, textColor: [25, 25, 25] },
+    headStyles: { fillColor: [27, 54, 93], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+  });
+  return doc;
+}
+async function exportReportPDF() {
+  const tabla = _reportExportTabla();
+  if (!tabla) { notify('No hay datos en pantalla para exportar en este reporte.', '⚠️'); return; }
+  try {
+    notify('Preparando el PDF…', '⏳');
+    await _cargarLibreriasPdf();
+    const titulo = document.getElementById('rpt-export-title')?.textContent || 'Reporte';
+    const nombre = _nombreArchivoSeguro((_reportCSVName || 'reporte.csv').replace(/\.csv$/i, ''));
+    const doc = _construirPdfTabla(titulo, _reportExportSubtitulo(), tabla.headers, tabla.rows);
+    _descargarBytes(doc.output('arraybuffer'), nombre + '.pdf', 'application/pdf');
+    notify('Reporte descargado en PDF ✓', '📄');
+  } catch (e) {
+    console.error(e);
+    notify('No se pudo generar el PDF (¿sin conexión?). Prueba la descarga en Word.', '⚠️');
+  }
+}
+
+// ── R1 — Informe de Programa General + Informe Focalizado ──────
+// Reconceptualización (2026-10-23): ver claude/plan-reconceptualizacion-reportes.md
+let _r1Subview = 'general';
+let _r1NivelAsignacion = {};              // valor de nivel -> 'individual'|'A'|'B'|'C'
+let _r1GrupoNombres = { A: '', B: '', C: '' };
+let _r1AgrupInicializada = false;
+let _r1EscalaIdActual = null;
+
+function r1SetSubview(view) {
+  _r1Subview = view;
+  document.getElementById('r1-sub-general').classList.toggle('active', view === 'general');
+  document.getElementById('r1-sub-focal').classList.toggle('active', view === 'focal');
+  document.getElementById('r1-general-pane').style.display = view === 'general' ? '' : 'none';
+  document.getElementById('r1-focal-pane').style.display = view === 'focal' ? '' : 'none';
+  if (view === 'general') renderR1General(); else renderR1Focal();
+}
+// showReport()/los filtros de arriba llaman siempre a renderR1(): despacha
+// a la subvista activa para no pisar los datos de exportación de la otra.
 function renderR1() {
+  if (_r1Subview === 'focal') renderR1Focal(); else renderR1General();
+}
+
+// ── R1-c: re-agrupar niveles ad-hoc (solo tiene sentido con UN programa
+// específico escogido, ya que cada programa puede tener su propia Escala
+// de Niveles). Arranca desde las agrupaciones default configuradas en la
+// Escala de Niveles del programa; el usuario puede reasignarlas aquí sin
+// que eso modifique la Escala de Niveles real guardada — el cambio es
+// solo para esta vista del reporte.
+function _r1InitAgrupacionAdHoc(escala) {
+  _r1NivelAsignacion = {}; _r1GrupoNombres = { A: '', B: '', C: '' };
+  const letras = ['A', 'B', 'C'];
+  (escala?.agrupaciones || []).slice(0, 3).forEach((g, i) => {
+    _r1GrupoNombres[letras[i]] = g.nombre;
+    (g.valores || []).forEach(v => { _r1NivelAsignacion[v] = letras[i]; });
+  });
+  (escala?.niveles?.length ? escala.niveles : ESCALA_NIVELES_DEFAULT.niveles).forEach(n => {
+    if (_r1NivelAsignacion[n.valor] === undefined) _r1NivelAsignacion[n.valor] = 'individual';
+  });
+}
+// Variante de construirColumnasNivel() que usa la asignación ad-hoc en vez
+// de las agrupaciones guardadas en la escala.
+function construirColumnasNivelAdHoc(escala) {
+  const niveles = escala?.niveles?.length ? escala.niveles : ESCALA_NIVELES_DEFAULT.niveles;
+  const letras = ['A', 'B', 'C'];
+  const columnas = [];
+  letras.forEach(letra => {
+    const valores = niveles.filter(n => _r1NivelAsignacion[n.valor] === letra).map(n => n.valor);
+    if (valores.length) columnas.push({ label: _r1GrupoNombres[letra] || ('Grupo ' + letra), valores, max: Math.max(...valores), esGrupo: true });
+  });
+  niveles.forEach(n => {
+    if ((_r1NivelAsignacion[n.valor] || 'individual') === 'individual') columnas.push({ label: n.titulo, valores: [n.valor], max: n.valor, esGrupo: false });
+  });
+  columnas.sort((a, b) => b.max - a.max);
+  return columnas;
+}
+function _r1RenderAgrupacionControl(escala) {
+  const niveles = (escala?.niveles?.length ? escala.niveles : ESCALA_NIVELES_DEFAULT.niveles).slice().sort((a, b) => b.valor - a.valor);
+  const letras = ['A', 'B', 'C'];
+  let html = '<div class="rpt-agrup-box"><div class="rpt-agrup-title">🧩 Agrupar niveles para esta vista (empieza con la agrupación default del programa — puedes cambiarla)</div><div class="rpt-agrup-rows">';
+  niveles.forEach(n => {
+    const actual = _r1NivelAsignacion[n.valor] || 'individual';
+    html += `<div class="rpt-agrup-row"><span>${_alEsc(n.titulo)}</span><select class="dash-select" onchange="_r1CambiarAsignacion(${n.valor}, this.value)">
+      <option value="individual" ${actual === 'individual' ? 'selected' : ''}>Individual</option>
+      ${letras.map(l => `<option value="${l}" ${actual === l ? 'selected' : ''}>Grupo ${l}</option>`).join('')}
+    </select></div>`;
+  });
+  html += '</div><div class="rpt-agrup-nombres">';
+  letras.forEach(l => {
+    const enUso = Object.values(_r1NivelAsignacion).includes(l);
+    html += `<div class="rpt-agrup-row" style="${enUso ? '' : 'display:none'}"><span>Nombre Grupo ${l}</span>
+      <input class="dash-select" value="${_alEsc(_r1GrupoNombres[l] || '')}" placeholder="Ej. Logrado" onchange="_r1CambiarNombreGrupo('${l}', this.value)"></div>`;
+  });
+  html += '</div></div>';
+  return html;
+}
+function _r1CambiarAsignacion(valor, letraOIndividual) { _r1NivelAsignacion[valor] = letraOIndividual; renderR1General(); }
+function _r1CambiarNombreGrupo(letra, nombre) { _r1GrupoNombres[letra] = nombre; renderR1General(); }
+
+// ── R1 · Informe de Programa General ────────────────────────────
+function renderR1General() {
   const filterAY   = document.getElementById('r1-ay')?.value||'';
   const filterTerm = document.getElementById('r1-term')?.value||'';
-  const filterProg = document.getElementById('r1-prog')?.value||'';
-  document.getElementById('rpt-export-title').textContent = 'R1 · Logro por Programa';
+  const progVal = autocompleteValue('r1-prog');
+  document.getElementById('rpt-export-title').textContent = 'R1 · Informe de Programa General';
+  const el = document.getElementById('r1-body');
+  const agrupEl = document.getElementById('r1-agrup-control');
+
+  // Regla general: nada se muestra hasta que se elija un programa
+  // (incluyendo "Todos los programas" como opción explícita de la lista).
+  if (progVal === null) {
+    el.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escribe y escoge un programa (o "Todos los programas") arriba para ver el informe.</p></div>';
+    agrupEl.innerHTML = '';
+    _reportCSVData = []; _reportCSVName = 'R1_logro_programa.csv';
+    return;
+  }
+  const filterProg = progVal;
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[]);
   if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
@@ -12291,8 +12630,11 @@ function renderR1() {
   });
 
   const evals = _allEvals(avaluos);
-  const el = document.getElementById('r1-body');
-  if (!evals.length) { el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos para los filtros seleccionados</p></div>'; _reportCSVData=[]; return; }
+  if (!evals.length) {
+    el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos para los filtros seleccionados</p></div>';
+    agrupEl.innerHTML = '';
+    _reportCSVData=[]; return;
+  }
 
   // Group by program → competency (se guarda un cursoId de muestra por
   // programa para poder resolver su escala de niveles)
@@ -12305,13 +12647,30 @@ function renderR1() {
     byProg[prog].comps[ev.compCode].vals.push(ev.val);
   });
 
+  // Control de re-agrupar niveles ad-hoc (R1-c): solo cuando se ve UN
+  // programa específico, porque cada uno puede tener su propia escala.
+  const progsEnVista = Object.keys(byProg);
+  let escalaUnica = null;
+  if (filterProg && progsEnVista.length) {
+    escalaUnica = resolverEscalaParaCurso(byProg[progsEnVista[0]].cursoMuestra) || resolverEscalaParaPrograma(filterProg);
+    if (!_r1AgrupInicializada || _r1EscalaIdActual !== escalaUnica?.id) {
+      _r1InitAgrupacionAdHoc(escalaUnica);
+      _r1EscalaIdActual = escalaUnica?.id;
+      _r1AgrupInicializada = true;
+    }
+    agrupEl.innerHTML = _r1RenderAgrupacionControl(escalaUnica);
+  } else {
+    agrupEl.innerHTML = '';
+    _r1AgrupInicializada = false;
+  }
+
   let html = '';
   const csvRows = [];
   let csvHeaderEscrito = false;
   Object.entries(byProg).sort(([a],[b])=>a.localeCompare(b)).forEach(([prog,{comps,cursoMuestra}])=>{
     const escala = resolverEscalaParaCurso(cursoMuestra);
-    const columnas = construirColumnasNivel(escala);
-    if (!csvHeaderEscrito) { csvRows.push(['Programa','Competencia','Descripción', ...columnas.map(c=>c.label), 'Total','Avg Logro']); csvHeaderEscrito = true; }
+    const columnas = (escalaUnica && escala?.id === escalaUnica.id) ? construirColumnasNivelAdHoc(escala) : construirColumnasNivel(escala);
+    if (!csvHeaderEscrito) { csvRows.push(['Programa','Competencia','Descripción', ...columnas.map(c=>c.label+' (N)'), ...columnas.map(c=>c.label+' (%)'), 'Total','Avg Logro']); csvHeaderEscrito = true; }
     const progAvg = _avgNivel(Object.values(comps).flatMap(c=>c.vals));
     html += `<div class="rpt-section-head"><span>${prog}</span><span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(progAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${progAvg?.toFixed(2)||'—'}</span></div>`;
     html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
@@ -12320,20 +12679,212 @@ function renderR1() {
     Object.values(comps).sort((a,b)=>a.code.localeCompare(b.code)).forEach(c=>{
       const total=c.vals.length, avg=_avgNivel(c.vals);
       const counts = contarEnColumnas(c.vals, columnas);
+      const pcts = counts.map(n=>total?Math.round(n/total*100):0);
       html += `<tr>
         <td><strong>${c.code}</strong></td>
         <td style="font-size:0.75rem;max-width:260px">${c.desc}</td>
-        ${counts.map(n=>`<td>${n}</td>`).join('')}
+        ${counts.map((n,i)=>`<td>${n} <span style="color:var(--muted);font-size:0.72rem">(${pcts[i]}%)</span></td>`).join('')}
         <td>${total}</td>
         <td>${_avgBadge(avg)}</td>
         <td>${_miniBarDinamico(counts,total)}</td>
       </tr>`;
-      csvRows.push([prog,c.code,c.desc,...counts,total,avg?.toFixed(2)||'']);
+      csvRows.push([prog,c.code,c.desc,...counts,...pcts,total,avg?.toFixed(2)||'']);
     });
     html += '</tbody></table></div>';
   });
   el.innerHTML = html;
   _reportCSVData = csvRows; _reportCSVName = 'R1_logro_programa.csv';
+}
+
+// ── R1-d/e · Informe Focalizado (dominio / competencia / criterio) +
+//            comparativa por año académico ──────────────────────
+// Evaluaciones que corresponden al "foco" elegido, a partir de los avalúos
+// ya filtrados por programa/año/trimestre. Devuelve objetos compatibles
+// con construirColumnasNivel/contarEnColumnas/_avgNivel ({val,...}).
+function _evalsParaFoco(avaluosScope, foco) {
+  if (foco.tipo === 'dominio') {
+    const codigos = new Set(db.bancoCompetencias.filter(c => c.dominioId === foco.valor).map(c => c.codigo));
+    return _allEvals(avaluosScope).filter(ev => codigos.has(ev.compCode));
+  }
+  if (foco.tipo === 'competencia') {
+    return _allEvals(avaluosScope).filter(ev => ev.compCode === foco.valor);
+  }
+  if (foco.tipo === 'criterio') {
+    // El nivel por criterio vive en av.criteriosResp, con llave <criterioId>
+    // o <criterioId>__<n> (varias competencias comparten un criterio) — el
+    // mismo patrón que usa _usosCriterioAlineamiento.
+    const out = [];
+    avaluosScope.forEach(av => {
+      const resp = av.criteriosResp || {};
+      Object.entries(resp).forEach(([k, v]) => {
+        if (v === '' || v === undefined || v === null) return;
+        if (k.split('__')[0] !== foco.valor) return;
+        const val = nvValor(v);
+        if (val === undefined) return;
+        out.push({ val, nivel: String(v), cursoId: av.cursoId, semestre: av.semestre, avaluoId: av.id });
+      });
+    });
+    return out;
+  }
+  return [];
+}
+function _r1PoblarFocalObjetivo() {
+  const progVal = autocompleteValue('r1-prog');
+  const tipo = document.getElementById('r1-focal-tipo')?.value || 'dominio';
+  let opciones = [];
+  if (progVal) { // "Todos los programas" no aplica al foco — se necesita uno específico
+    if (tipo === 'dominio') {
+      opciones = dominiosDePrograma(progVal).map(d => ({ value: d.id, label: d.nombre }));
+    } else if (tipo === 'competencia') {
+      opciones = db.bancoCompetencias.filter(c => c.programa === progVal)
+        .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)))
+        .map(c => ({ value: c.codigo, label: c.codigo + ' — ' + (c.descripcion || '') }));
+    } else if (tipo === 'criterio') {
+      db.bancoCompetencias.filter(c => c.programa === progVal).forEach(c => {
+        criteriosDeCompetencia(c).forEach(cr => opciones.push({ value: cr.id, label: c.codigo + ' · ' + cr.nombre }));
+      });
+    }
+  }
+  autocompleteBuild('r1-focal-obj', opciones, {
+    placeholder: opciones.length ? 'Escribe para buscar…' : 'Primero escoge un programa específico arriba',
+    initialValue: autocompleteValue('r1-focal-obj'),
+    onSelect: () => renderR1Focal(),
+  });
+}
+function r1FocalTipoChange() {
+  const tipo = document.getElementById('r1-focal-tipo').value;
+  const labels = { dominio: 'Dominio (escribe para buscar)', competencia: 'Competencia (escribe para buscar)', criterio: 'Criterio (escribe para buscar)' };
+  document.getElementById('r1-focal-obj-label').textContent = labels[tipo] || 'Objetivo';
+  autocompleteClear('r1-focal-obj');
+  document.getElementById('r1-focal-nivel').innerHTML = '<option value="">— Escoge un nivel/grupo —</option>';
+  renderR1Focal();
+}
+// Agrupa los valores evaluados del foco elegido por año académico, para la
+// comparativa (tabla + gráficas) del nivel/grupo que el usuario escoja.
+function _r1ComparativaPorAnio(evals, columna, avaluosScope) {
+  const porAnio = {};
+  evals.forEach(ev => {
+    const av = avaluosScope.find(a => a.id === ev.avaluoId);
+    const ay = getAcademicYear(av ? _getSemestre(av) : ev.semestre);
+    if (!ay) return;
+    if (!porAnio[ay]) porAnio[ay] = [];
+    porAnio[ay].push(ev.val);
+  });
+  return Object.keys(porAnio).sort().map(ay => {
+    const vals = porAnio[ay];
+    const total = vals.length;
+    const enColumna = vals.filter(v => columna.valores.includes(Math.round(v))).length;
+    return { ay, total, enColumna, pct: total ? Math.round(enColumna / total * 100) : 0, avgNivel: total ? _avgNivel(vals) : null };
+  });
+}
+// Tabla + gráfica de barras (%) + gráfica de serie (línea, promedio del
+// nivel) por año académico — SVG inline, sin librerías (mismo patrón de R4).
+function _r1HtmlComparativaAnio(columna, comp) {
+  if (!comp.length) return '<div class="dash-empty"><p>Sin años académicos identificables para esta comparativa</p></div>';
+  const W = 480, H = 170, PAD = { top: 16, right: 16, bottom: 28, left: 34 };
+  const iW = W - PAD.left - PAD.right, iH = H - PAD.top - PAD.bottom;
+  const n = comp.length;
+  const barW = Math.min(36, iW / n * 0.6);
+  const xC = i => n < 2 ? PAD.left + iW / 2 : PAD.left + (i / (n - 1)) * iW;
+  const yPct = p => PAD.top + iH - (p / 100) * iH;
+  const gridPct = [0, 25, 50, 75, 100];
+  const gridsBar = gridPct.map(p => `<line x1="${PAD.left}" y1="${yPct(p)}" x2="${PAD.left + iW}" y2="${yPct(p)}" stroke="#efefef" stroke-width="1"/><text x="${PAD.left - 4}" y="${yPct(p) + 3}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${p}%</text>`).join('');
+  const bars = comp.map((r, i) => {
+    const x = xC(i) - barW / 2, y = yPct(r.pct);
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${(PAD.top + iH) - y}" fill="#f27d67" rx="2"><title>AY ${r.ay}: ${r.pct}%</title></rect>`;
+  }).join('');
+  const labelsBar = comp.map((r, i) => `<text x="${xC(i)}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">AY ${r.ay}</text>`).join('');
+
+  const maxAvg = Math.max(...comp.map(r => r.avgNivel || 0), 1);
+  const yAvg = v => PAD.top + iH - (v / maxAvg) * iH;
+  const gridsLine = Array.from({ length: 5 }, (_, i) => i / 4 * maxAvg).map(v => `<line x1="${PAD.left}" y1="${yAvg(v)}" x2="${PAD.left + iW}" y2="${yAvg(v)}" stroke="#efefef" stroke-width="1"/><text x="${PAD.left - 4}" y="${yAvg(v) + 3}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${v.toFixed(1)}</text>`).join('');
+  const pts = comp.map((r, i) => r.avgNivel !== null ? { x: xC(i), y: yAvg(r.avgNivel) } : null);
+  const path = pts.filter(Boolean).reduce((acc, p, i) => acc + (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`), '');
+  const dots = pts.map((p, i) => p ? `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="#3b82f6" stroke="white" stroke-width="1.5"><title>AY ${comp[i].ay}: ${comp[i].avgNivel.toFixed(2)}</title></circle>` : '').join('');
+
+  const tabla = `<div style="overflow-x:auto;margin-top:10px"><table class="rpt-table"><thead><tr><th>Año Académico</th><th>N en "${_alEsc(columna.label)}"</th><th>Total</th><th>%</th><th>Promedio de nivel</th></tr></thead><tbody>
+    ${comp.map(r => `<tr><td>AY ${r.ay}</td><td>${r.enColumna}</td><td>${r.total}</td><td>${r.pct}%</td><td>${r.avgNivel !== null ? r.avgNivel.toFixed(2) : '—'}</td></tr>`).join('')}
+  </tbody></table></div>`;
+
+  return `<div class="rpt-section-head"><span>📅 Comparativa por año académico — ${_alEsc(columna.label)}</span></div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px">
+      <div><div style="font-size:0.74rem;font-weight:700;color:var(--muted);margin-bottom:4px">% en "${_alEsc(columna.label)}" por año</div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">${gridsBar}${bars}${labelsBar}</svg></div>
+      <div><div style="font-size:0.74rem;font-weight:700;color:var(--muted);margin-bottom:4px">Promedio de nivel por año (serie)</div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">${gridsLine}<path d="${path}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg></div>
+    </div>
+    ${tabla}`;
+}
+function renderR1Focal() {
+  _r1PoblarFocalObjetivo();
+  document.getElementById('rpt-export-title').textContent = 'R1 · Informe Focalizado';
+  const body = document.getElementById('r1-focal-body');
+  const progVal = autocompleteValue('r1-prog');
+  const tipo = document.getElementById('r1-focal-tipo')?.value || 'dominio';
+  const objVal = autocompleteValue('r1-focal-obj');
+
+  if (progVal === null) {
+    body.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Primero escoge un programa arriba.</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R1_focalizado.csv'; return;
+  }
+  if (!progVal) {
+    body.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🎯</div><p>El Informe Focalizado trabaja un programa a la vez — escoge un programa específico (no "Todos los programas") arriba.</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R1_focalizado.csv'; return;
+  }
+  if (objVal === null) {
+    const nombreFoco = tipo === 'dominio' ? 'dominio' : tipo === 'competencia' ? 'competencia' : 'criterio';
+    body.innerHTML = `<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escoge un ${nombreFoco} arriba para ver su distribución de niveles.</p></div>`;
+    _reportCSVData = []; _reportCSVName = 'R1_focalizado.csv'; return;
+  }
+
+  const filterAY   = document.getElementById('r1-ay')?.value||'';
+  const filterTerm = document.getElementById('r1-term')?.value||'';
+  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===progVal);
+  if (filterAY||filterTerm) avaluos = avaluos.filter(av=>{
+    const t=parseTermString(_getSemestre(av)); if(!t) return false;
+    if(filterAY && String(getAcademicYear(_getSemestre(av)))!==filterAY) return false;
+    if(filterTerm && t.term!==filterTerm) return false; return true;
+  });
+
+  const evals = _evalsParaFoco(avaluos, { tipo, valor: objVal });
+  const escala = resolverEscalaParaCurso(avaluos[0]?.cursoId) || resolverEscalaParaPrograma(progVal);
+  const columnas = construirColumnasNivel(escala);
+
+  const selNivel = document.getElementById('r1-focal-nivel');
+  const prevNivel = selNivel.value;
+  selNivel.innerHTML = '<option value="">— Escoge un nivel/grupo —</option>' + columnas.map((c, i) => `<option value="${i}">${_alEsc(c.label)}</option>`).join('');
+  if ([...selNivel.options].some(o => o.value === prevNivel)) selNivel.value = prevNivel;
+
+  if (!evals.length) {
+    body.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin avalúos para este enfoque con los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R1_focalizado.csv'; return;
+  }
+
+  const objLabel = document.getElementById('r1-focal-obj').value;
+  const vals = evals.map(e => e.val);
+  const total = vals.length, avg = _avgNivel(vals);
+  const counts = contarEnColumnas(vals, columnas);
+  const pcts = counts.map(n => total ? Math.round(n / total * 100) : 0);
+
+  let html = `<div class="rpt-section-head"><span>🎯 ${_alEsc(objLabel)}</span>
+    <span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(avg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${avg?.toFixed(2)||'—'} · ${total} evaluaciones</span></div>`;
+  html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>${columnas.map(c=>`<th>${c.label}</th>`).join('')}<th>Total</th><th>Distribución</th></tr></thead><tbody><tr>
+    ${counts.map((n,i)=>`<td>${n} <span style="color:var(--muted);font-size:0.72rem">(${pcts[i]}%)</span></td>`).join('')}
+    <td>${total}</td><td>${_miniBarDinamico(counts,total)}</td></tr></tbody></table></div>`;
+
+  const csvRows = [['Enfoque','Nivel/Grupo','N','%'], ...columnas.map((c,i)=>[objLabel, c.label, counts[i], pcts[i]])];
+
+  const nivelIdx = selNivel.value !== '' ? +selNivel.value : null;
+  if (nivelIdx !== null && columnas[nivelIdx]) {
+    const comp = _r1ComparativaPorAnio(evals, columnas[nivelIdx], avaluos);
+    html += _r1HtmlComparativaAnio(columnas[nivelIdx], comp);
+    csvRows.push([]); csvRows.push(['— Comparativa por año académico: ' + columnas[nivelIdx].label + ' —']);
+    csvRows.push(['Año Académico','N en nivel/grupo','Total','%','Promedio de nivel']);
+    comp.forEach(r => csvRows.push([r.ay, r.enColumna, r.total, r.pct, r.avgNivel!==null?r.avgNivel.toFixed(2):'']));
+  }
+
+  body.innerHTML = html;
+  _reportCSVData = csvRows; _reportCSVName = 'R1_focalizado.csv';
 }
 
 // ── R2 — Attainment by Course ─────────────────────────────────
@@ -19048,6 +19599,53 @@ async function dummyLoadAll() {
   // tiene configurados hoy — si algún día cambia la escala, los datos de
   // prueba automáticamente la siguen.
   _ensureEscalaNivelesSeeded();
+
+  // ── Escalas de Niveles de prueba por programa (Reconceptualización de
+  // Reportes, R1) — hasta 2 de los programas reales que tienen cursos en
+  // esta corrida de datos de prueba reciben una Escala de Niveles propia,
+  // distinta entre sí y de la global (más/menos niveles, nombres y
+  // agrupaciones default distintas), para poder probar en R1 el cambio de
+  // escala por programa y el control de re-agrupar niveles ad-hoc
+  // partiendo de defaults distintos. Nunca se pisa una escala específica
+  // que el programa ya tenga configurada de verdad.
+  const programaIdsEnCursos = [...new Set(cursos.map(c => c.programaId).filter(Boolean))];
+  const ESCALAS_PRUEBA_DUMMY = [
+    {
+      nombre: 'Escala de Prueba — 5 Niveles (Dominio Progresivo)',
+      niveles: [
+        { valor: 0, titulo: 'No Demuestra', descripcion: 'No evidencia la competencia.' },
+        { valor: 1, titulo: 'Inicial', descripcion: 'Demuestra la competencia de forma mínima.' },
+        { valor: 2, titulo: 'En Desarrollo', descripcion: 'Demuestra la competencia parcialmente.' },
+        { valor: 3, titulo: 'Competente', descripcion: 'Demuestra la competencia consistentemente.' },
+        { valor: 4, titulo: 'Avanzado', descripcion: 'Demuestra la competencia con dominio avanzado.' },
+      ],
+      agrupaciones: [{ id: 'grp_satisfactorio_' + ts, nombre: 'Satisfactorio', valores: [2, 3, 4] }],
+    },
+    {
+      nombre: 'Escala de Prueba — 4 Niveles (Aprobado/No Aprobado)',
+      niveles: [
+        { valor: 0, titulo: 'Deficiente', descripcion: 'No cumple el estándar mínimo.' },
+        { valor: 1, titulo: 'Marginal', descripcion: 'Cumple parcialmente el estándar.' },
+        { valor: 2, titulo: 'Aceptable', descripcion: 'Cumple el estándar esperado.' },
+        { valor: 3, titulo: 'Ejemplar', descripcion: 'Supera el estándar esperado.' },
+      ],
+      agrupaciones: [{ id: 'grp_aprobado_' + ts, nombre: 'Aprobado', valores: [2, 3] }],
+    },
+  ];
+  programaIdsEnCursos.slice(0, 2).forEach((progId, i) => {
+    const yaTieneEscalaPropia = (db.escalasNiveles || []).some(e => e.activa && e.aplicaA === 'programas' && e.programaIds?.includes(progId));
+    if (yaTieneEscalaPropia) return;
+    const def = ESCALAS_PRUEBA_DUMMY[i];
+    db.escalasNiveles.push({
+      id: 'esc_dummy_' + ts + '_' + i,
+      nombre: def.nombre, niveles: def.niveles,
+      aplicaA: 'programas', programaIds: [progId],
+      agrupaciones: def.agrupaciones,
+      activa: true, fechaCreacion: new Date().toISOString(),
+      [DUMMY_TAG]: true,
+    });
+  });
+
   function _poolNivelesPonderado(valores) {
     // valores viene ascendente (bajo→alto); se pondera hacia los niveles
     // más altos para que la mayoría de los avalúos de prueba lean como
@@ -19265,6 +19863,7 @@ async function dummyDeleteAll() {
   if (db.departamentos) db.departamentos = db.departamentos.filter(x => !x[DUMMY_TAG]);
   if (db.codigosProg) db.codigosProg = db.codigosProg.filter(x => !x[DUMMY_TAG]);
   if (db.asesorias)   db.asesorias   = db.asesorias.filter(x => !x[DUMMY_TAG]);
+  if (db.escalasNiveles) db.escalasNiveles = db.escalasNiveles.filter(x => !x[DUMMY_TAG]);
   saveDB();
 
   // Adiestramientos
@@ -19328,6 +19927,7 @@ function dummyShowStatus(msg, type) {
       <div><strong style="color:var(--egsp-coral)">Facultad</strong><br>4 miembros con email, departamento y rol</div>
       <div><strong style="color:var(--egsp-coral)">Usuarios</strong><br>4 roles: admin · director · coord · profesor · viewer<br>Contraseña: <code>Test1234!</code></div>
       <div><strong style="color:var(--egsp-coral)">Otros</strong><br>Programas, códigos de programa, asesorías, 3 módulos de adiestramiento con quizzes</div>
+      <div><strong style="color:var(--egsp-coral)">Escalas de Niveles</strong><br>Hasta 2 programas reciben una escala propia con niveles y agrupaciones distintas (prueba de R1)</div>
     </div>
     <div id="dummy-status" style="display:none;padding:10px;border-radius:8px;font-size:0.85rem;margin-bottom:12px"></div>
     <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
