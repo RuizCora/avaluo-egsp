@@ -1215,6 +1215,16 @@
     display: flex; flex-direction: column; border-left: 1px solid var(--border);
   }
   .ficha-panel.open { transform: translateX(0); }
+  .ficha-panel.resizing { transition: none; user-select: none; }
+  .ficha-resizer {
+    position: absolute; left: -5px; top: 0; bottom: 0; width: 10px; cursor: ew-resize; z-index: 2;
+    touch-action: none;
+  }
+  .ficha-resizer::after {
+    content: ''; position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 44px; border-radius: 2px; background: var(--border); transition: background 0.15s, height 0.15s;
+  }
+  .ficha-resizer:hover::after, .ficha-panel.resizing .ficha-resizer::after { background: var(--egsp-coral); height: 72px; }
   .ficha-head {
     display: flex; align-items: center; gap: 8px; padding: 12px 14px;
     border-bottom: 1px solid var(--border); background: var(--cream);
@@ -1233,7 +1243,8 @@
   .ficha-muted { color: var(--muted); font-size: 0.78rem; }
   .ficha-empty { color: var(--muted); font-size: 0.8rem; padding: 4px 0; }
   @media (max-width: 640px) {
-    .ficha-panel { width: 100vw; border-left: none; }
+    .ficha-panel { width: 100vw !important; border-left: none; }
+    .ficha-resizer { display: none; }
     .ficha-kv { grid-template-columns: 1fr; }
     .ficha-kv > div:nth-child(odd) { padding-top: 6px; }
   }
@@ -3014,6 +3025,7 @@
 
 <!-- ══ FICHAS (Interoperabilidad I1): panel lateral con la ficha de una entidad ══ -->
 <aside id="ficha-panel" class="ficha-panel" aria-hidden="true" role="dialog" aria-label="Ficha">
+  <div class="ficha-resizer" id="ficha-resizer" title="Arrastra para cambiar el ancho · doble clic para volver al ancho normal" onpointerdown="_fichaResizeInicio(event)" ondblclick="_fichaAplicarAncho(null, true)"></div>
   <div class="ficha-head">
     <button type="button" id="ficha-volver" class="btn btn-outline btn-sm" onclick="fichaVolver()" style="display:none">← Volver</button>
     <div id="ficha-head-title" class="ficha-head-title"></div>
@@ -17616,6 +17628,55 @@ function _renderFichaDepartamento(deptId) {
     ${_fichaSec(`🎓 Programas (${progs.length})`, progsHtml)}
     ${_fichaSec(`👩‍🏫 Facultad (${fac.length})`, facHtml)}`;
 }
+
+// ── Ancho de la ficha: se arrastra el borde izquierdo; doble clic lo restablece.
+// El ancho elegido se recuerda en este navegador (solo comodidad; si el
+// almacenamiento no está disponible, simplemente no se recuerda).
+const FICHA_ANCHO_MIN = 380;
+const FICHA_ANCHO_KEY = 'avaluo_ficha_ancho';
+function _fichaAnchoMax() { return Math.max(FICHA_ANCHO_MIN, window.innerWidth - 80); }
+function _fichaAplicarAncho(px, guardar) {
+  const panel = document.getElementById('ficha-panel');
+  if (!panel) return;
+  if (px == null) {
+    panel.style.width = '';
+    if (guardar) { try { localStorage.removeItem(FICHA_ANCHO_KEY); } catch (e) {} }
+    return;
+  }
+  const w = Math.round(Math.min(_fichaAnchoMax(), Math.max(FICHA_ANCHO_MIN, px)));
+  panel.style.width = w + 'px';
+  if (guardar) { try { localStorage.setItem(FICHA_ANCHO_KEY, String(w)); } catch (e) {} }
+}
+function _fichaResizeInicio(e) {
+  if (window.innerWidth <= 640) return;
+  e.preventDefault();
+  const panel = document.getElementById('ficha-panel');
+  const handle = e.currentTarget;
+  panel.classList.add('resizing');
+  try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+  const x0 = e.clientX, w0 = panel.getBoundingClientRect().width; // el borde no salta al agarrarlo
+  const mover = ev => _fichaAplicarAncho(w0 + (x0 - ev.clientX), false);
+  const soltar = () => {
+    panel.classList.remove('resizing');
+    handle.removeEventListener('pointermove', mover);
+    handle.removeEventListener('pointerup', soltar);
+    handle.removeEventListener('pointercancel', soltar);
+    _fichaAplicarAncho(panel.getBoundingClientRect().width, true);
+  };
+  handle.addEventListener('pointermove', mover);
+  handle.addEventListener('pointerup', soltar);
+  handle.addEventListener('pointercancel', soltar);
+}
+// Restaura el ancho guardado y lo mantiene dentro de la ventana si esta cambia
+(function () {
+  let guardado = null;
+  try { guardado = parseInt(localStorage.getItem(FICHA_ANCHO_KEY), 10); } catch (e) {}
+  if (guardado > 0) _fichaAplicarAncho(guardado, false);
+  window.addEventListener('resize', () => {
+    const panel = document.getElementById('ficha-panel');
+    if (panel?.style.width) _fichaAplicarAncho(parseInt(panel.style.width, 10), false);
+  });
+})();
 
 // Esc cierra la ficha (si no hay un modal abierto encima)
 document.addEventListener('keydown', e => {
