@@ -1201,6 +1201,42 @@
   .adies-block-item { display:flex; align-items:center; justify-content:space-between; background:var(--cream); border:1px solid var(--border); border-radius:9px; padding:10px 14px; gap:10px; }
   .adies-type-btn.active { background:var(--egsp-coral) !important; color:#fff !important; border-color:var(--egsp-coral) !important; }
 
+
+  /* ── FICHAS (Interoperabilidad I1): panel lateral con la ficha de una entidad ── */
+  .ficha-link {
+    color: var(--rust); cursor: pointer; text-decoration: underline dotted 1px;
+    text-underline-offset: 3px; background: none; border: none; padding: 0; font: inherit;
+  }
+  .ficha-link:hover { text-decoration-style: solid; color: var(--egsp-coral); }
+  .ficha-panel {
+    position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 100vw);
+    background: var(--white); z-index: 950; box-shadow: -8px 0 30px rgba(0,0,0,0.18);
+    transform: translateX(105%); transition: transform 0.22s ease;
+    display: flex; flex-direction: column; border-left: 1px solid var(--border);
+  }
+  .ficha-panel.open { transform: translateX(0); }
+  .ficha-head {
+    display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+    border-bottom: 1px solid var(--border); background: var(--cream);
+  }
+  .ficha-head-title { flex: 1; min-width: 0; font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 0.82rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ficha-body { flex: 1; overflow-y: auto; padding: 18px 20px 28px; }
+  .ficha-tipo { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .ficha-titulo { font-family: 'Montserrat', sans-serif; font-size: 1.15rem; font-weight: 700; margin: 2px 0 10px; }
+  .ficha-acciones { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+  .ficha-sec { margin-top: 18px; }
+  .ficha-sec-title { font-family: 'Montserrat', sans-serif; font-size: 0.8rem; font-weight: 700; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .ficha-kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 0.83rem; }
+  .ficha-kv > div:nth-child(odd) { color: var(--muted); font-size: 0.78rem; padding-top: 1px; }
+  .ficha-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--cream); font-size: 0.82rem; }
+  .ficha-row:last-child { border-bottom: none; }
+  .ficha-muted { color: var(--muted); font-size: 0.78rem; }
+  .ficha-empty { color: var(--muted); font-size: 0.8rem; padding: 4px 0; }
+  @media (max-width: 640px) {
+    .ficha-panel { width: 100vw; border-left: none; }
+    .ficha-kv { grid-template-columns: 1fr; }
+    .ficha-kv > div:nth-child(odd) { padding-top: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -2976,6 +3012,33 @@
 <!-- Notificación -->
 <div id="notif" class="notif"></div>
 
+<!-- ══ FICHAS (Interoperabilidad I1): panel lateral con la ficha de una entidad ══ -->
+<aside id="ficha-panel" class="ficha-panel" aria-hidden="true" role="dialog" aria-label="Ficha">
+  <div class="ficha-head">
+    <button type="button" id="ficha-volver" class="btn btn-outline btn-sm" onclick="fichaVolver()" style="display:none">← Volver</button>
+    <div id="ficha-head-title" class="ficha-head-title"></div>
+    <button type="button" class="modal-close" onclick="cerrarFicha()" title="Cerrar (Esc)">✕</button>
+  </div>
+  <div id="ficha-body" class="ficha-body"></div>
+</aside>
+<input type="file" id="ficha-alineamiento-file" accept=".xlsx,.docx" style="display:none" onchange="handleAlineamientoFileInput(this, this.dataset.prog)">
+
+<div id="modal-ficha-vincular" class="modal-overlay">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <div class="modal-title" id="fv-title">🔗 Vincular competencias del banco</div>
+      <button class="modal-close" onclick="closeModal('modal-ficha-vincular')">✕</button>
+    </div>
+    <input type="hidden" id="fv-curso-id">
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">Marca las competencias del banco del programa que este curso desarrolla. Las que ya están vinculadas no aparecen. Los LAOs se asignan después, desde la ficha o en LAOs.</div>
+    <div id="fv-lista" style="max-height:52vh;overflow-y:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-ficha-vincular')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarVinculacionFicha()">🔗 Vincular</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ======================== STATE ========================
 let db = {
@@ -3036,6 +3099,7 @@ function saveDB() {
   }
   // Respaldo local (ya no es la fuente de verdad, pero sirve si Firebase falla)
   try { localStorage.setItem('avaluo_db', JSON.stringify(db)); } catch(e) {}
+  _fichaRefrescarPronto(); // Fichas: re-pinta la ficha abierta tras guardar desde un modal
 }
 
 // loadDB() ahora es asíncrona: resuelve cuando cada colección recibió su
@@ -3086,6 +3150,7 @@ function loadDB() {
 // Re-renderiza el panel visible si su colección cambió por otro usuario.
 // POC: cubre los tabs más usados; se puede extender según haga falta.
 function refreshVisiblePanelFor(collectionKey) {
+  _fichaRefrescarPronto(); // Fichas: también la ficha abierta, si hay una
   const activePanel = document.querySelector('.panel.active');
   if (!activePanel) return;
   const tabId = activePanel.id.replace('panel-', '');
@@ -4148,7 +4213,7 @@ function renderCursos() {
   }
   if (deptSel) {
     const prev = deptSel.value;
-    const depts = [...new Set(db.cursos.map(c => c.departamento).filter(Boolean))].sort();
+    const depts = [...new Set(db.cursos.map(c => _deptoDeCurso(c).nombre).filter(Boolean))].sort();
     deptSel.innerHTML = '<option value="">Todos</option>' + depts.map(d => `<option value="${d}">${d}</option>`).join('');
     deptSel.value = prev;
   }
@@ -4161,7 +4226,7 @@ function renderCursos() {
   let cursosFiltrados = db.cursos.filter(c => {
     if (busqueda && !`${c.codigo} ${c.nombre}`.toLowerCase().includes(busqueda)) return false;
     if (filtroPrograma && c.programa !== filtroPrograma) return false;
-    if (filtroDepto && c.departamento !== filtroDepto) return false;
+    if (filtroDepto && _deptoDeCurso(c).nombre !== filtroDepto) return false;
     return true;
   });
 
@@ -4199,11 +4264,13 @@ function renderCursos() {
         'DrPH Environmental Health':'badge-green','DrPH HSAM':'badge-purple'
       };
       const progBadge = progBadgeMap[c.programa] || 'badge-gold';
+      const progCat = _programaDeCurso(c.id);
+      const depto = _deptoDeCurso(c);
       return `<tr>
-        <td><strong style="color:var(--rust);font-family:'Montserrat',sans-serif">${c.codigo}</strong></td>
+        <td><strong style="font-family:'Montserrat',sans-serif">${fichaLink('curso', c.id, c.codigo)}</strong></td>
         <td>${c.nombre}</td>
-        <td><span class="badge ${progBadge}">${c.programa || 'MPH/MPHE'}</span></td>
-        <td>${c.departamento || '—'}</td>
+        <td>${progCat ? `<span class="badge ${progBadge}" style="cursor:pointer" title="Ver ficha del programa" onclick="abrirFicha('programa','${progCat.id}')">${c.programa || progCat.nombre}</span>` : `<span class="badge ${progBadge}">${c.programa || 'MPH/MPHE'}</span>`}</td>
+        <td>${depto.id ? fichaLink('departamento', depto.id, depto.nombre) : (_alEsc(depto.nombre) || '—')}</td>
         <td><span class="badge ${comps === 0 ? 'badge-gold' : 'badge-blue'}">${comps} comp.</span></td>
         <td class="actions-cell">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCurso('${c.id}')">✏️</button>` : ''}
@@ -6047,7 +6114,7 @@ function renderLaos() {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800;font-size:0.95rem">${l.nombre}</div>
-          <div style="font-size:0.76rem;color:var(--muted);margin-top:2px">${curso ? curso.codigo + ' · ' + curso.nombre : '—'}</div>
+          <div style="font-size:0.76rem;color:var(--muted);margin-top:2px">${curso ? fichaLink('curso', curso.id, curso.codigo) + ' · ' + _alEsc(curso.nombre) : '—'}</div>
           ${l.descripcion ? `<div style="font-size:0.8rem;margin-top:6px">${l.descripcion}</div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
@@ -8770,6 +8837,7 @@ function selectDept(deptId) {
     <div class="prog-detail-header">
       <div><div class="prog-detail-name">🏛 ${dept.nombre}</div></div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="abrirFicha('departamento','${deptId}')" title="Abrir la ficha del departamento">🗂 Ficha</button>
         <button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${deptId}')">✏️ Editar</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarDepartamento('${deptId}')">🗑</button>
       </div>` : ''}
@@ -8819,10 +8887,10 @@ function selectPrograma(programaId) {
 
   const cursosHtml = cursos.length ? cursos.map(c => `
     <div class="prog-course-row">
-      <span class="prog-course-code">${c.codigo}</span>
+      <span class="prog-course-code">${fichaLink('curso', c.id, c.codigo)}</span>
       <div style="flex:1;min-width:0">
         <div class="prog-course-name" title="${c.nombre}">${c.nombre}</div>
-        <div class="prog-course-dept">${c.departamento || '—'} · ${c.creditos || '—'} cr.</div>
+        <div class="prog-course-dept">${_alEsc(_deptoDeCurso(c).nombre) || '—'} · ${c.creditos || '—'} cr.</div>
       </div>
       ${isAdmin ? `<select style="font-size:0.72rem;border:1.5px solid var(--border);border-radius:6px;padding:3px 8px;font-family:'Montserrat',sans-serif;background:var(--paper);cursor:pointer"
         onchange="reassignCurso('${c.id}',this.value,this)" title="Mover a otro programa">
@@ -8839,10 +8907,11 @@ function selectPrograma(programaId) {
     <div class="prog-detail-header">
       <div>
         <div class="prog-detail-name">${prog.nombre}</div>
-        <div class="prog-detail-sub">${deptNombre ? '🏛 ' + deptNombre : 'Sin departamento asignado'}</div>
+        <div class="prog-detail-sub">${deptNombre ? '🏛 ' + fichaLink('departamento', prog.departamentoId, deptNombre) : 'Sin departamento asignado'}</div>
         <div class="prog-detail-sub">📝 Modalidad de evaluación: ${_modalidadValida(prog.modalidadEvaluacion) ? modalidadInfo(prog.modalidadEvaluacion).corto : 'sin fijar — cada profesor escoge'}</div>
       </div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="abrirFicha('programa','${programaId}')" title="Abrir la ficha del programa">🗂 Ficha</button>
         <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${programaId}')">✏️ Editar</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarPrograma('${programaId}')">🗑</button>
       </div>` : ''}
@@ -14839,6 +14908,7 @@ function setViewAs(role) {
     _viewAsRole = null;
     applyRoleUI();
   }
+  _fichaRefrescar(); // "Ver como" aplica a la ficha abierta
 }
 function getEffectiveRole() {
   return _viewAsRole || currentUser?.rol || 'viewer';
@@ -15059,6 +15129,7 @@ function getAcademicYear(termStr) {
 // ── Logout ────────────────────────────────────────────────
 function doLogout() {
   if (!confirm('¿Cerrar sesión?')) return;
+  cerrarFicha();
   currentUser = null;
   document.getElementById('auth-overlay').style.display = 'flex';
   document.getElementById('login-user').value = '';
@@ -16767,7 +16838,7 @@ function openPerfil() {
 // decidió el admin), sin necesidad de aplicar diffs automáticos a 8
 // colecciones con formas distintas.
 
-function abrirSolicitudEdicion(tipo) {
+function abrirSolicitudEdicion(tipo, registroId) {
   document.getElementById('sol-tipo').value = tipo;
   document.getElementById('sol-descripcion').value = '';
   const sel = document.getElementById('sol-registro');
@@ -16779,6 +16850,8 @@ function abrirSolicitudEdicion(tipo) {
     const curso = db.cursos.find(x => x.id === c.cursoId);
     return { id: c.id, label: `${c.codigo} (${curso?.codigo||'—'}) — ${c.descripcion?.slice(0,50)||''}` };
   });
+  if (tipo === 'programas') registros = (db.programas || []).map(p => ({ id: p.id, label: p.nombre }));
+  if (tipo === 'departamentos') registros = (db.departamentos || []).map(d => ({ id: d.id, label: d.nombre }));
   if (tipo === 'base-datos') {
     wrap.style.display = 'none'; // el módulo de Base de Datos es tabular, no hay un "registro" único que seleccionar aquí
   } else {
@@ -16789,6 +16862,8 @@ function abrirSolicitudEdicion(tipo) {
     opt.value = r.id; opt.textContent = r.label;
     sel.appendChild(opt);
   });
+  // Fichas: si se pidió desde la ficha de un registro, queda preseleccionado
+  if (registroId && registros.some(r => r.id === registroId)) sel.value = registroId;
   openModal('modal-solicitud-edicion');
 }
 
@@ -16821,7 +16896,7 @@ async function enviarSolicitudEdicion() {
 }
 
 function _solTipoLabel(tipo) {
-  return { cursos:'Curso', competencias:'Competencia', 'base-datos':'Base de Datos', rubrica_lao:'Rúbrica de LAO', alineamiento:'Alineamiento del programa' }[tipo] || tipo;
+  return { cursos:'Curso', competencias:'Competencia', programas:'Programa', departamentos:'Departamento', 'base-datos':'Base de Datos', rubrica_lao:'Rúbrica de LAO', alineamiento:'Alineamiento del programa' }[tipo] || tipo;
 }
 function _solEstadoBadge(estado) {
   if (estado === 'aprobada')  return '<span class="badge badge-green">✓ Aprobada</span>';
@@ -17077,6 +17152,477 @@ async function notificarAdminPorEmail(solicitud) {
     console.error('No se pudo notificar por email (la solicitud sí se guardó):', e);
   }
 }
+
+// ════════════════════════════════════════════════════════════
+//  FICHAS — Interoperabilidad, Fase I1
+//  Panel lateral (derecha) que muestra la ficha de una entidad (curso,
+//  programa, departamento). Se abre al pulsar un enlace .ficha-link en
+//  cualquier lista; dentro de una ficha, los enlaces abren otra ficha y
+//  "← Volver" regresa a la anterior. La lista de fondo sigue visible.
+//  Editar reutiliza los modales existentes, que se abren encima del panel;
+//  al guardar (saveDB) o al llegar un cambio remoto, la ficha se refresca.
+//  Quien no es administrador ve la ficha en solo lectura, con "📝 Solicitar
+//  edición" apuntando al registro. "Ver como" aplica a las fichas.
+// ════════════════════════════════════════════════════════════
+let _fichaStack = [];          // [{ tipo, id }]; el último es el visible
+let _fichaRubricas = [];       // rúbricas listadas en la ficha de curso visible
+const FICHA_TIPOS = {
+  curso:        { icono: '📚', nombre: 'Curso' },
+  programa:     { icono: '🎓', nombre: 'Programa' },
+  departamento: { icono: '🏛', nombre: 'Departamento' },
+};
+
+function _fichaAdmin() { return getEffectiveRole() === 'admin'; }
+
+// Enlace que abre una ficha. `label` se escapa; usar dentro de innerHTML.
+function fichaLink(tipo, id, label, title) {
+  if (!id) return _alEsc(label);
+  const t = title || `Ver ficha de ${(FICHA_TIPOS[tipo]?.nombre || '').toLowerCase()}`;
+  return `<a href="#" class="ficha-link" title="${_alEsc(t)}" onclick="event.preventDefault();event.stopPropagation();abrirFicha('${_alEscAttr(tipo)}','${_alEscAttr(id)}')">${_alEsc(label)}</a>`;
+}
+
+function _fichaAbierta() { return !!document.getElementById('ficha-panel')?.classList.contains('open'); }
+
+function abrirFicha(tipo, id) {
+  if (!FICHA_TIPOS[tipo] || !currentUser) return;
+  if (!_fichaAbierta()) _fichaStack = [];
+  const top = _fichaStack[_fichaStack.length - 1];
+  if (!top || top.tipo !== tipo || top.id !== id) _fichaStack.push({ tipo, id });
+  const panel = document.getElementById('ficha-panel');
+  panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  _renderFichaActual(false);
+}
+function fichaVolver() {
+  if (_fichaStack.length > 1) { _fichaStack.pop(); _renderFichaActual(false); }
+}
+function cerrarFicha() {
+  const panel = document.getElementById('ficha-panel');
+  if (!panel) return;
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+  _fichaStack = [];
+}
+// Re-pinta la ficha visible conservando el scroll (después de guardar o de un cambio remoto)
+function _fichaRefrescar() {
+  if (_fichaAbierta() && _fichaStack.length) _renderFichaActual(true);
+}
+let _fichaRefrescoPendiente = false;
+function _fichaRefrescarPronto() {
+  if (_fichaRefrescoPendiente || !_fichaAbierta()) return;
+  _fichaRefrescoPendiente = true;
+  setTimeout(() => { _fichaRefrescoPendiente = false; _fichaRefrescar(); }, 0);
+}
+
+function _renderFichaActual(conservarScroll) {
+  const body = document.getElementById('ficha-body');
+  const cur = _fichaStack[_fichaStack.length - 1];
+  if (!body || !cur) return;
+  const scroll = conservarScroll ? body.scrollTop : 0;
+  const prev = _fichaStack[_fichaStack.length - 2];
+  const btnVolver = document.getElementById('ficha-volver');
+  btnVolver.style.display = prev ? '' : 'none';
+  btnVolver.title = prev ? 'Volver a ' + _fichaEtiqueta(prev) : '';
+  document.getElementById('ficha-head-title').textContent = _fichaStack.map(_fichaEtiqueta).join('  ›  ');
+  let html = '';
+  try {
+    if (cur.tipo === 'curso') html = _renderFichaCurso(cur.id);
+    else if (cur.tipo === 'programa') html = _renderFichaPrograma(cur.id);
+    else if (cur.tipo === 'departamento') html = _renderFichaDepartamento(cur.id);
+  } catch (e) {
+    console.error('Error al mostrar la ficha:', e);
+    html = '<div class="ficha-empty">⚠️ No se pudo mostrar esta ficha.</div>';
+  }
+  body.innerHTML = html;
+  body.scrollTop = scroll;
+}
+function _fichaEtiqueta(x) {
+  if (x.tipo === 'curso') return (db.cursos || []).find(c => c.id === x.id)?.codigo || 'Curso';
+  if (x.tipo === 'programa') return (db.programas || []).find(p => p.id === x.id)?.nombre || 'Programa';
+  if (x.tipo === 'departamento') return (db.departamentos || []).find(d => d.id === x.id)?.nombre || 'Departamento';
+  return '';
+}
+function _fichaNoExiste(tipo) {
+  return `<div class="ficha-tipo">${FICHA_TIPOS[tipo].icono} ${FICHA_TIPOS[tipo].nombre}</div>
+    <div class="ficha-empty" style="margin-top:10px">Este registro ya no existe (pudo haberse eliminado).</div>`;
+}
+function _fichaSec(titulo, contenido, derecha) {
+  return `<div class="ficha-sec"><div class="ficha-sec-title"><span>${titulo}</span>${derecha ? `<span>${derecha}</span>` : ''}</div>${contenido}</div>`;
+}
+// `pre` es el inicio de la llamada, p. ej. "accionRubricaFicha(0," — se le añade la acción
+function _fichaBotonesRubrica(pre) {
+  return `<span style="display:flex;gap:4px;flex-wrap:wrap">
+    <button type="button" class="btn btn-outline btn-sm" onclick="${pre}'ver')">👁 Ver</button>
+    <button type="button" class="btn btn-outline btn-sm" onclick="${pre}'docx')">⬇ Word</button>
+    <button type="button" class="btn btn-outline btn-sm" onclick="${pre}'pdf')">⬇ PDF</button></span>`;
+}
+
+// Departamento de un curso: se DERIVA del programa (programa.departamentoId).
+// Si el programa no tiene departamento, se cae al texto libre del curso.
+function _deptoDeCurso(curso) {
+  const prog = curso ? _programaDeCurso(curso.id) : null;
+  const d = prog?.departamentoId ? (db.departamentos || []).find(x => x.id === prog.departamentoId) : null;
+  if (d) return { id: d.id, nombre: d.nombre, derivado: true };
+  return { id: null, nombre: curso?.departamento || '', derivado: false };
+}
+
+// ¿Puede el usuario ver el detalle de esta sección en la ficha? Respeta
+// canSeeSeccion() y, con "Ver como", el rol simulado.
+function _fichaPuedeVerSeccion(sec) {
+  const role = getEffectiveRole();
+  if (role === 'admin' || role === 'decano') return true;
+  if (_viewAsRole) {
+    if (role === 'director' || role === 'coordinator') return true;
+    return _usuarioEsProfesorDeSeccion(sec);
+  }
+  return canSeeSeccion(sec);
+}
+
+// Secciones del año académico más reciente en que el curso tiene secciones
+function _seccionesAyRecienteCurso(cursoId) {
+  const secs = (db.secciones || []).filter(s => s.cursoId === cursoId);
+  const conAy = secs.map(s => ({ s, ay: getAcademicYear(s.semestre) })).filter(x => x.ay != null);
+  if (!conAy.length) return { ay: null, secciones: secs.length ? secs : [], sinAy: secs.length > 0 };
+  const ay = Math.max(...conAy.map(x => x.ay));
+  return { ay, secciones: conAy.filter(x => x.ay === ay).map(x => x.s), sinAy: false };
+}
+
+// ── Ficha: Curso ──────────────────────────────────────────────
+function _renderFichaCurso(cursoId) {
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  if (!c) return _fichaNoExiste('curso');
+  const isAdmin = _fichaAdmin();
+  const prog = _programaDeCurso(c.id);
+  const depto = _deptoDeCurso(c);
+  const idA = _alEscAttr(c.id);
+
+  // Acciones
+  const acciones = [];
+  if (isAdmin) {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarCurso('${idA}')">✏️ Editar curso</button>`);
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="fichaVincularCompetencias('${idA}')">🔗 Vincular competencia del banco</button>`);
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="fichaNuevoLao('${idA}')">＋ Nuevo LAO</button>`);
+  } else if (authCan('cursos')) {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirSolicitudEdicion('cursos','${idA}')">📝 Solicitar edición</button>`);
+  }
+  if (authCan('matriz')) acciones.push(`<button class="btn btn-outline btn-sm" onclick="fichaVerEnMatriz('${idA}')">🧭 Ver en Matriz</button>`);
+
+  // Información
+  const mod = resolverModalidadEvaluacion(c.id, null);
+  const modInfo = modalidadInfo(mod.modalidad);
+  const fuente = c.fuenteRubricaDirecta === 'curso' ? 'rúbrica propia del curso' : 'alineamiento del programa';
+  const info = `<div class="ficha-kv">
+    <div>Programa</div><div>${prog ? fichaLink('programa', prog.id, prog.nombre) : (c.programa ? _alEsc(c.programa) + ' <span class="ficha-muted">(no está en el catálogo)</span>' : '<span class="ficha-muted">Sin programa asignado</span>')}</div>
+    <div>Departamento</div><div>${depto.id ? fichaLink('departamento', depto.id, depto.nombre) : (depto.nombre ? _alEsc(depto.nombre) + ' <span class="ficha-muted">(el programa no tiene departamento)</span>' : '<span class="ficha-muted">—</span>')}</div>
+    <div>Créditos</div><div>${_alEsc(c.creditos || '—')}</div>
+    <div>Modalidad de evaluación</div><div>${_alEsc(modInfo?.corto || modInfo?.label || mod.modalidad || '—')}<div class="ficha-muted">${_alEsc(_origenModalidadTexto(mod.origen))}</div></div>
+    <div>Rúbrica directa</div><div>${_alEsc(fuente)}</div>
+    ${c.descripcion ? `<div>Descripción</div><div style="white-space:pre-wrap">${_alEsc(c.descripcion)}</div>` : ''}
+  </div>`;
+
+  // Competencias del curso
+  const comps = (db.competencias || []).filter(x => x.cursoId === c.id)
+    .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true }));
+  const compsHtml = comps.length ? comps.map(dc => {
+    const nLaos = laosDeCompetencia(dc).length;
+    return `<div class="ficha-row"><span class="badge badge-blue" style="flex-shrink:0">${_alEsc(dc.codigo)}</span>
+      <div style="flex:1;min-width:0">${_alEsc(dc.descripcion || '')}</div>
+      <span class="ficha-muted" style="white-space:nowrap">${nLaos} LAO${nLaos === 1 ? '' : 's'}</span></div>`;
+  }).join('') : '<div class="ficha-empty">Este curso no tiene competencias vinculadas.</div>';
+
+  // LAOs (los que el usuario puede ver, igual que en LAOs)
+  const laos = laosDisponiblesPara(c.id, currentUser?.username, isAdmin);
+  const laosHtml = laos.length ? laos.map(l => {
+    const rub = (db.rubricas || []).find(r => r.laoId === l.id);
+    const cs = (l.competencias || []).map(cc => {
+      const comp = (db.competencias || []).find(x => x.id === cc.competenciaId);
+      return comp ? `<span class="badge badge-blue" style="margin:2px 2px 0 0" title="${_alEsc(comp.descripcion || '')}">${_alEsc(comp.codigo)} · ${_alEsc(cc.peso)}%</span>` : '';
+    }).join('');
+    return `<div class="ficha-row" style="flex-direction:column;gap:4px">
+      <div style="display:flex;gap:8px;align-items:center;width:100%;flex-wrap:wrap">
+        <strong style="flex:1;min-width:0">${_alEsc(l.nombre)}</strong>
+        ${l.isGenerico ? '<span class="badge badge-gold">⚠️ Genérico</span>' : ''}
+        ${l.esOficial ? '<span class="badge badge-green">Oficial</span>' : `<span class="badge badge-purple">Alterno${l.compartido ? ' · compartido' : ''}</span>`}
+        ${rub?.criterios?.length ? '<span class="badge badge-blue">📐 Rúbrica</span>' : ''}
+        ${isAdmin ? `<button class="btn btn-outline btn-sm" style="padding:2px 8px" onclick="abrirEditarLao('${_alEscAttr(l.id)}')" title="Editar LAO">✏️</button>` : ''}
+      </div>
+      <div>${cs || '<span class="ficha-muted">Sin competencias asignadas</span>'}</div>
+    </div>`;
+  }).join('') : '<div class="ficha-empty">Este curso no tiene LAOs registrados.</div>';
+
+  // Rúbricas: directa del curso, de cada LAO y la completa del programa
+  _fichaRubricas = [];
+  const rd = resolverRubricaDirectaCurso(c.id);
+  if (rd.rubrica) _fichaRubricas.push({ nombre: 'Evaluación Directa del Curso', nota: rd.fuente === 'curso' ? 'rúbrica propia del curso' : 'derivada del alineamiento del programa',
+    rubrica: rd.rubrica, ctx: { cursoId: c.id, tipo: 'directa', fuente: rd.fuente } });
+  laos.forEach(l => {
+    const r = (db.rubricas || []).find(x => x.laoId === l.id);
+    if (r?.criterios?.length) _fichaRubricas.push({ nombre: l.nombre, nota: `rúbrica del LAO · ${r.criterios.length} criterio${r.criterios.length === 1 ? '' : 's'}`,
+      rubrica: r, ctx: { cursoId: c.id, tipo: 'lao', laoNombre: l.nombre } });
+  });
+  const tieneBancoProg = !!prog && (db.bancoCompetencias || []).some(b => b.programa === prog.nombre);
+  let rubHtml = _fichaRubricas.map((x, i) => `<div class="ficha-row" style="align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px"><strong>${_alEsc(x.nombre)}</strong><div class="ficha-muted">${_alEsc(x.nota)}</div></div>
+      ${_fichaBotonesRubrica(`accionRubricaFicha(${i},`)}</div>`).join('');
+  if (tieneBancoProg) rubHtml += `<div class="ficha-row" style="align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px"><strong>Rúbrica completa del programa</strong><div class="ficha-muted">${_alEsc(prog.nombre)} — todas las competencias y su alineamiento</div></div>
+      ${_fichaBotonesRubrica(`accionRubricaPrograma('${_alEscAttr(prog.id)}',`)}</div>`;
+  if (!rubHtml) rubHtml = '<div class="ficha-empty">Este curso todavía no tiene rúbricas.</div>';
+  const solRub = !isAdmin && laos.length && typeof abrirSolicitudRubrica === 'function'
+    ? `<button class="btn btn-outline btn-sm" onclick="abrirSolicitudRubrica('${idA}')">📝 Solicitar rúbrica</button>` : '';
+
+  // Secciones y profesores — solo el año académico más reciente
+  const { ay, secciones, sinAy } = _seccionesAyRecienteCurso(c.id);
+  const visibles = secciones.filter(_fichaPuedeVerSeccion);
+  const ocultas = secciones.length - visibles.length;
+  const profesores = [...new Set(secciones.map(s => (s.profesor || s.profesorEmail || '').trim()).filter(Boolean))].sort();
+  const ayTxt = ay != null ? `AY ${ay}-${ay + 1}` : (sinAy ? 'término sin año reconocible' : '');
+  let secHtml;
+  if (!secciones.length) secHtml = '<div class="ficha-empty">Este curso no tiene secciones registradas.</div>';
+  else {
+    secHtml = `<div class="ficha-kv" style="margin-bottom:6px"><div>Profesores</div><div>${profesores.map(_alEsc).join(', ') || '—'}</div></div>` +
+      visibles.sort((a, b) => String(a.semestre).localeCompare(String(b.semestre)) || String(a.numero).localeCompare(String(b.numero), undefined, { numeric: true }))
+        .map(s => `<div class="ficha-row"><strong style="white-space:nowrap">Sec. ${_alEsc(s.numero || '—')}</strong>
+          <div style="flex:1;min-width:0">${_alEsc(s.semestre || '—')} · ${_alEsc(s.profesor || s.profesorEmail || 'sin profesor')}</div>
+          <span class="ficha-muted" style="white-space:nowrap">${(s.estudiantes || []).length} est.</span></div>`).join('') +
+      (ocultas ? `<div class="ficha-muted" style="margin-top:4px">${ocultas} ${ocultas === 1 ? 'sección' : 'secciones'} más de otros profesores.</div>` : '');
+  }
+
+  return `<div class="ficha-tipo">📚 Curso</div>
+    <div class="ficha-titulo">${_alEsc(c.codigo)} · ${_alEsc(c.nombre)}</div>
+    ${acciones.length ? `<div class="ficha-acciones">${acciones.join('')}</div>` : ''}
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`🎯 Competencias (${comps.length})`, compsHtml)}
+    ${_fichaSec(`📋 LAOs (${laos.length})`, laosHtml)}
+    ${_fichaSec('📐 Rúbricas', rubHtml, solRub)}
+    ${_fichaSec(`👩‍🏫 Secciones${ayTxt ? ' — ' + ayTxt : ''}`, secHtml)}`;
+}
+function accionRubricaFicha(i, accion) {
+  const x = _fichaRubricas[i];
+  if (!x) return;
+  const m = _modeloRubricaDocumento(x.rubrica, x.ctx);
+  if (accion === 'ver') verModeloRubrica(m, '');
+  else if (accion === 'docx') descargarRubricaDocx(m);
+  else descargarRubricaPdf(m);
+}
+
+// ＋ Nuevo LAO con el curso ya escogido
+function fichaNuevoLao(cursoId) {
+  abrirNuevoLao();
+  const sel = document.getElementById('lao-curso');
+  if (sel) { sel.value = cursoId; laoOnCursoChange([]); }
+}
+
+// 🔗 Vincular competencias del banco del programa a este curso
+function fichaVincularCompetencias(cursoId) {
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  if (!c) return;
+  if (!c.programa) { notify('Asigna primero un programa al curso', '⚠️'); return; }
+  const banco = (db.bancoCompetencias || []).filter(b => b.programa === c.programa);
+  const yaVinc = new Set((db.competencias || []).filter(dc => dc.cursoId === cursoId).map(dc => String(dc.codigo).replace(/^C/, '')));
+  const disponibles = banco.filter(b => !yaVinc.has(String(b.num)))
+    .sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }));
+  if (!banco.length) { notify('El programa no tiene competencias en el banco', 'ℹ️'); return; }
+  if (!disponibles.length) { notify('El curso ya tiene todas las competencias del programa', 'ℹ️'); return; }
+  const doms = dominiosDePrograma(c.programa);
+  const grupos = doms.map(d => ({ titulo: `Dominio ${d.numero}: ${d.nombre}`, items: disponibles.filter(b => b.dominioId === d.id) }))
+    .filter(g => g.items.length);
+  const sinDom = disponibles.filter(b => !b.dominioId || !doms.some(d => d.id === b.dominioId));
+  if (sinDom.length) grupos.push({ titulo: doms.length ? 'Sin dominio' : '', items: sinDom });
+  document.getElementById('fv-curso-id').value = cursoId;
+  document.getElementById('fv-title').textContent = `🔗 Vincular competencias — ${c.codigo}`;
+  document.getElementById('fv-lista').innerHTML = grupos.map(g => `
+    ${g.titulo ? `<div style="font-weight:700;font-size:0.78rem;margin:10px 0 4px;color:var(--muted)">${_alEsc(g.titulo)}</div>` : ''}
+    ${g.items.map(b => `<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:0.82rem;cursor:pointer">
+      <input type="checkbox" class="fv-check" value="${_alEsc(b.num)}" style="margin-top:3px">
+      <span><strong>C${_alEsc(b.num)}</strong> — ${_alEsc(b.texto || '')}</span></label>`).join('')}`).join('');
+  openModal('modal-ficha-vincular');
+}
+function guardarVinculacionFicha() {
+  if (!_fichaAdmin()) { notify('Solo un administrador puede vincular competencias', '🔒'); return; }
+  const cursoId = document.getElementById('fv-curso-id').value;
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  const nums = [...document.querySelectorAll('#fv-lista .fv-check:checked')].map(x => x.value);
+  if (!c) return;
+  if (!nums.length) { notify('Marca al menos una competencia', '⚠️'); return; }
+  let n = 0;
+  nums.forEach((num, i) => {
+    const bc = (db.bancoCompetencias || []).find(b => b.programa === c.programa && String(b.num) === num);
+    if (!bc) return;
+    if ((db.competencias || []).some(dc => dc.cursoId === cursoId && (dc.codigo === 'C' + num || dc.codigo === num))) return;
+    db.competencias.push({ id: `${cursoId}_C${num}_${Date.now()}${i}`, cursoId, codigo: 'C' + num, descripcion: bc.texto,
+      tipo: 'rubrica', peso: '', fechaCreacion: new Date().toISOString() });
+    n++;
+  });
+  saveDB();
+  closeModal('modal-ficha-vincular');
+  if (typeof refreshVisiblePanelFor === 'function') refreshVisiblePanelFor('competencias');
+  notify(`${n} competencia${n === 1 ? '' : 's'} vinculada${n === 1 ? '' : 's'} a ${c.codigo} ✓`, '🔗');
+}
+
+// 🧭 Ver en Matriz: va a la Matriz de Pareo filtrada por el programa del curso
+function fichaVerEnMatriz(cursoId) {
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  cerrarFicha();
+  showTab('matriz', document.querySelector('.tab-btn[data-tab="matriz"]'));
+  const sel = document.getElementById('matriz-prog-filter');
+  if (sel && c?.programa && [...sel.options].some(o => o.value === c.programa)) { sel.value = c.programa; renderMatriz(); }
+}
+
+// ── Ficha: Programa ───────────────────────────────────────────
+function _liderazgoDePrograma(prog) {
+  const esDe = f => (f.programaIds || []).includes(prog.id) ||
+    String(f.programas || '').split('|').map(s => s.trim()).includes(prog.nombre);
+  const si = v => v === true || v === 'true';
+  const fac = db.facultad || [];
+  return {
+    coordinadores: fac.filter(f => si(f.coordinator) && esDe(f)),
+    directores: fac.filter(f => si(f.director) && esDe(f)),
+  };
+}
+function _renderFichaPrograma(progId) {
+  const p = (db.programas || []).find(x => x.id === progId);
+  if (!p) return _fichaNoExiste('programa');
+  const isAdmin = _fichaAdmin();
+  const idA = _alEscAttr(p.id);
+  const d = p.departamentoId ? (db.departamentos || []).find(x => x.id === p.departamentoId) : null;
+
+  const acciones = [];
+  if (isAdmin) {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${idA}')">✏️ Editar programa</button>`);
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="fichaNuevoCursoEnPrograma('${idA}')">＋ Curso</button>`);
+  } else {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirSolicitudEdicion('programas','${idA}')">📝 Solicitar edición</button>`);
+  }
+
+  const secs = p.secuencias || {};
+  const durTxt = s => {
+    const a = s?.duracion?.anios, t = s?.duracion?.trimestres;
+    const partes = [];
+    if (a != null && a !== '') partes.push(`${a} año${a == 1 ? '' : 's'}`);
+    if (t != null && t !== '') partes.push(`${t} trimestre${t == 1 ? '' : 's'}`);
+    return partes.join(' · ') || 'duración sin indicar';
+  };
+  const secTxt = SECUENCIAS_CONFIG.filter(({ key, opcional }) => !opcional || secs[key]?.activa)
+    .map(({ key, label }) => `<div>${_alEsc(label)} <span class="ficha-muted">— ${_alEsc(durTxt(secs[key]))}</span></div>`).join('');
+  const { coordinadores, directores } = _liderazgoDePrograma(p);
+  const nombres = arr => arr.length ? arr.map(f => _alEsc(f.nombre || f.email)).join(', ') : '<span class="ficha-muted">—</span>';
+  const info = `<div class="ficha-kv">
+    <div>Departamento</div><div>${d ? fichaLink('departamento', d.id, d.nombre) : '<span class="ficha-muted">Sin departamento asignado</span>'}</div>
+    <div>Modalidad de evaluación</div><div>${_modalidadValida(p.modalidadEvaluacion) ? _alEsc(modalidadInfo(p.modalidadEvaluacion).corto) : 'sin fijar — cada profesor escoge'}</div>
+    <div>Secuencias</div><div>${secTxt || '<span class="ficha-muted">—</span>'}</div>
+    <div>Coordinador/a</div><div>${nombres(coordinadores)}</div>
+    <div>Director/a</div><div>${nombres(directores)}</div>
+  </div>`;
+
+  const cursos = (db.cursos || []).filter(c => c.programaId === p.id)
+    .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true }));
+  const cursosHtml = cursos.length ? cursos.map(c => {
+    const nc = (db.competencias || []).filter(x => x.cursoId === c.id).length;
+    return `<div class="ficha-row"><span class="prog-course-code">${fichaLink('curso', c.id, c.codigo)}</span>
+      <div style="flex:1;min-width:0">${_alEsc(c.nombre)}</div>
+      <span class="ficha-muted" style="white-space:nowrap">${_alEsc(c.creditos || '—')} cr. · ${nc} comp.</span></div>`;
+  }).join('') : '<div class="ficha-empty">Sin cursos en este programa.</div>';
+
+  const banco = (db.bancoCompetencias || []).filter(b => b.programa === p.nombre)
+    .sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }));
+  const doms = dominiosDePrograma(p.nombre);
+  const grupos = doms.map(dm => ({ titulo: `Dominio ${dm.numero}: ${dm.nombre}`, items: banco.filter(b => b.dominioId === dm.id) })).filter(g => g.items.length);
+  const sinDom = banco.filter(b => !b.dominioId || !doms.some(dm => dm.id === b.dominioId));
+  if (sinDom.length) grupos.push({ titulo: doms.length ? 'Sin dominio' : '', items: sinDom });
+  const bancoHtml = banco.length ? grupos.map(g => `
+    ${g.titulo ? `<div style="font-weight:700;font-size:0.78rem;margin:8px 0 2px;color:var(--muted)">${_alEsc(g.titulo)}</div>` : ''}
+    ${g.items.map(b => {
+      const nCursos = (db.competencias || []).filter(dc => (dc.codigo === 'C' + b.num || dc.codigo === b.num) && cursos.some(c => c.id === dc.cursoId)).length;
+      return `<div class="ficha-row"><span class="badge badge-blue" style="flex-shrink:0">C${_alEsc(b.num)}</span>
+        <div style="flex:1;min-width:0">${_alEsc(b.texto || '')}</div>
+        <span class="ficha-muted" style="white-space:nowrap">${nCursos} curso${nCursos === 1 ? '' : 's'}</span></div>`;
+    }).join('')}`).join('') : '<div class="ficha-empty">Sin competencias registradas en el banco.</div>';
+
+  let rubHtml = '';
+  if (banco.length) {
+    const nCrit = banco.reduce((n, b) => n + criteriosDeCompetencia(b).length, 0);
+    rubHtml = `<div class="ficha-row" style="align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px"><strong>Rúbrica completa del programa</strong><div class="ficha-muted">${banco.length} competencias, ${nCrit} criterios${doms.length ? `, ${doms.length} dominios` : ''}</div></div>
+      ${_fichaBotonesRubrica(`accionRubricaPrograma('${idA}',`)}</div>`;
+    if (isAdmin) rubHtml += `<div class="ficha-row" style="align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:160px"><strong>Plantilla del alineamiento</strong><div class="ficha-muted">Descárgala, llénala y súbela para revisarla antes de incorporarla.</div></div>
+      <span style="display:flex;gap:4px;flex-wrap:wrap">
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaAlineamiento('${idA}','xlsx')">📥 Excel</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="descargarPlantillaAlineamiento('${idA}','docx')">📥 Word</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick="fichaSubirAlineamiento('${idA}')">📤 Subir llena</button>
+      </span></div>`;
+  } else rubHtml = '<div class="ficha-empty">El programa no tiene competencias en el banco todavía.</div>';
+
+  return `<div class="ficha-tipo">🎓 Programa</div>
+    <div class="ficha-titulo">${_alEsc(p.nombre)}</div>
+    <div class="ficha-acciones">${acciones.join('')}</div>
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`📚 Cursos (${cursos.length})`, cursosHtml)}
+    ${_fichaSec(`🎯 Banco de competencias (${banco.length})`, bancoHtml)}
+    ${_fichaSec('📐 Rúbrica del programa', rubHtml)}`;
+}
+function fichaNuevoCursoEnPrograma(progId) {
+  const p = (db.programas || []).find(x => x.id === progId);
+  abrirNuevoCurso();
+  const sel = document.getElementById('c-programa');
+  if (sel && p) { sel.value = p.id; _renderSelectModalidadCurso(); }
+  const d = p?.departamentoId ? (db.departamentos || []).find(x => x.id === p.departamentoId) : null;
+  const dept = document.getElementById('c-dept');
+  if (dept && d) dept.value = d.nombre;
+}
+function fichaSubirAlineamiento(progId) {
+  const inp = document.getElementById('ficha-alineamiento-file');
+  if (!inp) return;
+  inp.dataset.prog = progId;
+  inp.click();
+}
+
+// ── Ficha: Departamento ───────────────────────────────────────
+function _renderFichaDepartamento(deptId) {
+  const d = (db.departamentos || []).find(x => x.id === deptId);
+  if (!d) return _fichaNoExiste('departamento');
+  const isAdmin = _fichaAdmin();
+  const idA = _alEscAttr(d.id);
+  const progs = (db.programas || []).filter(p => p.departamentoId === d.id).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const cursos = (db.cursos || []).filter(c => progs.some(p => p.id === c.programaId));
+  const fac = (db.facultad || []).filter(f => f.departamentoId === d.id)
+    .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')));
+  const si = v => v === true || v === 'true';
+
+  const acciones = isAdmin
+    ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${idA}')">✏️ Editar departamento</button>`
+    : `<button class="btn btn-outline btn-sm" onclick="abrirSolicitudEdicion('departamentos','${idA}')">📝 Solicitar edición</button>`;
+
+  const kpi = (icono, n, label) => `<div class="dash-kpi" style="padding:10px 12px"><div class="dash-kpi-icon">${icono}</div>
+    <div class="dash-kpi-num" style="font-size:1.3rem">${n}</div><div class="dash-kpi-label">${label}</div></div>`;
+  const progsHtml = progs.length ? progs.map(p => {
+    const nc = cursos.filter(c => c.programaId === p.id).length;
+    return `<div class="ficha-row"><div style="flex:1;min-width:0">${fichaLink('programa', p.id, p.nombre)}</div>
+      <span class="ficha-muted" style="white-space:nowrap">${nc} curso${nc === 1 ? '' : 's'}</span></div>`;
+  }).join('') : '<div class="ficha-empty">Sin programas en este departamento.</div>';
+  const facHtml = fac.length ? fac.map(f => {
+    const roles = [si(f.director) ? 'Director/a' : '', si(f.coordinator) ? 'Coordinador/a' : ''].filter(Boolean);
+    return `<div class="ficha-row"><div style="flex:1;min-width:0">${_alEsc(f.nombre || f.email || '—')}</div>
+      ${roles.map(r => `<span class="badge badge-gold">${r}</span>`).join(' ')}</div>`;
+  }).join('') : '<div class="ficha-empty">No hay facultad asignada a este departamento.</div>';
+
+  return `<div class="ficha-tipo">🏛 Departamento</div>
+    <div class="ficha-titulo">${_alEsc(d.nombre)}</div>
+    <div class="ficha-acciones">${acciones}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px">
+      ${kpi('🎓', progs.length, 'Programas')}${kpi('📚', cursos.length, 'Cursos')}${kpi('👩‍🏫', fac.length, 'Facultad')}
+    </div>
+    ${_fichaSec(`🎓 Programas (${progs.length})`, progsHtml)}
+    ${_fichaSec(`👩‍🏫 Facultad (${fac.length})`, facHtml)}`;
+}
+
+// Esc cierra la ficha (si no hay un modal abierto encima)
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !_fichaAbierta()) return;
+  if (document.querySelector('.modal-overlay.open')) return;
+  cerrarFicha();
+});
 
 
 </script>
