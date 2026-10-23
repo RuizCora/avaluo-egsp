@@ -3646,8 +3646,8 @@ function renderEstudiantesTab() {
       return `<tr>
         ${esAdmin ? `<td><input type="checkbox" ${_estSeleccionados.has(e.id) ? 'checked' : ''} onchange="toggleEstSeleccion('${e.id}', this.checked)"></td>` : ''}
         <td>${e.numero}</td>
-        <td>${e.nombre}</td>
-        <td>${prog ? `<span class="badge badge-blue">${prog.nombre}</span>` : '<span class="badge badge-red">Sin programa</span>'}</td>
+        <td>${fichaLinkEstudiante(e.numero, e.nombre)}</td>
+        <td>${prog ? `<span class="badge badge-blue ficha-clic" ${fichaAttr('programa', prog.id)}>${prog.nombre}</span>` : '<span class="badge badge-red">Sin programa</span>'}</td>
         <td>${e.anioComienzo ? (_anioComienzoValido(e.anioComienzo) ? e.anioComienzo : `<span class="badge badge-rust" title="Debe ser un año académico consecutivo, ej. 2026-27">⚠ ${e.anioComienzo}</span>`) : '—'}</td>
         <td>${e.secuencia ? `<span class="badge badge-gold">${e.secuencia}</span>` : '—'}</td>
         <td>${e.registracion || '—'}</td>
@@ -9319,7 +9319,7 @@ function renderSecciones() {
               <tr>
                 <td style="color:var(--muted)">${i+1}</td>
                 <td><code style="font-size:0.8rem">${e.id||'—'}</code></td>
-                <td><strong>${e.nombre}</strong></td>
+                <td><strong>${fichaLinkEstudiante(e.id, e.nombre)}</strong></td>
                 <td style="font-size:0.78rem;color:var(--muted)">${e.email||'—'}</td>
                 <td style="display:flex;gap:4px">
                   ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" style="padding:3px 7px" onclick="abrirEditarEstudiante('${sec.id}','${e.id}')">✏️</button>` : ''}
@@ -11659,10 +11659,10 @@ function renderBaseDatos() {
       return `<tr>
       ${esAdmin ? `<td><input type="checkbox" ${_avSeleccionados.has(a.id) ? 'checked' : ''} onchange="toggleAvSeleccion('${a.id}', this.checked)"></td>` : ''}
       <td style="color:var(--muted)">${i+1}</td>
-      <td><strong>${a.estudiante}</strong></td>
+      <td><strong>${a.estudianteId ? fichaLinkEstudiante(a.estudianteId, a.estudiante) : a.estudiante}</strong></td>
       <td>${a.estudianteId||'—'}</td>
-      <td><span class="badge badge-gold">${a.cursoCodigo}</span></td>
-      <td>${a.seccion||'—'}</td>
+      <td><span class="badge badge-gold ${db.cursos.some(c => c.id === a.cursoId) ? 'ficha-clic' : ''}" ${db.cursos.some(c => c.id === a.cursoId) ? fichaAttr('curso', a.cursoId) : ''}>${a.cursoCodigo}</span></td>
+      <td>${a.seccionId && (db.secciones || []).some(x => x.id === a.seccionId) ? fichaLink('seccion', a.seccionId, a.seccion || 'Sección') : (a.seccion||'—')}</td>
       <td>${a.semestre||'—'}</td>
       <td>${a.fecha||'—'}</td>
       <td><span class="badge badge-blue">${a.evaluaciones?.length||0}</span></td>
@@ -12737,7 +12737,7 @@ function renderR6() {
     const uniqueRisk = [...new Map(e.compsRiesgo.map(c=>[c.code,c])).values()].slice(0,5);
     const motivo = e.riskComp && e.riskNota ? 'Ambos' : e.riskComp ? 'Competencias' : 'Nota del curso';
     html+=`<tr>
-      <td><strong>${e.nombre}</strong></td>
+      <td><strong>${fichaLinkEstudiante(e.id, e.nombre)}</strong></td>
       <td style="font-size:0.75rem;color:var(--muted)">${e.id}</td>
       <td>${e.avg!==null?`<span class="${riskCls}">${e.avg.toFixed(2)}</span>`:'—'}</td>
       <td>${e.notaMin!==null?e.notaMin:'—'}</td>
@@ -12952,7 +12952,7 @@ function renderR8() {
         const l = isNaN(n)?'—':gradeToLetter(n);
         const col = gradeColors[l] || '#9ca3af';
         return `<tr>
-          <td><strong>${av.estudiante||'—'}</strong></td>
+          <td><strong>${av.estudianteId ? fichaLinkEstudiante(av.estudianteId, av.estudiante || av.estudianteId) : (av.estudiante||'—')}</strong></td>
           <td style="font-size:0.72rem;color:var(--muted)">${av.estudianteId||'—'}</td>
           <td><span class="badge badge-gold">${cur?.codigo||av.cursoCodigo||'—'}</span></td>
           <td style="font-size:0.75rem">${_getSemestre(av)||'—'}</td>
@@ -13059,7 +13059,7 @@ function renderR9() {
         html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
           <th>Número</th><th>Nombre</th><th>Registración</th>
         </tr></thead><tbody>${grupo.map(est => `<tr>
-          <td>${est.numero}</td><td>${est.nombre}</td><td>${est.registracion || '—'}</td>
+          <td>${est.numero}</td><td>${fichaLinkEstudiante(est.numero, est.nombre)}</td><td>${est.registracion || '—'}</td>
         </tr>`).join('')}</tbody></table></div>`;
         grupo.forEach(est => csvRows.push([nombrePrograma, anio || 'Sin asignar', etiquetaSec, est.numero, est.nombre, est.registracion || '']));
       });
@@ -13724,7 +13724,7 @@ function renderDashboard2() {
         const globalAvg = s.avgs.length ? _avgNivel(s.avgs) : null;
         const col = _colorForAvg(globalAvg);
         return `<tr>
-          <td><strong>${s.nombre}</strong></td>
+          <td><strong>${fichaLinkEstudiante(s.id, s.nombre)}</strong></td>
           <td style="font-size:0.72rem;color:var(--muted)">${s.id}</td>
           <td style="text-align:center">${s.courses.length}</td>
           <td style="text-align:center"><span style="font-weight:800;color:${col}">${globalAvg!==null?globalAvg.toFixed(2):'—'}</span></td>
@@ -16956,7 +16956,7 @@ async function renderSolicitudes() {
       <tr>
         <td style="font-size:0.78rem;white-space:nowrap">${new Date(s.fecha).toLocaleString('es-PR',{dateStyle:'short',timeStyle:'short'})}</td>
         <td><span class="badge badge-blue">${_solTipoLabel(s.coleccion)}</span></td>
-        <td style="font-size:0.8rem">${s.registroLabel || '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="font-size:0.8rem">${_fichaLinkSolicitud(s) || s.registroLabel || '<span style="color:var(--muted)">—</span>'}</td>
         <td style="font-size:0.82rem;max-width:280px">${s.descripcion}</td>
         ${isAdmin ? `<td style="font-size:0.78rem">${s.solicitanteNombre||s.solicitante}</td>` : ''}
         <td>${_solEstadoBadge(s.estado)}</td>
@@ -17250,6 +17250,7 @@ function _renderFichaActual(conservarScroll) {
     else if (cur.tipo === 'competencia') html = _renderFichaCompetencia(cur.id);
     else if (cur.tipo === 'seccion') html = _renderFichaSeccion(cur.id);
     else if (cur.tipo === 'profesor') html = _renderFichaProfesor(cur.id);
+    else if (cur.tipo === 'estudiante') html = _renderFichaEstudiante(cur.id);
   } catch (e) {
     console.error('Error al mostrar la ficha:', e);
     html = '<div class="ficha-empty">⚠️ No se pudo mostrar esta ficha.</div>';
@@ -17265,6 +17266,7 @@ function _fichaEtiqueta(x) {
   if (x.tipo === 'competencia') { const b = (db.bancoCompetencias || []).find(y => y.id === x.id); return b ? 'C' + b.num : 'Competencia'; }
   if (x.tipo === 'seccion') { const sc = (db.secciones || []).find(y => y.id === x.id); const c = sc && (db.cursos || []).find(y => y.id === sc.cursoId); return sc ? `${c?.codigo || ''} Sec. ${sc.numero || ''}`.trim() : 'Sección'; }
   if (x.tipo === 'profesor') return (db.facultad || []).find(y => y.id === x.id)?.nombre || 'Profesor';
+  if (x.tipo === 'estudiante') return _rosterDeEstudiante(x.id)?.nombre || x.id;
   return '';
 }
 function _fichaNoExiste(tipo) {
@@ -17844,7 +17846,7 @@ function _renderFichaSeccion(secId) {
     : '<div class="ficha-empty">El curso no tiene LAOs.</div>';
 
   const estHtml = ests.length ? ests.map((e, i) => `<div class="ficha-row"><span class="ficha-muted" style="width:22px;text-align:right">${i + 1}</span>
-      <div style="flex:1;min-width:0"><strong>${_alEsc(e.nombre || '—')}</strong> <span class="ficha-muted">${_alEsc(e.id || '')}</span></div>
+      <div style="flex:1;min-width:0"><strong>${fichaLinkEstudiante(e.id, e.nombre || '—')}</strong> <span class="ficha-muted">${_alEsc(e.id || '')}</span></div>
       ${evaluados.has(e.id) ? '<span class="badge badge-green" title="Tiene evaluaciones guardadas en esta sección">✓</span>' : ''}</div>`).join('')
     : '<div class="ficha-empty">La sección no tiene estudiantes.</div>';
 
@@ -17914,6 +17916,144 @@ function _renderFichaProfesor(facId) {
     ${_fichaSec('Información', info)}
     ${_fichaSec(`🏫 Secciones${ay != null ? ` — AY ${ay}-${ay + 1}` : ''}`, secHtml)}
     ${_fichaSec(`📚 Cursos que ha enseñado (${cursosIds.length})`, `<div style="font-size:0.84rem">${cursosHtml}</div>`)}`;
+}
+
+// ════════════════════════════════════════════════════════════
+//  FICHAS — Interoperabilidad, Fase I3: Estudiante.
+//  La clave de la ficha es el NÚMERO del estudiante (el mismo que usan las
+//  secciones, los avalúos y las asesorías). Si además está en el roster de
+//  Estudiantes (db.estudiantes), se muestran sus datos de cohorte.
+// ════════════════════════════════════════════════════════════
+FICHA_TIPOS.estudiante = { icono: '🧑‍🎓', nombre: 'Estudiante' };
+
+function _rosterDeEstudiante(num) {
+  const k = String(num ?? '').trim();
+  if (!k) return null;
+  return (db.estudiantes || []).find(e => String(e.numero) === k) || (db.estudiantes || []).find(e => e.id === k) || null;
+}
+function _clave(num) { return String(num ?? '').trim(); }
+// Secciones donde está matriculado (por número/ID dentro de la sección)
+function _seccionesDeEstudiante(num) {
+  const k = _clave(num);
+  return (db.secciones || []).filter(s => (s.estudiantes || []).some(e => _clave(e.id) === k));
+}
+// Avalúos del estudiante que el usuario puede ver (mismas reglas que Base de Datos/Reportes)
+function _avaluosVisiblesDeEstudiante(num) {
+  const k = _clave(num);
+  const suyos = (db.avaluos || []).filter(a => _clave(a.estudianteId) === k);
+  const role = getEffectiveRole();
+  if (_viewAsRole && role !== 'admin' && role !== 'decano') {
+    if (role === 'director' || role === 'coordinator') return suyos;
+    return suyos.filter(a => { const s = (db.secciones || []).find(x => x.id === a.seccionId); return s && _fichaPuedeVerSeccion(s); });
+  }
+  return _filterAvaluosByRole(suyos);
+}
+function _fichaPuedeVerEstudiante(num) {
+  const role = getEffectiveRole();
+  if (role === 'admin' || role === 'decano') return true;
+  if (_seccionesDeEstudiante(num).some(_fichaPuedeVerSeccion)) return true;
+  if (_viewAsRole) return role === 'director' || role === 'coordinator';
+  const est = _rosterDeEstudiante(num);
+  if (est && canSeeEstudiante(est)) return true;
+  return _avaluosVisiblesDeEstudiante(num).length > 0;
+}
+// Enlace a la ficha de un estudiante por su número
+function fichaLinkEstudiante(num, nombre) {
+  const k = _clave(num);
+  return k ? fichaLink('estudiante', k, nombre || k) : _alEsc(nombre || '—');
+}
+
+function _renderFichaEstudiante(num) {
+  const k = _clave(num);
+  const est = _rosterDeEstudiante(k);
+  const secs = _seccionesDeEstudiante(k);
+  const enSec = secs.map(s => (s.estudiantes || []).find(e => _clave(e.id) === k)).find(Boolean);
+  const avsTodos = (db.avaluos || []).filter(a => _clave(a.estudianteId) === k);
+  const nombre = est?.nombre || enSec?.nombre || avsTodos[0]?.estudiante || k;
+  if (!est && !secs.length && !avsTodos.length) return _fichaNoExiste('estudiante');
+  if (!_fichaPuedeVerEstudiante(k)) return _fichaSinAcceso('estudiante', nombre);
+  const isAdmin = _fichaAdmin();
+
+  const acciones = [];
+  if (est && isAdmin) acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarEstudianteRoster('${_alEscAttr(est.id)}')">✏️ Editar estudiante</button>`);
+
+  const prog = est?.programaId ? (db.programas || []).find(p => p.id === est.programaId) : null;
+  const ases = (db.asesorias || []).find(a => _clave(a.studentId) === k);
+  const asesorF = ases ? (db.facultad || []).find(f => String(f.email || '').toLowerCase() === String(ases.profesorEmail || '').toLowerCase()) : null;
+  const email = enSec?.email || '';
+  const info = `<div class="ficha-kv">
+    <div>Número</div><div>${_alEsc(k)}</div>
+    ${email ? `<div>Correo</div><div><a href="mailto:${_alEsc(email)}">${_alEsc(email)}</a></div>` : ''}
+    <div>Programa</div><div>${prog ? fichaLink('programa', prog.id, prog.nombre) : (est ? '<span class="ficha-muted">Sin programa</span>' : '<span class="ficha-muted">—</span>')}</div>
+    ${est ? `<div>Año comienzo</div><div>${_alEsc(est.anioComienzo || '—')}</div>
+    <div>Secuencia</div><div>${_alEsc(est.secuencia || '—')}</div>
+    <div>Registración</div><div>${_alEsc(est.registracion || '—')}</div>` : ''}
+    <div>Asesor/a</div><div>${asesorF ? fichaLink('profesor', asesorF.id, asesorF.nombre || asesorF.email) : (ases ? _alEsc(ases.profesorEmail) : '<span class="ficha-muted">—</span>')}</div>
+  </div>${est ? '' : '<div class="ficha-muted" style="margin-top:6px">No está en el roster de Estudiantes; aparece en secciones o avalúos.</div>'}`;
+
+  // Secciones (las que el usuario puede ver), más reciente primero
+  const secsVis = secs.filter(_fichaPuedeVerSeccion)
+    .sort((a, b) => (getAcademicYear(b.semestre) ?? -1) - (getAcademicYear(a.semestre) ?? -1) || String(b.semestre).localeCompare(String(a.semestre)));
+  const ocultas = secs.length - secsVis.length;
+  const secHtml = (secsVis.length ? secsVis.map(s => {
+    const c = (db.cursos || []).find(x => x.id === s.cursoId);
+    return `<div class="ficha-row"><div style="flex:1;min-width:0">${fichaLink('seccion', s.id, `${c?.codigo || '—'} · Sec. ${s.numero || '—'}`)} <span class="ficha-muted">${_alEsc(c?.nombre || '')}</span></div>
+      <span class="ficha-muted" style="white-space:nowrap">${_alEsc(s.semestre || '')}</span></div>`;
+  }).join('') : '<div class="ficha-empty">No hay secciones que puedas ver.</div>') +
+    (ocultas ? `<div class="ficha-muted" style="margin-top:4px">${ocultas} ${ocultas === 1 ? 'sección' : 'secciones'} más que tu rol no permite ver.</div>` : '');
+
+  // Logro por competencia, por curso (solo avalúos visibles)
+  const avs = _avaluosVisiblesDeEstudiante(k);
+  const porCurso = {};
+  avs.forEach(a => { (porCurso[a.cursoId] = porCurso[a.cursoId] || []).push(a); });
+  const cursoIds = Object.keys(porCurso).sort((a, b) => String((db.cursos || []).find(c => c.id === a)?.codigo || '').localeCompare(String((db.cursos || []).find(c => c.id === b)?.codigo || ''), undefined, { numeric: true }));
+  const logroHtml = cursoIds.length ? cursoIds.map(cid => {
+    const c = (db.cursos || []).find(x => x.id === cid);
+    const lista = porCurso[cid];
+    const escala = resolverEscalaParaCurso(cid);
+    const titulo = v => (escala?.niveles || []).find(n => Number(n.valor) === Math.round(Number(v)))?.titulo || '';
+    const comps = (db.competencias || []).filter(x => x.cursoId === cid)
+      .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true }));
+    const filas = comps.map(dc => {
+      let v = null;
+      try { v = computeNivelCompetenciaFinal(k, dc.id, cid, lista); } catch (e) { v = null; }
+      if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '';
+      const bc = _bancoDeCompCurso(dc);
+      return `<div style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:0.8rem">
+        <span class="badge badge-blue ${bc ? 'ficha-clic' : ''}" ${bc ? fichaAttr('competencia', bc.id) : ''}>${_alEsc(dc.codigo)}</span>
+        <strong>${_alEsc(Number(v) % 1 ? Number(v).toFixed(2) : v)}</strong><span class="ficha-muted">${_alEsc(titulo(v))}</span></div>`;
+    }).filter(Boolean).join('');
+    const notas = lista.map(a => parseFloat(a.notaFinal)).filter(n => !isNaN(n));
+    const sem = [...new Set(lista.map(a => _getSemestre(a) || a.semestre).filter(Boolean))].join(', ');
+    return `<div class="ficha-row" style="flex-direction:column;gap:2px">
+      <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap"><span class="prog-course-code">${c ? fichaLink('curso', c.id, c.codigo) : _alEsc(lista[0]?.cursoCodigo || '—')}</span>
+        <span style="flex:1;min-width:0">${_alEsc(c?.nombre || lista[0]?.cursoNombre || '')}</span>
+        <span class="ficha-muted">${_alEsc(sem)}${notas.length ? ` · nota ${_alEsc(notas[notas.length - 1])}` : ''}</span></div>
+      ${filas || '<div class="ficha-muted">Sin niveles por competencia calculados.</div>'}</div>`;
+  }).join('') : '<div class="ficha-empty">No hay evaluaciones que puedas ver.</div>';
+
+  return `<div class="ficha-tipo">🧑‍🎓 Estudiante</div>
+    <div class="ficha-titulo">${_alEsc(nombre)}</div>
+    ${acciones.length ? `<div class="ficha-acciones">${acciones.join('')}</div>` : ''}
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`🏫 Secciones (${secsVis.length})`, secHtml)}
+    ${_fichaSec('🎯 Logro por competencia', logroHtml)}`;
+}
+
+// Enlace al registro de una solicitud (pestaña Solicitudes)
+function _fichaLinkSolicitud(s) {
+  const label = s.registroLabel || '';
+  if (!s.registroId || !label) return '';
+  const id = s.registroId;
+  const map = { cursos: 'curso', programas: 'programa', departamentos: 'departamento', rubrica_lao: 'lao', alineamiento: 'programa' };
+  if (s.coleccion === 'competencias') {
+    const bc = _bancoDeCompCurso((db.competencias || []).find(c => c.id === id));
+    return bc ? fichaLink('competencia', bc.id, label) : '';
+  }
+  const tipo = map[s.coleccion];
+  if (!tipo) return '';
+  const existe = { curso: db.cursos, programa: db.programas, departamento: db.departamentos, lao: db.laos }[tipo] || [];
+  return existe.some(x => x.id === id) ? fichaLink(tipo, id, label) : '';
 }
 
 // ── Ancho de la ficha: se arrastra el borde izquierdo; doble clic lo restablece.
