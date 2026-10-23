@@ -1208,6 +1208,8 @@
     text-underline-offset: 3px; background: none; border: none; padding: 0; font: inherit;
   }
   .ficha-link:hover { text-decoration-style: solid; color: var(--egsp-coral); }
+  .ficha-clic { cursor: pointer; }
+  .ficha-clic:hover { filter: brightness(0.9); text-decoration: underline; text-underline-offset: 2px; }
   .ficha-panel {
     position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 100vw);
     background: var(--white); z-index: 950; box-shadow: -8px 0 30px rgba(0,0,0,0.18);
@@ -4371,14 +4373,15 @@ function renderCompetencias() {
   el.innerHTML = comps.map(c => {
     const curso = db.cursos.find(x => x.id === c.cursoId);
     const tipoLabels = { rubrica:'Rúbrica L/P/N', numerica:'Numérica 1-10', cotejo:'Cotejo Sí/No', combinada:'Combinada' };
+    const bcC = _bancoDeCompCurso(c);
     return `<div class="competencia-item">
       <div class="competencia-header">
         <div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="competencia-code">${c.codigo}</span>
+            <span class="competencia-code">${bcC ? fichaLink('competencia', bcC.id, c.codigo) : c.codigo}</span>
             <span class="badge badge-gold">${tipoLabels[c.tipo]}</span>
             ${c.peso ? `<span class="badge badge-blue">${c.peso}%</span>` : ''}
-            ${curso ? `<span style="font-size:0.78rem;color:var(--muted)">${curso.codigo} · ${curso.nombre}</span>` : ''}
+            ${curso ? `<span style="font-size:0.78rem;color:var(--muted)">${fichaLink('curso', curso.id, curso.codigo)} · ${_alEsc(curso.nombre)}</span>` : ''}
           </div>
           <div class="competencia-desc">${c.descripcion}</div>
           ${(() => { const ln = laosDeCompetencia(c); return ln.length ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px">📋 ${ln.join(' | ')}</div>` : ''; })()}
@@ -6125,7 +6128,7 @@ function renderLaos() {
     return `<div class="card" style="margin-bottom:12px;padding:14px 16px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div>
-          <div style="font-weight:800;font-size:0.95rem">${l.nombre}</div>
+          <div style="font-weight:800;font-size:0.95rem">${fichaLink('lao', l.id, l.nombre)}</div>
           <div style="font-size:0.76rem;color:var(--muted);margin-top:2px">${curso ? fichaLink('curso', curso.id, curso.codigo) + ' · ' + _alEsc(curso.nombre) : '—'}</div>
           ${l.descripcion ? `<div style="font-size:0.8rem;margin-top:6px">${l.descripcion}</div>` : ''}
         </div>
@@ -9294,13 +9297,13 @@ function renderSecciones() {
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           ${esAdmin ? `<input type="checkbox" ${_secSeleccionadas.has(sec.id) ? 'checked' : ''} onchange="toggleSecSeleccion('${sec.id}', this.checked)">` : ''}
           <div class="card-title">
-            <span class="competencia-code">${curso?.codigo || '—'}</span>
-            Sec. <strong>${sec.numero}</strong>${sec.semestre ? ` · <span style="font-weight:400;font-size:0.9rem">${sec.semestre}</span>` : ''}
+            <span class="competencia-code">${curso ? fichaLink('curso', curso.id, curso.codigo) : '—'}</span>
+            ${fichaLink('seccion', sec.id, 'Sec. ' + sec.numero)}${sec.semestre ? ` · <span style="font-weight:400;font-size:0.9rem">${sec.semestre}</span>` : ''}
           </div>
           <span class="badge badge-blue">${sec.estudiantes?.length || 0} estudiantes</span>
           ${sec.semestre ? `<span class="badge badge-gold">${sec.semestre}</span>` : ''}
           ${sec.origenRoster ? `<span class="badge badge-green">📂 Roster RCM</span>` : ''}
-          ${sec.profesor ? `<span style="font-size:0.8rem;color:var(--muted)">👤 ${sec.profesor}</span>` : ''}
+          ${sec.profesor ? `<span style="font-size:0.8rem;color:var(--muted)">👤 ${_fichaLinkProfesorSec(sec)}</span>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarSeccion('${sec.id}')">✏️ Editar</button>` : ''}
@@ -14633,7 +14636,7 @@ function renderMatriz() {
           <thead>
             <tr>
               <th style="text-align:left;min-width:260px">Competencia</th>
-              ${cursos.map(c => `<th style="min-width:120px">${c.codigo}<br>
+              ${cursos.map(c => `<th style="min-width:120px"><span class="ficha-clic" ${fichaAttr('curso', c.id)}>${c.codigo}</span><br>
                 <span style="font-weight:300;font-size:0.65rem;opacity:0.8;display:block;margin-top:2px;line-height:1.3">${c.nombre}</span></th>`).join('')}
             </tr>
           </thead>
@@ -14641,7 +14644,7 @@ function renderMatriz() {
             ${comps.map(comp => `
               <tr>
                 <td>
-                  <div class="comp-num">C${comp.num}</div>
+                  <div class="comp-num ficha-clic" ${fichaAttr('competencia', comp.id)}>C${comp.num}</div>
                   <div class="comp-text">${comp.texto}</div>
                 </td>
                 ${cursos.map(curso => {
@@ -15357,7 +15360,7 @@ function renderAlBank(filterProg, isAdmin) {
       html += `<div class="al-comp-card">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
           <div style="flex:1">
-            <span class="al-comp-num">C${comp.num}</span>
+            <span class="al-comp-num ficha-clic" ${fichaAttr('competencia', comp.id)}>C${comp.num}</span>
             <div class="al-comp-text">${comp.texto}</div>
             <div class="al-comp-courses">
               ${linkedCourses.map(cu => {
@@ -15366,7 +15369,7 @@ function renderAlBank(filterProg, isAdmin) {
                   `<span class="al-lao-tag">${l}</span>`).join('');
                 return `<div>
                   <div class="al-course-chip">
-                    ${cu.codigo}
+                    <span class="ficha-clic" ${fichaAttr('curso', cu.id)}>${cu.codigo}</span>
                     ${isAdmin ? `<span class="al-chip-remove" onclick="desvincularCompCurso('${comp.num}','${cu.id}')" title="Desvincular">×</span>` : ''}
                   </div>
                   ${laoText ? `<div class="al-lao-list">${laoText}</div>` : ''}
@@ -15413,7 +15416,7 @@ function renderAlMatrix(filterProg, isAdmin) {
       <table class="al-matrix-table">
         <thead><tr>
           <th class="comp-col">Competencia</th>
-          ${cursos.map(cu => `<th title="${cu.nombre}">${cu.codigo}</th>`).join('')}
+          ${cursos.map(cu => `<th title="${_alEsc(cu.nombre)}"><span class="ficha-clic" ${fichaAttr('curso', cu.id)}>${cu.codigo}</span></th>`).join('')}
         </tr></thead>
         <tbody>
           ${comps.map(comp => {
@@ -15422,7 +15425,7 @@ function renderAlMatrix(filterProg, isAdmin) {
             );
             return `<tr>
               <td class="comp-cell">
-                <span class="al-comp-num" style="font-size:0.68rem">C${comp.num}</span>
+                <span class="al-comp-num ficha-clic" style="font-size:0.68rem" ${fichaAttr('competencia', comp.id)}>C${comp.num}</span>
                 <span style="margin-left:6px;font-size:0.78rem">${comp.texto.substring(0,80)}${comp.texto.length>80?'…':''}</span>
               </td>
               ${cursos.map(cu => {
@@ -16289,7 +16292,7 @@ function renderFacultadList() {
       ${isAdmin ? `<div style="align-self:start;padding-top:2px">${checkbox}</div>` : ''}
       <div class="fac-avatar">${initials}</div>
       <div>
-        <div class="fac-name">${f.nombre}</div>
+        <div class="fac-name">${fichaLink('profesor', f.id, f.nombre)}</div>
         <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
         <div class="fac-tags">
           ${f.esAdmin ? '<span class="badge badge-red">🔑 Administrador</span>' : ''}
@@ -17198,8 +17201,10 @@ function _fichaAbierta() { return !!document.getElementById('ficha-panel')?.clas
 function abrirFicha(tipo, id) {
   if (!FICHA_TIPOS[tipo] || !currentUser) return;
   if (!_fichaAbierta()) _fichaStack = [];
-  const top = _fichaStack[_fichaStack.length - 1];
-  if (!top || top.tipo !== tipo || top.id !== id) _fichaStack.push({ tipo, id });
+  // Si la ficha ya está en el recorrido, se vuelve a ella en vez de repetirla
+  const idx = _fichaStack.findIndex(x => x.tipo === tipo && x.id === id);
+  if (idx >= 0) _fichaStack = _fichaStack.slice(0, idx + 1);
+  else _fichaStack.push({ tipo, id });
   const panel = document.getElementById('ficha-panel');
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
@@ -17241,6 +17246,10 @@ function _renderFichaActual(conservarScroll) {
     if (cur.tipo === 'curso') html = _renderFichaCurso(cur.id);
     else if (cur.tipo === 'programa') html = _renderFichaPrograma(cur.id);
     else if (cur.tipo === 'departamento') html = _renderFichaDepartamento(cur.id);
+    else if (cur.tipo === 'lao') html = _renderFichaLao(cur.id);
+    else if (cur.tipo === 'competencia') html = _renderFichaCompetencia(cur.id);
+    else if (cur.tipo === 'seccion') html = _renderFichaSeccion(cur.id);
+    else if (cur.tipo === 'profesor') html = _renderFichaProfesor(cur.id);
   } catch (e) {
     console.error('Error al mostrar la ficha:', e);
     html = '<div class="ficha-empty">⚠️ No se pudo mostrar esta ficha.</div>';
@@ -17252,6 +17261,10 @@ function _fichaEtiqueta(x) {
   if (x.tipo === 'curso') return (db.cursos || []).find(c => c.id === x.id)?.codigo || 'Curso';
   if (x.tipo === 'programa') return (db.programas || []).find(p => p.id === x.id)?.nombre || 'Programa';
   if (x.tipo === 'departamento') return (db.departamentos || []).find(d => d.id === x.id)?.nombre || 'Departamento';
+  if (x.tipo === 'lao') { const l = (db.laos || []).find(y => y.id === x.id); return l ? l.nombre : 'LAO'; }
+  if (x.tipo === 'competencia') { const b = (db.bancoCompetencias || []).find(y => y.id === x.id); return b ? 'C' + b.num : 'Competencia'; }
+  if (x.tipo === 'seccion') { const sc = (db.secciones || []).find(y => y.id === x.id); const c = sc && (db.cursos || []).find(y => y.id === sc.cursoId); return sc ? `${c?.codigo || ''} Sec. ${sc.numero || ''}`.trim() : 'Sección'; }
+  if (x.tipo === 'profesor') return (db.facultad || []).find(y => y.id === x.id)?.nombre || 'Profesor';
   return '';
 }
 function _fichaNoExiste(tipo) {
@@ -17337,7 +17350,8 @@ function _renderFichaCurso(cursoId) {
     .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true }));
   const compsHtml = comps.length ? comps.map(dc => {
     const nLaos = laosDeCompetencia(dc).length;
-    return `<div class="ficha-row"><span class="badge badge-blue" style="flex-shrink:0">${_alEsc(dc.codigo)}</span>
+    const bcDc = _bancoDeCompCurso(dc);
+    return `<div class="ficha-row"><span class="badge badge-blue ${bcDc ? 'ficha-clic' : ''}" style="flex-shrink:0" ${bcDc ? fichaAttr('competencia', bcDc.id) : ''}>${_alEsc(dc.codigo)}</span>
       <div style="flex:1;min-width:0">${_alEsc(dc.descripcion || '')}</div>
       <span class="ficha-muted" style="white-space:nowrap">${nLaos} LAO${nLaos === 1 ? '' : 's'}</span></div>`;
   }).join('') : '<div class="ficha-empty">Este curso no tiene competencias vinculadas.</div>';
@@ -17352,7 +17366,7 @@ function _renderFichaCurso(cursoId) {
     }).join('');
     return `<div class="ficha-row" style="flex-direction:column;gap:4px">
       <div style="display:flex;gap:8px;align-items:center;width:100%;flex-wrap:wrap">
-        <strong style="flex:1;min-width:0">${_alEsc(l.nombre)}</strong>
+        <strong style="flex:1;min-width:0">${fichaLink('lao', l.id, l.nombre)}</strong>
         ${l.isGenerico ? '<span class="badge badge-gold">⚠️ Genérico</span>' : ''}
         ${l.esOficial ? '<span class="badge badge-green">Oficial</span>' : `<span class="badge badge-purple">Alterno${l.compartido ? ' · compartido' : ''}</span>`}
         ${rub?.criterios?.length ? '<span class="badge badge-blue">📐 Rúbrica</span>' : ''}
@@ -17387,15 +17401,19 @@ function _renderFichaCurso(cursoId) {
   const { ay, secciones, sinAy } = _seccionesAyRecienteCurso(c.id);
   const visibles = secciones.filter(_fichaPuedeVerSeccion);
   const ocultas = secciones.length - visibles.length;
-  const profesores = [...new Set(secciones.map(s => (s.profesor || s.profesorEmail || '').trim()).filter(Boolean))].sort();
+  const _profVistos = new Set();
+  const profesores = secciones.filter(s => {
+    const k = _facultadDeSeccion(s)?.id || (s.profesor || s.profesorEmail || '').trim().toLowerCase();
+    if (!k || _profVistos.has(k)) return false; _profVistos.add(k); return true;
+  }).sort((a, b) => String(a.profesor || '').localeCompare(String(b.profesor || '')));
   const ayTxt = ay != null ? `AY ${ay}-${ay + 1}` : (sinAy ? 'término sin año reconocible' : '');
   let secHtml;
   if (!secciones.length) secHtml = '<div class="ficha-empty">Este curso no tiene secciones registradas.</div>';
   else {
-    secHtml = `<div class="ficha-kv" style="margin-bottom:6px"><div>Profesores</div><div>${profesores.map(_alEsc).join(', ') || '—'}</div></div>` +
+    secHtml = `<div class="ficha-kv" style="margin-bottom:6px"><div>Profesores</div><div>${profesores.map(_fichaLinkProfesorSec).join(', ') || '—'}</div></div>` +
       visibles.sort((a, b) => String(a.semestre).localeCompare(String(b.semestre)) || String(a.numero).localeCompare(String(b.numero), undefined, { numeric: true }))
-        .map(s => `<div class="ficha-row"><strong style="white-space:nowrap">Sec. ${_alEsc(s.numero || '—')}</strong>
-          <div style="flex:1;min-width:0">${_alEsc(s.semestre || '—')} · ${_alEsc(s.profesor || s.profesorEmail || 'sin profesor')}</div>
+        .map(s => `<div class="ficha-row"><strong style="white-space:nowrap">${fichaLink('seccion', s.id, 'Sec. ' + (s.numero || '—'))}</strong>
+          <div style="flex:1;min-width:0">${_alEsc(s.semestre || '—')} · ${_fichaLinkProfesorSec(s)}</div>
           <span class="ficha-muted" style="white-space:nowrap">${(s.estudiantes || []).length} est.</span></div>`).join('') +
       (ocultas ? `<div class="ficha-muted" style="margin-top:4px">${ocultas} ${ocultas === 1 ? 'sección' : 'secciones'} más de otros profesores.</div>` : '');
   }
@@ -17518,7 +17536,7 @@ function _renderFichaPrograma(progId) {
   const secTxt = SECUENCIAS_CONFIG.filter(({ key, opcional }) => !opcional || secs[key]?.activa)
     .map(({ key, label }) => `<div>${_alEsc(label)} <span class="ficha-muted">— ${_alEsc(durTxt(secs[key]))}</span></div>`).join('');
   const { coordinadores, directores } = _liderazgoDePrograma(p);
-  const nombres = arr => arr.length ? arr.map(f => _alEsc(f.nombre || f.email)).join(', ') : '<span class="ficha-muted">—</span>';
+  const nombres = arr => arr.length ? arr.map(f => fichaLink('profesor', f.id, f.nombre || f.email)).join(', ') : '<span class="ficha-muted">—</span>';
   const info = `<div class="ficha-kv">
     <div>Departamento</div><div>${d ? fichaLink('departamento', d.id, d.nombre) : '<span class="ficha-muted">Sin departamento asignado</span>'}</div>
     <div>Modalidad de evaluación</div><div>${_modalidadValida(p.modalidadEvaluacion) ? _alEsc(modalidadInfo(p.modalidadEvaluacion).corto) : 'sin fijar — cada profesor escoge'}</div>
@@ -17546,7 +17564,7 @@ function _renderFichaPrograma(progId) {
     ${g.titulo ? `<div style="font-weight:700;font-size:0.78rem;margin:8px 0 2px;color:var(--muted)">${_alEsc(g.titulo)}</div>` : ''}
     ${g.items.map(b => {
       const nCursos = (db.competencias || []).filter(dc => (dc.codigo === 'C' + b.num || dc.codigo === b.num) && cursos.some(c => c.id === dc.cursoId)).length;
-      return `<div class="ficha-row"><span class="badge badge-blue" style="flex-shrink:0">C${_alEsc(b.num)}</span>
+      return `<div class="ficha-row"><span class="badge badge-blue ficha-clic" style="flex-shrink:0" ${fichaAttr('competencia', b.id)}>C${_alEsc(b.num)}</span>
         <div style="flex:1;min-width:0">${_alEsc(b.texto || '')}</div>
         <span class="ficha-muted" style="white-space:nowrap">${nCursos} curso${nCursos === 1 ? '' : 's'}</span></div>`;
     }).join('')}`).join('') : '<div class="ficha-empty">Sin competencias registradas en el banco.</div>';
@@ -17615,7 +17633,7 @@ function _renderFichaDepartamento(deptId) {
   }).join('') : '<div class="ficha-empty">Sin programas en este departamento.</div>';
   const facHtml = fac.length ? fac.map(f => {
     const roles = [si(f.director) ? 'Director/a' : '', si(f.coordinator) ? 'Coordinador/a' : ''].filter(Boolean);
-    return `<div class="ficha-row"><div style="flex:1;min-width:0">${_alEsc(f.nombre || f.email || '—')}</div>
+    return `<div class="ficha-row"><div style="flex:1;min-width:0">${fichaLink('profesor', f.id, f.nombre || f.email || '—')}</div>
       ${roles.map(r => `<span class="badge badge-gold">${r}</span>`).join(' ')}</div>`;
   }).join('') : '<div class="ficha-empty">No hay facultad asignada a este departamento.</div>';
 
@@ -17627,6 +17645,275 @@ function _renderFichaDepartamento(deptId) {
     </div>
     ${_fichaSec(`🎓 Programas (${progs.length})`, progsHtml)}
     ${_fichaSec(`👩‍🏫 Facultad (${fac.length})`, facHtml)}`;
+}
+
+// ════════════════════════════════════════════════════════════
+//  FICHAS — Interoperabilidad, Fase I2: LAO, Competencia (del banco),
+//  Sección (con ▶ Evaluar) y Profesor.
+// ════════════════════════════════════════════════════════════
+Object.assign(FICHA_TIPOS, {
+  lao:         { icono: '📋', nombre: 'LAO' },
+  competencia: { icono: '🎯', nombre: 'Competencia' },
+  seccion:     { icono: '🏫', nombre: 'Sección' },
+  profesor:    { icono: '👩‍🏫', nombre: 'Profesor' },
+});
+
+// Atributos para hacer clicable un elemento existente (badge, chip, encabezado)
+// sin cambiar su estilo; añadir también class="ficha-clic".
+function fichaAttr(tipo, id) {
+  if (!id) return '';
+  return `onclick="event.preventDefault();event.stopPropagation();abrirFicha('${_alEscAttr(tipo)}','${_alEscAttr(id)}')" title="Ver ficha de ${_alEsc((FICHA_TIPOS[tipo]?.nombre || '').toLowerCase())}" role="link" tabindex="0"`;
+}
+
+// Competencia de un curso (db.competencias) → su competencia del banco
+function _bancoDeCompCurso(dc) {
+  if (!dc) return null;
+  const curso = (db.cursos || []).find(c => c.id === dc.cursoId);
+  return curso ? _bancoDeCompetenciaCurso(dc, curso) : null;
+}
+// Profesor (registro de facultad) de una sección: por correo y, si no, por nombre
+function _facultadDeSeccion(sec) {
+  if (!sec) return null;
+  const em = String(sec.profesorEmail || '').trim().toLowerCase();
+  const nom = String(sec.profesor || '').trim().toLowerCase();
+  const fac = db.facultad || [];
+  return (em && fac.find(f => String(f.email || '').toLowerCase() === em)) ||
+    (nom && fac.find(f => String(f.nombre || '').trim().toLowerCase() === nom)) || null;
+}
+function _fichaLinkProfesorSec(sec) {
+  const f = _facultadDeSeccion(sec);
+  const label = sec.profesor || f?.nombre || sec.profesorEmail || '';
+  return f ? fichaLink('profesor', f.id, label) : _alEsc(label || 'sin profesor');
+}
+function _fichaPuedeVerLao(lao) {
+  if (!lao) return false;
+  return _fichaAdmin() || laosDisponiblesPara(lao.cursoId, currentUser?.username, false).some(l => l.id === lao.id);
+}
+function _fichaSinAcceso(tipo, titulo) {
+  return `<div class="ficha-tipo">${FICHA_TIPOS[tipo].icono} ${FICHA_TIPOS[tipo].nombre}</div>
+    <div class="ficha-titulo">${_alEsc(titulo)}</div>
+    <div class="ficha-empty">🔒 Tu rol no permite ver el detalle de este registro.</div>`;
+}
+
+// ── Ficha: LAO ────────────────────────────────────────────────
+const LAO_MODO_TXT = {
+  libre: 'Libre — con rúbrica si la tiene; si no, calificación directa',
+  requiere_rubrica: 'Requiere rúbrica',
+  solo_directa: 'Solo calificación directa',
+};
+function _renderFichaLao(laoId) {
+  const l = (db.laos || []).find(x => x.id === laoId);
+  if (!l) return _fichaNoExiste('lao');
+  if (!_fichaPuedeVerLao(l)) return _fichaSinAcceso('lao', l.nombre);
+  const isAdmin = _fichaAdmin();
+  const curso = (db.cursos || []).find(c => c.id === l.cursoId);
+  const rub = (db.rubricas || []).find(r => r.laoId === l.id);
+  const idA = _alEscAttr(l.id);
+
+  const acciones = [];
+  if (isAdmin) acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarLao('${idA}')">✏️ Editar LAO</button>`);
+  else if (curso && typeof abrirSolicitudRubrica === 'function')
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirSolicitudRubrica('${_alEscAttr(curso.id)}','${idA}')">📝 Solicitar ${rub?.criterios?.length ? 'cambio de' : ''} rúbrica</button>`);
+
+  const autor = l.profesorEmail ? ((db.facultad || []).find(f => String(f.email || '').toLowerCase() === String(l.profesorEmail).toLowerCase()) || null) : null;
+  const tipo = l.esOficial ? 'Oficial' : `Alterno${l.compartido ? ' · compartido con todos los profesores del curso' : ''}`;
+  const info = `<div class="ficha-kv">
+    <div>Curso</div><div>${curso ? fichaLink('curso', curso.id, curso.codigo) + ' · ' + _alEsc(curso.nombre) : '—'}</div>
+    <div>Tipo</div><div>${_alEsc(tipo)}${l.isGenerico ? ' <span class="badge badge-gold">⚠️ Genérico — falta definir</span>' : ''}</div>
+    ${l.profesorEmail ? `<div>Creado por</div><div>${autor ? fichaLink('profesor', autor.id, autor.nombre || autor.email) : _alEsc(l.profesorEmail)}</div>` : ''}
+    <div>Modo de evaluación</div><div>${_alEsc(LAO_MODO_TXT[l.modoEvaluacion || 'libre'] || l.modoEvaluacion)}</div>
+    ${l.descripcion ? `<div>Descripción</div><div style="white-space:pre-wrap">${_alEsc(l.descripcion)}</div>` : ''}
+  </div>`;
+
+  const comps = (l.competencias || []).map(cc => {
+    const dc = (db.competencias || []).find(x => x.id === cc.competenciaId);
+    if (!dc) return '';
+    const bc = _bancoDeCompCurso(dc);
+    return `<div class="ficha-row"><span class="badge badge-blue ${bc ? 'ficha-clic' : ''}" style="flex-shrink:0" ${bc ? fichaAttr('competencia', bc.id) : ''}>${_alEsc(dc.codigo)}</span>
+      <div style="flex:1;min-width:0">${_alEsc(dc.descripcion || '')}</div>
+      <span class="ficha-muted" style="white-space:nowrap" title="${cc.pesoAuto === false ? 'peso fijado a mano' : 'peso automático: se reparte entre los LAOs que miden esta competencia'}">${_alEsc(cc.peso)}% · ${cc.pesoAuto === false ? 'fijo' : 'auto'}</span></div>`;
+  }).join('') || '<div class="ficha-empty">Sin competencias asignadas.</div>';
+
+  let rubHtml;
+  if (rub?.criterios?.length) {
+    const niveles = (rub.niveles || []).map(n => n.label).filter(Boolean).join(' · ');
+    rubHtml = `<div class="ficha-row" style="align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px"><strong>${rub.criterios.length} criterio${rub.criterios.length === 1 ? '' : 's'}</strong>
+          <div class="ficha-muted">Niveles: ${_alEsc(niveles || '—')}</div></div>
+        ${_fichaBotonesRubrica(`accionRubricaLao('${idA}',`)}</div>` +
+      rub.criterios.map(cr => `<div class="ficha-row"><div style="flex:1;min-width:0">${_alEsc(cr.nombre || '(sin nombre)')}</div>
+        <span class="ficha-muted" style="white-space:nowrap">${parseFloat(cr.peso) > 0 ? _alEsc(cr.peso) + '% de la nota' : 'sin peso en la nota'}</span></div>`).join('');
+  } else rubHtml = '<div class="ficha-empty">Sin rúbrica — se evalúa con calificación directa por competencia.</div>';
+
+  const avs = (db.avaluos || []).filter(a => a.laoId === l.id);
+  const nEst = new Set(avs.map(a => a.estudianteId)).size;
+  const uso = `<div class="ficha-kv"><div>Evaluaciones guardadas</div><div>${avs.length ? `${nEst} estudiante${nEst === 1 ? '' : 's'} evaluado${nEst === 1 ? '' : 's'}` : 'Todavía no se ha evaluado con este LAO'}</div></div>`;
+
+  return `<div class="ficha-tipo">📋 LAO</div>
+    <div class="ficha-titulo">${_alEsc(l.nombre)}</div>
+    ${acciones.length ? `<div class="ficha-acciones">${acciones.join('')}</div>` : ''}
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`🎯 Competencias que mide (${(l.competencias || []).length})`, comps)}
+    ${_fichaSec('📐 Rúbrica', rubHtml)}
+    ${_fichaSec('📊 Uso', uso)}`;
+}
+
+// ── Ficha: Competencia (del banco del programa) ───────────────
+function _renderFichaCompetencia(bcId) {
+  const bc = (db.bancoCompetencias || []).find(x => x.id === bcId);
+  if (!bc) return _fichaNoExiste('competencia');
+  const isAdmin = _fichaAdmin();
+  const prog = (db.programas || []).find(p => p.nombre === bc.programa);
+  const dom = bc.dominioId ? (db.dominiosCompetencias || []).find(d => d.id === bc.dominioId) : null;
+  const crits = criteriosDeCompetencia(bc);
+  const idA = _alEscAttr(bc.id), numA = _alEscAttr(bc.num), progA = _alEscAttr(bc.programa);
+
+  const acciones = [`<button class="btn btn-outline btn-sm" onclick="abrirCriteriosCompetencia('${idA}')">📐 ${isAdmin ? 'Editar criterios' : 'Ver criterios'}</button>`];
+  if (isAdmin) {
+    acciones.unshift(`<button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${numA}','${progA}')">✏️ Editar competencia</button>`);
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${numA}','${progA}')">🔗 Vincular a un curso</button>`);
+  } else if (authCan('competencias')) {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirSolicitudEdicion('competencias')">📝 Solicitar edición</button>`);
+  }
+
+  const info = `<div class="ficha-kv">
+    <div>Programa</div><div>${prog ? fichaLink('programa', prog.id, prog.nombre) : _alEsc(bc.programa || '—')}</div>
+    <div>Dominio</div><div>${dom ? `Dominio ${_alEsc(dom.numero)}: ${_alEsc(dom.nombre)}` : '<span class="ficha-muted">Sin dominio asignado</span>'}</div>
+  </div>`;
+  const critHtml = crits.length ? crits.map(cr => `<div class="ficha-row"><strong style="white-space:nowrap">${_alEsc(cr.codigo || '')}</strong>
+      <div style="flex:1;min-width:0">${_alEsc(cr.nombre || '')}</div>
+      <span class="ficha-muted" style="white-space:nowrap">peso ${_alEsc(cr.peso ?? 1)}</span></div>`).join('')
+    : '<div class="ficha-empty">Sin criterios de evaluación en el alineamiento.</div>';
+
+  // Cursos del programa que la desarrollan, con los LAOs que la miden
+  const vinc = (db.competencias || []).filter(dc => (dc.codigo === 'C' + bc.num || dc.codigo === bc.num))
+    .map(dc => ({ dc, curso: (db.cursos || []).find(c => c.id === dc.cursoId) }))
+    .filter(x => x.curso && x.curso.programa === bc.programa)
+    .sort((a, b) => String(a.curso.codigo).localeCompare(String(b.curso.codigo), undefined, { numeric: true }));
+  const cursosHtml = vinc.length ? vinc.map(({ dc, curso }) => {
+    const laos = laosDisponiblesPara(curso.id, currentUser?.username, isAdmin)
+      .filter(l => (l.competencias || []).some(cc => cc.competenciaId === dc.id));
+    return `<div class="ficha-row" style="flex-direction:column;gap:3px">
+      <div><span class="prog-course-code">${fichaLink('curso', curso.id, curso.codigo)}</span> <span>${_alEsc(curso.nombre)}</span></div>
+      <div class="ficha-muted">${laos.length ? laos.map(l => {
+        const cc = l.competencias.find(x => x.competenciaId === dc.id);
+        return `${fichaLink('lao', l.id, l.nombre)} (${_alEsc(cc?.peso)}%)`;
+      }).join(' · ') : 'Ningún LAO la mide todavía'}</div></div>`;
+  }).join('') : '<div class="ficha-empty">Ningún curso del programa la tiene vinculada.</div>';
+
+  return `<div class="ficha-tipo">🎯 Competencia</div>
+    <div class="ficha-titulo" style="font-size:0.98rem;line-height:1.45"><span class="al-comp-num" style="margin:0 6px 0 0;vertical-align:middle">C${_alEsc(bc.num)}</span>${_alEsc(bc.texto || '')}</div>
+    <div class="ficha-acciones">${acciones.join('')}</div>
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`📐 Criterios de evaluación (${crits.length})`, critHtml)}
+    ${_fichaSec(`📚 Cursos que la desarrollan (${vinc.length})`, cursosHtml)}`;
+}
+
+// ── Ficha: Sección ────────────────────────────────────────────
+function _renderFichaSeccion(secId) {
+  const s = (db.secciones || []).find(x => x.id === secId);
+  if (!s) return _fichaNoExiste('seccion');
+  const curso = (db.cursos || []).find(c => c.id === s.cursoId);
+  const titulo = `${curso?.codigo || '—'} · Sec. ${s.numero || '—'}`;
+  if (!_fichaPuedeVerSeccion(s)) return _fichaSinAcceso('seccion', titulo);
+  const isAdmin = _fichaAdmin();
+  const idA = _alEscAttr(s.id);
+  const ay = getAcademicYear(s.semestre);
+
+  const acciones = [];
+  if (authCan('avaluo') && curso) acciones.push(`<button class="btn btn-primary btn-sm" onclick="fichaEvaluarSeccion('${idA}')">▶ Evaluar</button>`);
+  if (isAdmin) {
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="abrirEditarSeccion('${idA}')">✏️ Editar sección</button>`);
+    acciones.push(`<button class="btn btn-outline btn-sm" onclick="openAddEstudiante('${idA}')">＋ Estudiante</button>`);
+  }
+
+  const ests = s.estudiantes || [];
+  const evaluados = new Set((db.avaluos || []).filter(a => a.seccionId === s.id).map(a => a.estudianteId));
+  const nEval = ests.filter(e => evaluados.has(e.id)).length;
+  const info = `<div class="ficha-kv">
+    <div>Curso</div><div>${curso ? fichaLink('curso', curso.id, curso.codigo) + ' · ' + _alEsc(curso.nombre) : '—'}</div>
+    <div>Término</div><div>${_alEsc(s.semestre || '—')}${ay != null ? ` <span class="ficha-muted">(AY ${ay}-${ay + 1})</span>` : ''}</div>
+    <div>Profesor/a</div><div>${_fichaLinkProfesorSec(s)}</div>
+    <div>Estudiantes</div><div>${ests.length}${ests.length ? ` <span class="ficha-muted">· ${nEval} con evaluaciones guardadas</span>` : ''}</div>
+    ${s.origenRoster ? '<div>Origen</div><div>📂 Roster RCM</div>' : ''}
+  </div>`;
+
+  const laos = curso ? laosDisponiblesPara(curso.id, currentUser?.username, isAdmin) : [];
+  const laosHtml = laos.length ? laos.map(l => `<div class="ficha-row"><div style="flex:1;min-width:0">${fichaLink('lao', l.id, l.nombre)}</div>
+      ${(db.rubricas || []).some(r => r.laoId === l.id && r.criterios?.length) ? '<span class="badge badge-blue">📐 Rúbrica</span>' : ''}</div>`).join('')
+    : '<div class="ficha-empty">El curso no tiene LAOs.</div>';
+
+  const estHtml = ests.length ? ests.map((e, i) => `<div class="ficha-row"><span class="ficha-muted" style="width:22px;text-align:right">${i + 1}</span>
+      <div style="flex:1;min-width:0"><strong>${_alEsc(e.nombre || '—')}</strong> <span class="ficha-muted">${_alEsc(e.id || '')}</span></div>
+      ${evaluados.has(e.id) ? '<span class="badge badge-green" title="Tiene evaluaciones guardadas en esta sección">✓</span>' : ''}</div>`).join('')
+    : '<div class="ficha-empty">La sección no tiene estudiantes.</div>';
+
+  return `<div class="ficha-tipo">🏫 Sección</div>
+    <div class="ficha-titulo">${_alEsc(titulo)}</div>
+    ${acciones.length ? `<div class="ficha-acciones">${acciones.join('')}</div>` : ''}
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`📋 LAOs del curso (${laos.length})`, laosHtml)}
+    ${_fichaSec(`🧑‍🎓 Estudiantes (${ests.length})`, estHtml)}`;
+}
+// ▶ Evaluar: abre Avalúo con el curso y la sección ya escogidos
+function fichaEvaluarSeccion(secId) {
+  const s = (db.secciones || []).find(x => x.id === secId);
+  if (!s) return;
+  if (!authCan('avaluo')) { notify('Tu rol no permite evaluar', '🔒'); return; }
+  if (!canSeeSeccion(s)) { notify('Solo el profesor de la sección puede evaluarla', '🔒'); return; }
+  cerrarFicha();
+  showTab('avaluo', document.querySelector('.tab-btn[data-tab="avaluo"]'));
+  const selC = document.getElementById('av-curso');
+  if (![...selC.options].some(o => o.value === s.cursoId)) { notify('Este curso no está disponible en Avalúo', '⚠️'); return; }
+  selC.value = s.cursoId; onCursoChange();
+  const selS = document.getElementById('av-seccion-sel');
+  if ([...selS.options].some(o => o.value === s.id)) { selS.value = s.id; onSeccionChange(); }
+  document.getElementById('panel-avaluo')?.scrollIntoView?.({ block: 'start' });
+}
+
+// ── Ficha: Profesor ───────────────────────────────────────────
+function _renderFichaProfesor(facId) {
+  const f = (db.facultad || []).find(x => x.id === facId);
+  if (!f) return _fichaNoExiste('profesor');
+  const isAdmin = _fichaAdmin();
+  const si = v => v === true || v === 'true';
+  const rolLabel = { decano: 'Decano/a', director: 'Director/a', coordinator: 'Coordinador/a', profesor: 'Profesor/a', viewer: 'Visitante' };
+  const d = f.departamentoId ? (db.departamentos || []).find(x => x.id === f.departamentoId) : null;
+  const progIds = new Set(f.programaIds || []);
+  String(f.programas || '').split('|').map(x => x.trim()).filter(Boolean).forEach(n => { const p = (db.programas || []).find(x => x.nombre === n); if (p) progIds.add(p.id); });
+  const progs = [...progIds].map(id => (db.programas || []).find(p => p.id === id)).filter(Boolean);
+
+  const acciones = isAdmin ? `<div class="ficha-acciones"><button class="btn btn-outline btn-sm" onclick="editarFacultad('${_alEscAttr(f.id)}')">✏️ Editar profesor/a</button></div>` : '';
+  const roles = [f.esAdmin ? '🔑 Administrador' : '', f.rolBase ? (rolLabel[f.rolBase] || f.rolBase) : '',
+    si(f.director) ? '🏛 Director/a' : '', si(f.coordinator) ? '📋 Coordinador/a' : ''].filter(Boolean);
+  const info = `<div class="ficha-kv">
+    <div>Correo</div><div>${f.email ? `<a href="mailto:${_alEsc(f.email)}">${_alEsc(f.email)}</a>` : '—'}</div>
+    <div>Departamento</div><div>${d ? fichaLink('departamento', d.id, d.nombre) : _alEsc(f.departamento || '—')}</div>
+    <div>Programas</div><div>${progs.length ? progs.map(p => fichaLink('programa', p.id, p.nombre)).join(', ') : '<span class="ficha-muted">—</span>'}</div>
+    <div>Roles</div><div>${roles.length ? roles.map(r => `<span class="badge badge-gold" style="margin:0 4px 2px 0">${_alEsc(r)}</span>`).join('') : '<span class="ficha-muted">Sin acceso al sistema</span>'}</div>
+  </div>`;
+
+  const secs = (db.secciones || []).filter(s => _facultadDeSeccion(s)?.id === f.id);
+  const conAy = secs.map(s => ({ s, ay: getAcademicYear(s.semestre) })).filter(x => x.ay != null);
+  const ay = conAy.length ? Math.max(...conAy.map(x => x.ay)) : null;
+  const recientes = (ay != null ? conAy.filter(x => x.ay === ay).map(x => x.s) : secs).filter(_fichaPuedeVerSeccion)
+    .sort((a, b) => String(a.semestre).localeCompare(String(b.semestre)));
+  const secHtml = recientes.length ? recientes.map(s => {
+    const c = (db.cursos || []).find(x => x.id === s.cursoId);
+    return `<div class="ficha-row"><div style="flex:1;min-width:0">${fichaLink('seccion', s.id, `${c?.codigo || '—'} · Sec. ${s.numero || '—'}`)} <span class="ficha-muted">${_alEsc(c?.nombre || '')}</span></div>
+      <span class="ficha-muted" style="white-space:nowrap">${_alEsc(s.semestre || '')} · ${(s.estudiantes || []).length} est.</span></div>`;
+  }).join('') : '<div class="ficha-empty">No hay secciones que puedas ver.</div>';
+  const cursosIds = [...new Set(secs.map(s => s.cursoId))];
+  const cursosHtml = cursosIds.length ? cursosIds.map(id => (db.cursos || []).find(c => c.id === id)).filter(Boolean)
+    .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true }))
+    .map(c => fichaLink('curso', c.id, c.codigo)).join(' · ') : '<span class="ficha-muted">—</span>';
+
+  return `<div class="ficha-tipo">👩‍🏫 Profesor/a</div>
+    <div class="ficha-titulo">${_alEsc(f.nombre || f.email || '—')}</div>
+    ${acciones}
+    ${_fichaSec('Información', info)}
+    ${_fichaSec(`🏫 Secciones${ay != null ? ` — AY ${ay}-${ay + 1}` : ''}`, secHtml)}
+    ${_fichaSec(`📚 Cursos que ha enseñado (${cursosIds.length})`, `<div style="font-size:0.84rem">${cursosHtml}</div>`)}`;
 }
 
 // ── Ancho de la ficha: se arrastra el borde izquierdo; doble clic lo restablece.
