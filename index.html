@@ -12582,7 +12582,7 @@ function construirColumnasNivelAdHoc(escala) {
 function _r1RenderAgrupacionControl(escala) {
   const niveles = (escala?.niveles?.length ? escala.niveles : ESCALA_NIVELES_DEFAULT.niveles).slice().sort((a, b) => b.valor - a.valor);
   const letras = ['A', 'B', 'C'];
-  let html = '<div class="rpt-agrup-box"><div class="rpt-agrup-title">🧩 Agrupar niveles para esta vista (empieza con la agrupación default del programa — puedes cambiarla)</div><div class="rpt-agrup-rows">';
+  let html = '<div class="rpt-agrup-box"><div class="rpt-agrup-title">Agrupar niveles para esta vista (empieza con la agrupación default del programa — puedes cambiarla)</div><div class="rpt-agrup-rows">';
   niveles.forEach(n => {
     const actual = _r1NivelAsignacion[n.valor] || 'individual';
     html += `<div class="rpt-agrup-row"><span>${_alEsc(n.titulo)}</span><select class="dash-select" onchange="_r1CambiarAsignacion(${n.valor}, this.value)">
@@ -12701,13 +12701,28 @@ function renderR1General() {
 // Evaluaciones que corresponden al "foco" elegido, a partir de los avalúos
 // ya filtrados por programa/año/trimestre. Devuelve objetos compatibles
 // con construirColumnasNivel/contarEnColumnas/_avgNivel ({val,...}).
+// El Banco de Competencias (db.bancoCompetencias) identifica cada
+// competencia por `num` (ej. "1.1"), no por `codigo`/`descripcion" — esos
+// campos no existen ahí (sí existen en db.competencias, a nivel de curso).
+// Las evaluaciones (av.evaluaciones[].competenciaCodigo) se guardan con el
+// código de curso, que puede llevar el prefijo "C" (ej. "C1.1") o no, según
+// de dónde salió la competencia — el mismo criterio de match que ya usa el
+// resto de la app (ver guardarCompetenciaBank(), línea ~16184).
+function _codigosPosiblesBanco(bc) {
+  const num = String(bc.num || '');
+  return [num, 'C' + num];
+}
 function _evalsParaFoco(avaluosScope, foco) {
   if (foco.tipo === 'dominio') {
-    const codigos = new Set(db.bancoCompetencias.filter(c => c.dominioId === foco.valor).map(c => c.codigo));
-    return _allEvals(avaluosScope).filter(ev => codigos.has(ev.compCode));
+    const codigos = new Set();
+    db.bancoCompetencias.filter(c => c.dominioId === foco.valor).forEach(c => {
+      _codigosPosiblesBanco(c).forEach(cod => codigos.add(cod));
+    });
+    return _allEvals(avaluosScope).filter(ev => codigos.has(String(ev.compCode)));
   }
   if (foco.tipo === 'competencia') {
-    return _allEvals(avaluosScope).filter(ev => ev.compCode === foco.valor);
+    const codigos = new Set(_codigosPosiblesBanco({ num: foco.valor }));
+    return _allEvals(avaluosScope).filter(ev => codigos.has(String(ev.compCode)));
   }
   if (foco.tipo === 'criterio') {
     // El nivel por criterio vive en av.criteriosResp, con llave <criterioId>
@@ -12737,11 +12752,11 @@ function _r1PoblarFocalObjetivo() {
       opciones = dominiosDePrograma(progVal).map(d => ({ value: d.id, label: d.nombre }));
     } else if (tipo === 'competencia') {
       opciones = db.bancoCompetencias.filter(c => c.programa === progVal)
-        .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)))
-        .map(c => ({ value: c.codigo, label: c.codigo + ' — ' + (c.descripcion || '') }));
+        .sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }))
+        .map(c => ({ value: c.num, label: c.num + ' — ' + (c.texto || '') }));
     } else if (tipo === 'criterio') {
       db.bancoCompetencias.filter(c => c.programa === progVal).forEach(c => {
-        criteriosDeCompetencia(c).forEach(cr => opciones.push({ value: cr.id, label: c.codigo + ' · ' + cr.nombre }));
+        criteriosDeCompetencia(c).forEach(cr => opciones.push({ value: cr.id, label: c.num + ' · ' + cr.nombre }));
       });
     }
   }
@@ -19735,6 +19750,129 @@ async function dummyLoadAll() {
   });
   db.avaluos.push(...avaluoEntries);
 
+  // ── Programas ficticios para probar el Informe Focalizado de R1 — uno
+  // CON dominios/criterios configurados y otro SIN ninguno (hoy, entre los
+  // programas reales, solo MHSA tiene su alineamiento sembrado; esto da
+  // variedad para probar ambos escenarios sin depender de eso). A
+  // diferencia de los cursos reales de arriba, aquí el curso, el banco de
+  // competencias y los dominios SÍ son fabricados — con nombres que
+  // empiezan en "ZZ-Prueba" para que no se confundan con programas reales
+  // en ningún selector — y quedan completos con [DUMMY_TAG] para
+  // eliminarse enteros con "Eliminar Datos de Prueba".
+  const progConDom = {
+    id: 'prog_dummy_condom_' + ts, nombre: 'ZZ-Prueba Reportes (Con Dominios)', tipo: '',
+    descripcion: 'Programa ficticio de prueba — con dominios y criterios de evaluación configurados.',
+    departamentoId: null, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+  };
+  const progSinDom = {
+    id: 'prog_dummy_sindom_' + ts, nombre: 'ZZ-Prueba Reportes (Sin Dominios)', tipo: '',
+    descripcion: 'Programa ficticio de prueba — sin dominios configurados (solo competencias).',
+    departamentoId: null, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+  };
+  db.programas.push(progConDom, progSinDom);
+
+  const cursoConDom = {
+    id: dummyId('curso'), codigo: 'ZZPR-101', nombre: 'Curso de Prueba A (con dominios)',
+    departamento: '', creditos: '3', descripcion: 'Curso ficticio para probar R1 con dominios configurados.',
+    programaId: progConDom.id, programa: progConDom.nombre, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+  };
+  const cursoSinDom = {
+    id: dummyId('curso'), codigo: 'ZZPR-201', nombre: 'Curso de Prueba B (sin dominios)',
+    departamento: '', creditos: '3', descripcion: 'Curso ficticio para probar R1 sin dominios configurados.',
+    programaId: progSinDom.id, programa: progSinDom.nombre, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+  };
+  db.cursos.push(cursoConDom, cursoSinDom);
+
+  // Dominios — solo el programa "Con Dominios" los tiene.
+  if (!db.dominiosCompetencias) db.dominiosCompetencias = [];
+  const domA1 = { id: 'dom_dummy_' + ts + '_1', programa: progConDom.nombre, numero: 1, nombre: 'Dominio de Prueba — Comunicación', fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true };
+  const domA2 = { id: 'dom_dummy_' + ts + '_2', programa: progConDom.nombre, numero: 2, nombre: 'Dominio de Prueba — Liderazgo', fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true };
+  db.dominiosCompetencias.push(domA1, domA2);
+
+  // Criterios de evaluación de prueba (ambos programas los tienen, para que
+  // el Informe Focalizado · Criterio también se pueda probar en los dos;
+  // el dominio es la única diferencia entre los dos programas).
+  function _critsPrueba(prefijo) {
+    const descriptores = {
+      n0: 'No demuestra el criterio.', n1: 'Demuestra el criterio mínimamente.',
+      n2: 'Demuestra el criterio parcialmente.', n3: 'Demuestra el criterio consistentemente.',
+      n4: 'Demuestra el criterio con dominio avanzado.',
+    };
+    return [
+      { id: prefijo + '_c1', codigo: 'C1', nombre: 'Criterio de prueba 1', peso: 1, descriptores },
+      { id: prefijo + '_c2', codigo: 'C2', nombre: 'Criterio de prueba 2', peso: 1, descriptores },
+    ];
+  }
+  const bancoConDom = [
+    { id: 'banco_dummy_' + ts + '_a1', num: '1.1', texto: 'Competencia de prueba 1.1 — redacta documentos administrativos con claridad.', programa: progConDom.nombre, dominioId: domA1.id, criteriosEvaluacion: _critsPrueba('crit_dummy_a1'), fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true },
+    { id: 'banco_dummy_' + ts + '_a2', num: '1.2', texto: 'Competencia de prueba 1.2 — presenta hallazgos oralmente ante un grupo.', programa: progConDom.nombre, dominioId: domA1.id, criteriosEvaluacion: _critsPrueba('crit_dummy_a2'), fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true },
+    { id: 'banco_dummy_' + ts + '_a3', num: '2.1', texto: 'Competencia de prueba 2.1 — dirige un equipo de trabajo interdisciplinario.', programa: progConDom.nombre, dominioId: domA2.id, criteriosEvaluacion: _critsPrueba('crit_dummy_a3'), fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true },
+  ];
+  const bancoSinDom = [
+    { id: 'banco_dummy_' + ts + '_b1', num: '1.1', texto: 'Competencia de prueba 1.1 — aplica métodos cuantitativos básicos.', programa: progSinDom.nombre, criteriosEvaluacion: _critsPrueba('crit_dummy_b1'), fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true },
+    { id: 'banco_dummy_' + ts + '_b2', num: '1.2', texto: 'Competencia de prueba 1.2 — redacta un informe técnico.', programa: progSinDom.nombre, criteriosEvaluacion: _critsPrueba('crit_dummy_b2'), fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true },
+  ];
+  db.bancoCompetencias.push(...bancoConDom, ...bancoSinDom);
+
+  // Competencias a nivel de curso (código "C"+num, el mismo patrón que usan
+  // las competencias reales) ligadas 1:1 al banco de cada programa.
+  const compsConDom = bancoConDom.map(b => ({ id: dummyId('comp'), cursoId: cursoConDom.id, codigo: 'C' + b.num, descripcion: b.texto, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true }));
+  const compsSinDom = bancoSinDom.map(b => ({ id: dummyId('comp'), cursoId: cursoSinDom.id, codigo: 'C' + b.num, descripcion: b.texto, fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true }));
+  db.competencias.push(...compsConDom, ...compsSinDom);
+
+  // Secciones + avalúos — una sección por cada uno de los 5 trimestres de
+  // prueba (2023T2 → 2025T1), para que la comparativa por año académico de
+  // R1 también se pueda probar con estos dos programas; se incluye
+  // `criteriosResp` (no lo generan los cursos reales de arriba) para poder
+  // probar el Informe Focalizado · Criterio.
+  [[cursoConDom, compsConDom, bancoConDom], [cursoSinDom, compsSinDom, bancoSinDom]].forEach(([curso, comps, bancoArr], ci) => {
+    const escala = resolverEscalaParaCurso(curso.id);
+    const valoresNivel = (escala?.niveles || []).map(n => String(n.valor));
+    const poolNivel = valoresNivel.length ? _poolNivelesPonderado(valoresNivel) : ['4', '3', '2', '1', '0'];
+    const lao = {
+      id: dummyId('lao'), cursoId: curso.id, nombre: curso.codigo + ' Avalúo del Curso',
+      descripcion: 'LAO de prueba — evaluación directa por competencia.',
+      competencias: comps.map(c => ({ competenciaId: c.id, peso: 100 })),
+      modoEvaluacion: 'libre', esOficial: true, compartido: true, profesorEmail: null,
+      creadoPor: 'sistema', isGenerico: false, origenSolicitudId: null,
+      fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+    };
+    db.laos.push(lao);
+    SEMESTRES_DUMMY.forEach((semestre, si) => {
+      const prof = PROFESORES_DUMMY[(ci * 5 + si) % PROFESORES_DUMMY.length];
+      const n = 10 + (si % 5);
+      const offset = (ci * 31 + si * 13) % studentPool.length;
+      const estudiantesSec = makeStudents(n, offset);
+      const sec = {
+        id: dummyId('sec'), cursoId: curso.id, numero: String(si + 1).padStart(3, '0'),
+        profesor: prof.nombre, profesorEmail: prof.email, semestre, estudiantes: estudiantesSec,
+        fechaCreacion: new Date().toISOString(), [DUMMY_TAG]: true,
+      };
+      db.secciones.push(sec);
+      estudiantesSec.forEach(est => {
+        const nota = rndNota();
+        const criteriosResp = {};
+        const evaluaciones = comps.map((c, idx) => {
+          criteriosDeCompetencia(bancoArr[idx]).forEach(cr => { criteriosResp[cr.id] = rndFrom(poolNivel); });
+          return {
+            competenciaId: c.id, competenciaCodigo: c.codigo, competenciaDesc: c.descripcion,
+            nivel: rndFrom(poolNivel), puntajeLao: null, lao: lao.nombre,
+          };
+        });
+        db.avaluos.push({
+          id: dummyId('av'), cursoId: curso.id, cursoNombre: curso.nombre, cursoCodigo: curso.codigo,
+          estudiante: est.nombre, estudianteId: est.id, seccionId: sec.id, seccion: sec.numero,
+          semestre, fecha: fechasBySem[semestre] || '2025-03-20', profesor: prof.nombre,
+          laoId: lao.id, laoNombre: lao.nombre, modoEvaluacion: 'directa', esDirectaCurso: true,
+          notaLao: rndNota(), comentarioGeneral: rndFrom(comentariosPool),
+          notaFinal: nota, notaFinalLetra: letraMap(nota),
+          evaluaciones, criteriosResp,
+          fechaRegistro: new Date().toISOString(), [DUMMY_TAG]: true,
+        });
+      });
+    });
+  });
+
   // ── Facultad ── (facultadDummy ya se definió más arriba, antes de
   // Secciones, para poder derivar de ahí la rotación PROFESORES_DUMMY).
   db.facultad.push(...facultadDummy);
@@ -19837,7 +19975,7 @@ async function dummyLoadAll() {
   const resumenCursos = cursos.length
     ? `<strong>${avaluoEntries.length} avalúos</strong> en <strong>${secciones.length} secciones</strong> de tus cursos reales (<strong>${cursos.map(c => c.codigo).join(', ')}</strong>) a lo largo de 5 trimestres (2023T2 → 2025T1).`
     : `⚠ No se generaron secciones ni avalúos de prueba: no encontré ningún curso real con al menos una competencia definida. Crea un curso en la pestaña "Cursos" y sus competencias en "Competencias", y vuelve a cargar los datos de prueba.`;
-  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> y <strong>${facultadDummy.length} profesores/as</strong> de prueba cargados. ${resumenCursos}<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
+  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> y <strong>${facultadDummy.length} profesores/as</strong> de prueba cargados. ${resumenCursos}<br>También se crearon 2 programas ficticios para probar el Informe Focalizado de R1 — <strong>${progConDom.nombre}</strong> y <strong>${progSinDom.nombre}</strong> — cada uno con su curso, 5 secciones y avalúos propios.<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
@@ -19864,6 +20002,8 @@ async function dummyDeleteAll() {
   if (db.codigosProg) db.codigosProg = db.codigosProg.filter(x => !x[DUMMY_TAG]);
   if (db.asesorias)   db.asesorias   = db.asesorias.filter(x => !x[DUMMY_TAG]);
   if (db.escalasNiveles) db.escalasNiveles = db.escalasNiveles.filter(x => !x[DUMMY_TAG]);
+  if (db.bancoCompetencias) db.bancoCompetencias = db.bancoCompetencias.filter(x => !x[DUMMY_TAG]);
+  if (db.dominiosCompetencias) db.dominiosCompetencias = db.dominiosCompetencias.filter(x => !x[DUMMY_TAG]);
   saveDB();
 
   // Adiestramientos
@@ -19928,6 +20068,7 @@ function dummyShowStatus(msg, type) {
       <div><strong style="color:var(--egsp-coral)">Usuarios</strong><br>4 roles: admin · director · coord · profesor · viewer<br>Contraseña: <code>Test1234!</code></div>
       <div><strong style="color:var(--egsp-coral)">Otros</strong><br>Programas, códigos de programa, asesorías, 3 módulos de adiestramiento con quizzes</div>
       <div><strong style="color:var(--egsp-coral)">Escalas de Niveles</strong><br>Hasta 2 programas reciben una escala propia con niveles y agrupaciones distintas (prueba de R1)</div>
+      <div><strong style="color:var(--egsp-coral)">Programas ficticios (R1)</strong><br>"ZZ-Prueba Reportes": uno con dominios y criterios configurados, otro sin ninguno — con su propio curso, secciones y avalúos</div>
     </div>
     <div id="dummy-status" style="display:none;padding:10px;border-radius:8px;font-size:0.85rem;margin-bottom:12px"></div>
     <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
