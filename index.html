@@ -2305,9 +2305,8 @@
   <!-- R3 — Student Report -->
   <div id="rpt-r3" class="rpt-pane" style="display:none">
     <div class="rpt-filter-bar">
-      <div class="dash-filter-group" style="flex:1"><label class="dash-filter-label">Buscar Estudiante (nombre o ID)</label>
-        <input id="r3-search" class="dash-select" style="min-width:220px" placeholder="Ej: Juan García o 202301234"
-          oninput="renderR3()"></div>
+      <div class="dash-filter-group" style="flex:1;min-width:260px"><label class="dash-filter-label">Buscar Estudiante (nombre o ID)</label>
+        <div class="ac-wrap" id="r3-search-wrap"><input id="r3-search" class="dash-select" style="width:100%"></div></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Trimestre</label>
         <select id="r3-term" class="dash-select" onchange="renderR3()">
           <option value="">Todos</option><option value="T1">T1</option>
@@ -12676,6 +12675,32 @@ function renderReportes() {
     initialValue: autocompleteValue('r2-curso'),
     onSelect: () => renderR2(),
   });
+  // R3 — Buscar Estudiante: mismo patrón de autocompletar (escribir y
+  // escoger de la lista, sin "Todos" — R3 siempre trabaja un estudiante a
+  // la vez) — pedido explícito de Edgardo, 2026-10-26: "cuando ponga el
+  // nombre, quiero que me salgan opciones de nombre para hacer click...
+  // No quiero que aparezca de manera automática." Si dos estudiantes
+  // comparten nombre, se añade el número de estudiante a la etiqueta para
+  // distinguirlos (también pedido explícitamente).
+  {
+    const porEst = {}; // estudianteId -> nombre (primera vez que aparece)
+    scoped.forEach(av => {
+      const estId = av.estudianteId || av.estudiante;
+      if (!estId || porEst[estId]) return;
+      porEst[estId] = av.estudiante || estId;
+    });
+    const porNombre = {};
+    Object.values(porEst).forEach(n => { const k = (n||'').toLowerCase(); porNombre[k] = (porNombre[k]||0) + 1; });
+    const opcionesR3 = Object.entries(porEst).map(([estId, nombre]) => ({
+      value: estId,
+      label: (porNombre[(nombre||'').toLowerCase()] > 1) ? `${nombre} — ${estId}` : nombre,
+    })).sort((a, b) => a.label.localeCompare(b.label));
+    autocompleteBuild('r3-search', opcionesR3, {
+      placeholder: 'Escribe un nombre o ID y escoge de la lista…',
+      initialValue: autocompleteValue('r3-search'),
+      onSelect: () => renderR3(),
+    });
+  }
   ['r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id=>_populateSelect(id,progs));
   ['r5-curso','r8-curso'].forEach(id=>_populateSelect(id,cursos.map(c=>c.id),id=>db.cursos.find(c=>c.id===id)?.codigo||id));
   // R6 threshold global default
@@ -14335,70 +14360,76 @@ function _r3CompetenciasBlock(nombre, estId, compsAgrupadas) {
   return { html, csvRows };
 }
 function renderR3() {
-  const query      = (document.getElementById('r3-search')?.value||'').trim().toLowerCase();
+  // Buscar Estudiante es un autocompletar (no un filtro de texto libre):
+  // nada se muestra hasta que el usuario ESCOGE una opción de la lista
+  // (pedido explícito de Edgardo, 2026-10-26: "No quiero que aparezca de
+  // manera automática"). Si hay varios estudiantes con el mismo nombre,
+  // la etiqueta de cada opción ya incluye su número (ver renderReportes),
+  // así que aquí basta con el valor escogido — un solo estudiante, nunca
+  // varios a la vez.
+  const estId      = autocompleteValue('r3-search');
   const filterTerm = document.getElementById('r3-term')?.value||'';
   document.getElementById('rpt-export-title').textContent = _r3Subview === 'competencias'
     ? 'R3 · Competencias Agrupadas por Estudiante' : 'R3 · Reporte por Estudiante';
 
   const el = document.getElementById('r3-body');
-  if (!query) {
-    el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">🔍</div><p>Escribe un nombre o ID de estudiante para buscar</p></div>';
+  if (estId === null) {
+    el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">🔍</div><p>Escribe un nombre o ID de estudiante y escoge una opción de la lista</p></div>';
     _reportCSVData=[]; return;
   }
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[]);
-  // Also add advisee avaluos
   const myAdvisees = new Set(currentUser?.efectivo?.advisees||[]);
 
-  // Find matching student identifiers
-  const matchingIds = new Set();
-  avaluos.forEach(av => {
-    const name = (av.estudiante||'').toLowerCase();
-    const id   = (av.estudianteId||av.estudiante||'').toLowerCase();
-    if (name.includes(query)||id.includes(query)) matchingIds.add(av.estudianteId||av.estudiante);
+  let estAvaluos = avaluos.filter(a=>(a.estudianteId||a.estudiante)===estId);
+  if (filterTerm) estAvaluos = estAvaluos.filter(av=>{
+    const t=parseTermString(_getSemestre(av)); return t?.term===filterTerm;
   });
-
-  if (!matchingIds.size) {
-    el.innerHTML=`<div class="dash-empty"><div class="dash-empty-icon">🔍</div><p>No se encontró estudiante con "${query}"</p></div>`;
+  if (!estAvaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><p>Sin avalúos para este estudiante con los filtros seleccionados</p></div>';
     _reportCSVData=[]; return;
   }
 
-  const csvRows = _r3Subview === 'competencias'
+  const nombre = estAvaluos[0].estudiante || estId;
+  // Programa, año de entrada y corriente del expediente (pedido explícito
+  // de Edgardo, 2026-10-26) — del roster de Estudiantes (db.estudiantes,
+  // la fuente autoritativa de esta información), con el mecanismo viejo
+  // (resolveStudentProgram sobre av.programaEstudiante) como respaldo
+  // solo para el programa, por si el estudiante todavía no está en el
+  // roster.
+  const roster = _rosterDeEstudiante(estId);
+  const prog = roster?.programaId
+    ? (db.programas.find(p=>p.id===roster.programaId)?.nombre || '')
+    : resolveStudentProgram(estAvaluos[0].programaEstudiante||'');
+  const anioEntrada = roster?.anioComienzo || '';
+  const corriente = roster?.secuencia || '';
+  const isAdvisee = myAdvisees.has(estId);
+
+  const byCurso = _r3AgruparPorCurso(estAvaluos);
+  const compsAgrupadas = _r3CompetenciasAgrupadas(estAvaluos);
+  const resumen = _r3Resumen(byCurso, compsAgrupadas);
+
+  let html = `<div class="rpt-section-head">
+    <span>👤 ${_alEsc(nombre)}</span>
+    <span class="badge badge-blue">${_alEsc(estId)}</span>
+    ${prog&&prog!=='OTHER'?`<span class="badge badge-gold">${_alEsc(prog)}</span>`:''}
+    ${anioEntrada?`<span class="badge badge-purple">Entrada: ${_alEsc(anioEntrada)}</span>`:''}
+    ${corriente?`<span class="badge badge-rust">${_alEsc(corriente)}</span>`:''}
+    ${isAdvisee?'<span class="badge badge-green">Asesoría</span>':''}
+  </div>`;
+  html += _r3ResumenHtml(resumen);
+
+  const bloque = _r3Subview === 'competencias'
+    ? _r3CompetenciasBlock(nombre, estId, compsAgrupadas)
+    : _r3CursoBlock(nombre, estId, byCurso);
+  html += bloque.html;
+
+  const csvRows = (_r3Subview === 'competencias'
     ? [['Estudiante','ID','Competencia','Descripción','Cursos Evaluados','Avg']]
-    : [['Estudiante','ID','Curso','Trimestre','Nota del Curso','Letra','LAO','Nota LAO','Competencia','Descripción','Nivel','Valor']];
-  let html = '';
+    : [['Estudiante','ID','Curso','Trimestre','Nota del Curso','Letra','LAO','Nota LAO','Competencia','Descripción','Nivel','Valor']]
+  ).concat(bloque.csvRows);
 
-  matchingIds.forEach(estId => {
-    let estAvaluos = avaluos.filter(a=>(a.estudianteId||a.estudiante)===estId);
-    if (filterTerm) estAvaluos = estAvaluos.filter(av=>{
-      const t=parseTermString(_getSemestre(av)); return t?.term===filterTerm;
-    });
-    if (!estAvaluos.length) return;
-
-    const nombre = estAvaluos[0].estudiante || estId;
-    const prog   = resolveStudentProgram(estAvaluos[0].programaEstudiante||'');
-    const isAdvisee = myAdvisees.has(estId);
-
-    const byCurso = _r3AgruparPorCurso(estAvaluos);
-    const compsAgrupadas = _r3CompetenciasAgrupadas(estAvaluos);
-    const resumen = _r3Resumen(byCurso, compsAgrupadas);
-
-    html += `<div class="rpt-section-head">
-      <span>👤 ${_alEsc(nombre)}</span>
-      <span class="badge badge-blue">${_alEsc(estId)}</span>
-      ${prog&&prog!=='OTHER'?`<span class="badge badge-gold">${_alEsc(prog)}</span>`:''}
-      ${isAdvisee?'<span class="badge badge-green">Asesoría</span>':''}
-    </div>`;
-    html += _r3ResumenHtml(resumen);
-
-    const bloque = _r3Subview === 'competencias'
-      ? _r3CompetenciasBlock(nombre, estId, compsAgrupadas)
-      : _r3CursoBlock(nombre, estId, byCurso);
-    html += bloque.html;
-    csvRows.push(...bloque.csvRows);
-  });
-
-  el.innerHTML = html || '<div class="dash-empty"><p>Sin avalúos para este filtro</p></div>';
+  el.innerHTML = html;
   _reportCSVData = csvRows;
   _reportCSVName = _r3Subview === 'competencias' ? 'R3_competencias_agrupadas.csv' : 'R3_estudiante.csv';
 }
