@@ -13444,17 +13444,25 @@ function renderR1Focal() {
     }));
   }
 
+  // La gráfica de Serie (líneas) solo tiene sentido comparando un mismo
+  // enfoque A TRAVÉS DE años académicos — con un solo año no hay nada que
+  // trazar como línea, y comparando "entre enfoques" (varios focos) el eje
+  // x ya no son años, así que una "serie" ahí no es una comparación de
+  // años tampoco. Pedido explícito de Edgardo (2026-10-26): debe aparecer
+  // SOLO cuando se compara por año académico y hay más de un año.
+  const serieAplica = focos.length === 1 && xLabels.length > 1;
+  const serieActiva = serieAplica && _r1FocalChartTipos.serie;
   const nombreArchivoBase = 'R1_focalizado_' + (focos.length === 1 ? _nombreArchivoSeguro(focos[0].label) : 'comparativa');
   const graficaHtml = `<div class="rpt-focal-panel-head"><span>📈 Gráfica${focos.length > 1 ? ' — comparativa entre enfoques' : ' — comparativa por año académico'}</span></div>
     <div class="rpt-focal-chart-toggle">
       <label><input type="checkbox" ${_r1FocalChartTipos.barra?'checked':''} onchange="r1FocalToggleChart('barra',this.checked)"> Barra</label>
-      <label><input type="checkbox" ${_r1FocalChartTipos.serie?'checked':''} onchange="r1FocalToggleChart('serie',this.checked)"> Serie</label>
+      ${serieAplica ? `<label><input type="checkbox" ${_r1FocalChartTipos.serie?'checked':''} onchange="r1FocalToggleChart('serie',this.checked)"> Serie</label>
       <select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r1FocalCambiarSerieMetric(this.value)" ${_r1FocalChartTipos.serie?'':'disabled'}>
         <option value="pct" ${_r1FocalSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
         <option value="avg" ${_r1FocalSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
-      </select>
+      </select>` : ''}
     </div>
-    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r1FocalChartTipos.barra, serie: _r1FocalChartTipos.serie, serieMetric: _r1FocalSerieMetric, nombreArchivo: nombreArchivoBase })}`;
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r1FocalChartTipos.barra, serie: serieActiva, serieMetric: _r1FocalSerieMetric, nombreArchivo: nombreArchivoBase })}`;
 
   body.innerHTML = `<div class="rpt-focal-grid">
     <div class="rpt-focal-panel">${tablaHtml}</div>
