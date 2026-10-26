@@ -2221,8 +2221,8 @@
     </div>
     <div class="rpt-periodo-banner" id="r1-periodo-banner"></div>
     <div class="rpt-subtabs">
-      <button class="rpt-subtab active" id="r1-sub-general" onclick="r1SetSubview('general')">📊 Informe de Programa General</button>
-      <button class="rpt-subtab" id="r1-sub-focal" onclick="r1SetSubview('focal')">🔎 Informe Focalizado</button>
+      <button class="rpt-subtab active" id="r1-sub-general" onclick="r1SetSubview('general')">Informe de Programa General</button>
+      <button class="rpt-subtab" id="r1-sub-focal" onclick="r1SetSubview('focal')">Informe Focalizado</button>
     </div>
     <div id="r1-general-pane">
       <div class="rpt-agrup-link-row">
@@ -2233,14 +2233,12 @@
     </div>
     <div id="r1-focal-pane" style="display:none">
       <div class="rpt-filter-bar">
-        <div class="dash-filter-group"><label class="dash-filter-label">Enfocar en</label>
-          <select id="r1-focal-tipo" class="dash-select" onchange="r1FocalTipoChange()">
-            <option value="dominio">Dominio(s) de competencias</option>
-            <option value="competencia">Competencia(s)</option>
-            <option value="criterio">Criterio(s) de la rúbrica</option>
-          </select></div>
-        <div class="dash-filter-group" style="flex:1;min-width:260px"><label class="dash-filter-label" id="r1-focal-obj-label">Dominio(s) (escribe y añade uno o más)</label>
-          <div class="ac-wrap" id="r1-focal-obj-wrap"><input id="r1-focal-obj" class="dash-select" style="width:100%"></div></div>
+        <div class="dash-filter-group" style="min-width:200px"><label class="dash-filter-label">Dominio(s)</label>
+          <div id="r1-focal-dominios-wrap"></div></div>
+        <div class="dash-filter-group" style="min-width:200px"><label class="dash-filter-label">Competencia(s)</label>
+          <div id="r1-focal-competencias-wrap"></div></div>
+        <div class="dash-filter-group" style="min-width:200px"><label class="dash-filter-label">Criterio(s)</label>
+          <div id="r1-focal-criterios-wrap"></div></div>
       </div>
       <div class="rpt-agrup-link-row">
         <button type="button" class="rpt-agrup-link" onclick="_r1AbrirModalAgrupar('focal')">⚙️ Agrupar niveles para esta vista</button>
@@ -12374,9 +12372,14 @@ function multiSelectBuild(id, options, cfg = {}) {
   const prev = _msState[id];
   let values = prev ? prev.values.filter(v => options.some(o => String(o.value) === String(v))) : null;
   if (!values || !values.length) values = cfg.defaultAll === false ? [] : options.map(o => String(o.value));
+  // cfg.disabled: usado por el Informe Focalizado para que escoger algo en
+  // uno de los tres drop-downs (dominios/competencias/criterios) desactive
+  // a los otros dos (pedido explícito) — se vacía mientras está desactivado.
+  if (cfg.disabled) values = [];
   _msState[id] = { values, options, cfg };
+  const dis = cfg.disabled ? 'disabled style="opacity:.45;cursor:not-allowed"' : '';
   wrap.innerHTML = `<div class="ms-wrap">
-    <button type="button" class="dash-select" style="width:100%;text-align:left;cursor:pointer" onclick="_msToggle('${id}')">
+    <button type="button" class="dash-select" style="width:100%;text-align:left;cursor:pointer" onclick="_msToggle('${id}')" ${dis}>
       <span id="${id}-ms-label"></span> <span style="float:right">▾</span>
     </button>
     <div class="ms-dropdown" id="${id}-ms-list" style="display:none">
@@ -12393,11 +12396,21 @@ function _msRenderLabel(id) {
   const st = _msState[id]; if (!st) return;
   const lbl = document.getElementById(id + '-ms-label');
   if (!lbl) return;
+  if (st.cfg.disabled) { lbl.textContent = '— desactivado —'; return; }
   const n = st.values.length, total = st.options.length;
   lbl.textContent = n === 0 ? (st.cfg.emptyLabel || 'Ninguno escogido')
     : n === total && total > 1 ? (st.cfg.allLabel || 'Todos')
     : n === 1 ? (st.options.find(o => String(o.value) === st.values[0])?.label ?? st.values[0])
     : n + ' escogidos';
+}
+// Devuelve las opciones actualmente escogidas de un multiSelectBuild como
+// [{value,label}] (análogo a tagPickerSelected, pero para este
+// componente) — usado por el Informe Focalizado para traducir los valores
+// escogidos en sus tres drop-downs a los objetos {value,label} que ya
+// espera el resto de renderR1Focal.
+function multiSelectSelected(id) {
+  const st = _msState[id]; if (!st) return [];
+  return st.values.map(v => ({ value: v, label: st.options.find(o => String(o.value) === String(v))?.label ?? v }));
 }
 function _msToggle(id) {
   const list = document.getElementById(id + '-ms-list');
@@ -12847,8 +12860,12 @@ let _r1Subview = 'general';
 // título de exportación.
 const _R1_TRIM_LABELS = { T1: '1er Trimestre', T2: '2do Trimestre', T3: '3er Trimestre', V: 'Verano' };
 function _periodoLabel(aniosSel, term) {
-  const anios = (aniosSel || []).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b);
-  if (!anios.length) return 'Ningún año académico escogido';
+  let anios = (aniosSel || []).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b);
+  // Una selección vacía significa, en todo el filtrado de datos, "todos los
+  // años académicos" — así que la etiqueta debe reflejar eso (la totalidad
+  // de los años disponibles) en lugar de un literal de "ninguno escogido".
+  if (!anios.length) anios = _ayOptions().map(Number).sort((a, b) => a - b);
+  if (!anios.length) return 'Sin años académicos con datos';
   let base;
   if (anios.length === 1) {
     base = 'AY' + anios[0];
@@ -12862,7 +12879,7 @@ function _r1PintarPeriodoBanner() {
   const aniosSel = multiSelectValues('r1-ay');
   const term = document.getElementById('r1-term')?.value || '';
   const el = document.getElementById('r1-periodo-banner');
-  if (el) el.textContent = '📅 ' + _periodoLabel(aniosSel, term);
+  if (el) el.textContent = _periodoLabel(aniosSel, term);
 }
 
 function r1SetSubview(view) {
@@ -13128,37 +13145,58 @@ function _evalsParaFoco(avaluosScope, foco) {
   }
   return [];
 }
-// Opciones del buscador de enfoque (tag picker): dominios, competencias
-// (por `num`) o criterios de evaluación del programa escogido. Reemplaza
-// el autocompletar de un solo valor — ahora se pueden añadir varios.
+// Tres drop-downs independientes (dominios / competencias / criterios del
+// programa escogido) en lugar del selector de "tipo" + buscador de chips
+// — a Edgardo le pareció "descuadrado y feo" (pedido explícito, 2026-10-26).
+// Escoger uno o más en cualquiera de los tres desactiva a los otros dos,
+// así que el "tipo" de enfoque queda determinado implícitamente por cuál
+// de ellos tiene algo escogido.
+function _r1EnfoqueTipoActivo() {
+  if (multiSelectValues('r1-focal-dominios').length) return 'dominio';
+  if (multiSelectValues('r1-focal-competencias').length) return 'competencia';
+  if (multiSelectValues('r1-focal-criterios').length) return 'criterio';
+  return null;
+}
 function _r1PoblarFocalObjetivo() {
   const progVal = autocompleteValue('r1-prog');
-  const tipo = document.getElementById('r1-focal-tipo')?.value || 'dominio';
-  let opciones = [];
+  let opcDominios = [], opcCompetencias = [], opcCriterios = [];
   if (progVal) { // "Todos los programas" no aplica al foco — se necesita uno específico
-    if (tipo === 'dominio') {
-      opciones = dominiosDePrograma(progVal).map(d => ({ value: d.id, label: d.nombre }));
-    } else if (tipo === 'competencia') {
-      opciones = db.bancoCompetencias.filter(c => c.programa === progVal)
-        .sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }))
-        .map(c => ({ value: c.num, label: c.num + ' — ' + (c.texto || '') }));
-    } else if (tipo === 'criterio') {
-      db.bancoCompetencias.filter(c => c.programa === progVal).forEach(c => {
-        criteriosDeCompetencia(c).forEach(cr => opciones.push({ value: cr.id, label: c.num + ' · ' + cr.nombre }));
-      });
-    }
+    opcDominios = dominiosDePrograma(progVal).map(d => ({ value: d.id, label: d.nombre }));
+    opcCompetencias = db.bancoCompetencias.filter(c => c.programa === progVal)
+      .sort((a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true }))
+      .map(c => ({ value: c.num, label: c.num + ' — ' + (c.texto || '') }));
+    db.bancoCompetencias.filter(c => c.programa === progVal).forEach(c => {
+      criteriosDeCompetencia(c).forEach(cr => opcCriterios.push({ value: cr.id, label: c.num + ' · ' + cr.nombre }));
+    });
   }
-  tagPickerBuild('r1-focal-obj', opciones, {
-    placeholder: opciones.length ? 'Escribe para buscar y añadir…' : 'Primero escoge un programa específico arriba',
+  // Purga cualquier selección que ya no sea válida para las opciones
+  // actuales (p.ej. tras cambiar de programa a uno sin ese dominio) ANTES
+  // de decidir cuál drop-down está "activo" — si no, una selección vieja
+  // podría desactivar a los otros dos por error durante este render,
+  // hasta que el usuario volviera a tocar algo.
+  const purgar = (id, opciones) => {
+    const st = _msState[id];
+    if (st) st.values = st.values.filter(v => opciones.some(o => String(o.value) === String(v)));
+  };
+  purgar('r1-focal-dominios', opcDominios);
+  purgar('r1-focal-competencias', opcCompetencias);
+  purgar('r1-focal-criterios', opcCriterios);
+  const activo = _r1EnfoqueTipoActivo();
+  multiSelectBuild('r1-focal-dominios', opcDominios, {
+    emptyLabel: opcDominios.length ? 'Ningún dominio escogido' : 'Sin dominios en este programa',
+    defaultAll: false, disabled: !!activo && activo !== 'dominio',
     onChange: () => renderR1Focal(),
   });
-}
-function r1FocalTipoChange() {
-  const tipo = document.getElementById('r1-focal-tipo').value;
-  const labels = { dominio: 'Dominio(s) (escribe y añade uno o más)', competencia: 'Competencia(s) (escribe y añade una o más)', criterio: 'Criterio(s) (escribe y añade uno o más)' };
-  document.getElementById('r1-focal-obj-label').textContent = labels[tipo] || 'Objetivo(s)';
-  tagPickerClear('r1-focal-obj');
-  renderR1Focal();
+  multiSelectBuild('r1-focal-competencias', opcCompetencias, {
+    emptyLabel: opcCompetencias.length ? 'Ninguna competencia escogida' : 'Sin competencias en este programa',
+    defaultAll: false, disabled: !!activo && activo !== 'competencia',
+    onChange: () => renderR1Focal(),
+  });
+  multiSelectBuild('r1-focal-criterios', opcCriterios, {
+    emptyLabel: opcCriterios.length ? 'Ningún criterio escogido' : 'Sin criterios en este programa',
+    defaultAll: false, disabled: !!activo && activo !== 'criterio',
+    onChange: () => renderR1Focal(),
+  });
 }
 // Colores para las series de la gráfica comparativa (uno por nivel/grupo
 // escogido).
@@ -13166,21 +13204,44 @@ function _rptColor(i) {
   const p = ['#f27d67', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#ef4444'];
   return p[i % p.length];
 }
-// Gráfica de barras agrupadas y/o de serie (líneas) — ambas sobre el mismo
-// eje de 0–100%, para comparar una o más series (niveles/grupos
-// escogidos) a través de un eje x compartido: años académicos cuando se
-// mira UN enfoque, o los propios enfoques cuando se escoge más de uno
-// ("de manera comparativa", pedido explícito). Reemplaza
-// _r1HtmlComparativaAnio (fija a una sola serie).
+// Leyenda dibujada DENTRO del propio <svg> (no como HTML aparte) — así
+// queda incluida cuando la gráfica se descarga como foto/PNG (pedido
+// explícito de Edgardo), ya que _descargarSvgComoImagen solo serializa el
+// elemento <svg>. Envuelve a la siguiente línea si no cabe todo en una.
+function _rptLegendSvgFragment(series, W) {
+  const padL = 8, swatch = 9, gap = 4, itemGap = 16, lineH = 14;
+  let x = padL, y = 10, lineas = 1, svg = '';
+  series.forEach((s, i) => {
+    const label = _alEsc(s.label);
+    const anchoEst = swatch + gap + label.length * 5.3 + itemGap;
+    if (x > padL && x + anchoEst > W - padL) { x = padL; y += lineH; lineas++; }
+    svg += `<rect x="${x.toFixed(1)}" y="${(y - 7).toFixed(1)}" width="${swatch}" height="${swatch}" rx="2" fill="${_rptColor(i)}"/>`;
+    svg += `<text x="${(x + swatch + gap).toFixed(1)}" y="${y.toFixed(1)}" font-size="8" fill="#3a3a3a" font-family="Montserrat,sans-serif">${label}</text>`;
+    x += anchoEst;
+  });
+  return { svg, height: lineas * lineH + 6 };
+}
+// Gráfica de barras agrupadas y/o de serie (líneas) para comparar una o
+// más series (niveles/grupos escogidos) a través de un eje x compartido:
+// años académicos cuando se mira UN enfoque, o los propios enfoques cuando
+// se escoge más de uno ("de manera comparativa", pedido explícito).
+// Reemplaza _r1HtmlComparativaAnio (fija a una sola serie). La barra
+// siempre es por % (proporción de evaluaciones en cada nivel/grupo); la
+// serie/línea puede graficarse por % (opts.serieMetric==='pct', por
+// defecto) o por el promedio real de la puntuación entre las
+// evaluaciones de cada nivel/grupo (opts.serieMetric==='avg', en cuyo
+// caso cada serie debe traer también un arreglo `avg` además de `pct`).
 function _rptHtmlComparativaMulti(xLabels, series, opts = {}) {
   if (!xLabels.length || !series.length) return '<div class="dash-empty"><p>Nada que graficar con lo escogido</p></div>';
-  const W = 480, H = 190, PAD = { top: 14, right: 10, bottom: 30, left: 34 };
+  const W = 480, n = xLabels.length, nS = series.length;
+  const metric = opts.serieMetric === 'avg' ? 'avg' : 'pct';
+  const legendFrag = _rptLegendSvgFragment(series, W);
+  const PAD = { top: 14 + legendFrag.height, right: 10, bottom: 30, left: 34 };
+  const H = 190 + legendFrag.height;
   const iW = W - PAD.left - PAD.right, iH = H - PAD.top - PAD.bottom;
-  const n = xLabels.length, nS = series.length;
   const yPct = p => PAD.top + iH - (p / 100) * iH;
   const gridPct = [0, 25, 50, 75, 100];
-  const grids = gridPct.map(p => `<line x1="${PAD.left}" y1="${yPct(p)}" x2="${PAD.left + iW}" y2="${yPct(p)}" stroke="#efefef" stroke-width="1"/><text x="${PAD.left - 4}" y="${yPct(p) + 3}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${p}%</text>`).join('');
-  const legend = series.map((s, i) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px"><span style="width:9px;height:9px;border-radius:2px;background:${_rptColor(i)};display:inline-block"></span>${_alEsc(s.label)}</span>`).join('');
+  const gridsPct = gridPct.map(p => `<line x1="${PAD.left}" y1="${yPct(p)}" x2="${PAD.left + iW}" y2="${yPct(p)}" stroke="#efefef" stroke-width="1"/><text x="${PAD.left - 4}" y="${yPct(p) + 3}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${p}%</text>`).join('');
   const nombreArchivo = _nombreArchivoSeguro(opts.nombreArchivo || 'grafica');
   let html = '';
   if (opts.barra !== false) {
@@ -13194,28 +13255,50 @@ function _rptHtmlComparativaMulti(xLabels, series, opts = {}) {
       bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(barW - 1, 1).toFixed(1)}" height="${((PAD.top + iH) - y).toFixed(1)}" fill="${_rptColor(si)}" rx="2"><title>${_alEsc(s.label)} · ${_alEsc(xLabels[i])}: ${p}%</title></rect>`;
     }));
     const labels = xLabels.map((lb, i) => `<text x="${(PAD.left + i * groupW + groupW / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${_alEsc(lb)}</text>`).join('');
-    html += `<div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap"><div style="font-size:0.72rem">${legend}</div><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;white-space:nowrap" onclick="_descargarSvgComoImagen('${idBar}','${nombreArchivo}_barra')">⬇ Foto</button></div>
-      <svg id="${idBar}" viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff">${grids}${bars}${labels}</svg></div>`;
+    html += `<div style="margin-bottom:16px"><div style="display:flex;justify-content:flex-end"><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;white-space:nowrap" onclick="_descargarSvgComoImagen('${idBar}','${nombreArchivo}_barra')">⬇ Foto</button></div>
+      <svg id="${idBar}" viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff">${gridsPct}${legendFrag.svg}${bars}${labels}</svg></div>`;
   }
   if (opts.serie !== false) {
     const idLine = 'r1chart_' + Math.random().toString(36).slice(2, 9);
     const xC = i => n < 2 ? PAD.left + iW / 2 : PAD.left + (i / (n - 1)) * iW;
+    let gridsLine, yLineFn, fmtVal;
+    if (metric === 'avg') {
+      const todos = [];
+      series.forEach(s => (s.avg || []).forEach(v => { if (v != null) todos.push(v); }));
+      const maxVal = todos.length ? Math.max(...todos) : 1;
+      const gridMax = Math.max(1, Math.ceil(maxVal));
+      yLineFn = v => PAD.top + iH - (v / gridMax) * iH;
+      fmtVal = v => v.toFixed(2);
+      gridsLine = [0, 0.25, 0.5, 0.75, 1].map(f => {
+        const val = f * gridMax;
+        return `<line x1="${PAD.left}" y1="${yLineFn(val)}" x2="${PAD.left + iW}" y2="${yLineFn(val)}" stroke="#efefef" stroke-width="1"/><text x="${PAD.left - 4}" y="${(yLineFn(val) + 3).toFixed(1)}" text-anchor="end" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${val.toFixed(1)}</text>`;
+      }).join('');
+    } else {
+      yLineFn = yPct; fmtVal = v => v + '%'; gridsLine = gridsPct;
+    }
     let lines = '';
     series.forEach((s, si) => {
-      const pts = s.pct.map((p, i) => p != null ? { x: xC(i), y: yPct(p) } : null);
+      const arr = metric === 'avg' ? (s.avg || []) : s.pct;
+      const pts = arr.map((v, i) => v != null ? { x: xC(i), y: yLineFn(v) } : null);
       const path = pts.filter(Boolean).reduce((acc, p, i) => acc + (i === 0 ? `M${p.x.toFixed(1)},${p.y.toFixed(1)}` : `L${p.x.toFixed(1)},${p.y.toFixed(1)}`), '');
       lines += `<path d="${path}" fill="none" stroke="${_rptColor(si)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-      lines += pts.map((p, i) => p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.2" fill="${_rptColor(si)}" stroke="white" stroke-width="1.2"><title>${_alEsc(s.label)} · ${_alEsc(xLabels[i])}: ${s.pct[i]}%</title></circle>` : '').join('');
+      lines += pts.map((p, i) => p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.2" fill="${_rptColor(si)}" stroke="white" stroke-width="1.2"><title>${_alEsc(s.label)} · ${_alEsc(xLabels[i])}: ${fmtVal(arr[i])}</title></circle>` : '').join('');
     });
     const labels = xLabels.map((lb, i) => `<text x="${xC(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${_alEsc(lb)}</text>`).join('');
-    html += `<div><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap"><div style="font-size:0.72rem">${legend}</div><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;white-space:nowrap" onclick="_descargarSvgComoImagen('${idLine}','${nombreArchivo}_serie')">⬇ Foto</button></div>
-      <svg id="${idLine}" viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff">${grids}${lines}${labels}</svg></div>`;
+    html += `<div><div style="display:flex;justify-content:flex-end"><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;white-space:nowrap" onclick="_descargarSvgComoImagen('${idLine}','${nombreArchivo}_serie')">⬇ Foto</button></div>
+      <svg id="${idLine}" viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto;background:#fff">${gridsLine}${legendFrag.svg}${lines}${labels}</svg></div>`;
   }
   return html;
 }
 
 let _r1FocalChartTipos = { barra: true, serie: true };
 function r1FocalToggleChart(tipo, checked) { _r1FocalChartTipos[tipo] = checked; renderR1Focal(); }
+// Métrica que grafica la gráfica de Serie (líneas): % (proporción de
+// evaluaciones en el nivel/grupo, como antes) o el promedio real de la
+// puntuación entre esas evaluaciones (pedido explícito). La barra se
+// mantiene siempre en %.
+let _r1FocalSerieMetric = 'pct';
+function r1FocalCambiarSerieMetric(v) { _r1FocalSerieMetric = v === 'avg' ? 'avg' : 'pct'; renderR1Focal(); }
 let _r1FocalTablaExport = null;
 function r1FocalDescargarTabla(formato) {
   if (!_r1FocalTablaExport) return;
@@ -13235,8 +13318,10 @@ function renderR1Focal() {
   const nivelesWrap = document.getElementById('r1-focal-niveles-wrap');
   const resumenEl = document.getElementById('r1-focal-agrup-resumen');
   const progVal = autocompleteValue('r1-prog');
-  const tipo = document.getElementById('r1-focal-tipo')?.value || 'dominio';
-  const focos = tagPickerSelected('r1-focal-obj'); // [{value,label}] — uno o más
+  const tipo = _r1EnfoqueTipoActivo() || 'dominio';
+  const focos = tipo === 'dominio' ? multiSelectSelected('r1-focal-dominios')
+    : tipo === 'competencia' ? multiSelectSelected('r1-focal-competencias')
+    : multiSelectSelected('r1-focal-criterios'); // [{value,label}] — uno o más
 
   const limpiar = (msgHtml) => {
     body.innerHTML = msgHtml;
@@ -13331,23 +13416,32 @@ function renderR1Focal() {
       : [...new Set(p.evals.map(ev => { const av = avaluos.find(a => a.id === ev.avaluoId); return av ? getAcademicYear(_getSemestre(av)) : null; }).filter(Boolean))].sort((a,b)=>+a-+b).map(String);
     series = nivelesSelIdx.map(i => {
       const col = columnas[i];
-      const pct = anios.map(ay => {
+      const pct = [], avg = [];
+      anios.forEach(ay => {
         const evsAno = p.evals.filter(ev => {
           const av = avaluos.find(a => a.id === ev.avaluoId);
           return String(getAcademicYear(av ? _getSemestre(av) : ev.semestre)) === ay;
         });
-        if (!evsAno.length) return null;
-        const enCol = evsAno.filter(ev => col.valores.includes(Math.round(ev.val))).length;
-        return Math.round(enCol / evsAno.length * 100);
+        if (!evsAno.length) { pct.push(null); avg.push(null); return; }
+        const enCol = evsAno.filter(ev => col.valores.includes(Math.round(ev.val)));
+        pct.push(Math.round(enCol.length / evsAno.length * 100));
+        avg.push(enCol.length ? _avgNivel(enCol.map(e => e.val)) : null);
       });
-      return { label: col.label, pct };
+      return { label: col.label, pct, avg };
     });
     xLabels = anios.map(ay => 'AY' + ay);
   } else {
     // Varios enfoques: eje x = los enfoques mismos; una serie por
     // nivel/grupo — comparación lado a lado (años ya filtrados arriba).
     xLabels = porFoco.map(p => p.foco.label);
-    series = nivelesSelIdx.map(i => ({ label: columnas[i].label, pct: porFoco.map(p => p.pcts[i]) }));
+    series = nivelesSelIdx.map(i => ({
+      label: columnas[i].label,
+      pct: porFoco.map(p => p.pcts[i]),
+      avg: porFoco.map(p => {
+        const enCol = p.vals.filter(v => columnas[i].valores.includes(Math.round(v)));
+        return enCol.length ? _avgNivel(enCol) : null;
+      }),
+    }));
   }
 
   const nombreArchivoBase = 'R1_focalizado_' + (focos.length === 1 ? _nombreArchivoSeguro(focos[0].label) : 'comparativa');
@@ -13355,8 +13449,12 @@ function renderR1Focal() {
     <div class="rpt-focal-chart-toggle">
       <label><input type="checkbox" ${_r1FocalChartTipos.barra?'checked':''} onchange="r1FocalToggleChart('barra',this.checked)"> Barra</label>
       <label><input type="checkbox" ${_r1FocalChartTipos.serie?'checked':''} onchange="r1FocalToggleChart('serie',this.checked)"> Serie</label>
+      <select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r1FocalCambiarSerieMetric(this.value)" ${_r1FocalChartTipos.serie?'':'disabled'}>
+        <option value="pct" ${_r1FocalSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
+        <option value="avg" ${_r1FocalSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
+      </select>
     </div>
-    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r1FocalChartTipos.barra, serie: _r1FocalChartTipos.serie, nombreArchivo: nombreArchivoBase })}`;
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r1FocalChartTipos.barra, serie: _r1FocalChartTipos.serie, serieMetric: _r1FocalSerieMetric, nombreArchivo: nombreArchivoBase })}`;
 
   body.innerHTML = `<div class="rpt-focal-grid">
     <div class="rpt-focal-panel">${tablaHtml}</div>
