@@ -13222,15 +13222,16 @@ function _rptLegendSvgFragment(series, W) {
   return { svg, height: lineas * lineH + 6 };
 }
 // Gráfica de barras agrupadas y/o de serie (líneas) para comparar una o
-// más series (niveles/grupos escogidos) a través de un eje x compartido:
-// años académicos cuando se mira UN enfoque, o los propios enfoques cuando
-// se escoge más de uno ("de manera comparativa", pedido explícito).
-// Reemplaza _r1HtmlComparativaAnio (fija a una sola serie). La barra
-// siempre es por % (proporción de evaluaciones en cada nivel/grupo); la
-// serie/línea puede graficarse por % (opts.serieMetric==='pct', por
-// defecto) o por el promedio real de la puntuación entre las
-// evaluaciones de cada nivel/grupo (opts.serieMetric==='avg', en cuyo
-// caso cada serie debe traer también un arreglo `avg` además de `pct`).
+// más series a través de un eje x compartido. Es genérica: no le importa
+// qué representa cada serie (un nivel/grupo, un enfoque) ni qué es el eje
+// x (años académicos, enfoques) — eso lo decide quien la llama, pasando
+// el `xLabels`/`series` que correspondan. Reemplaza _r1HtmlComparativaAnio
+// (fija a una sola serie). La barra siempre grafica `s.pct` (%); la
+// serie/línea grafica `s.pct` (opts.serieMetric==='pct', por defecto) o
+// `s.avg` (opts.serieMetric==='avg') — el llamador decide a qué
+// corresponde cada arreglo, y puede llamarla dos veces con datos
+// distintos para la barra y la serie cuando sus ejes x no coinciden
+// (ver renderR1Focal: Serie "promedio" comparando varios enfoques).
 function _rptHtmlComparativaMulti(xLabels, series, opts = {}) {
   if (!xLabels.length || !series.length) return '<div class="dash-empty"><p>Nada que graficar con lo escogido</p></div>';
   const W = 480, n = xLabels.length, nS = series.length;
@@ -13407,62 +13408,108 @@ function renderR1Focal() {
     </tbody></table></div>`;
 
   // ── Panel de gráfica ──
-  let xLabels, series;
+  // Helpers locales por año académico — los usan tanto la Barra/Serie "por
+  // nivel/grupo" (como hasta ahora) como la Serie "promedio de la
+  // puntuación" (pedido explícito de Edgardo, 2026-10-26 — ver más abajo).
+  const _aniosDeEvals = (evals) => [...new Set(evals.map(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    return av ? getAcademicYear(_getSemestre(av)) : null;
+  }).filter(Boolean))].sort((a, b) => +a - +b).map(String);
+  const _evalsPorAnio = (evals, anios) => anios.map(ay => evals.filter(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    return String(getAcademicYear(av ? _getSemestre(av) : ev.semestre)) === ay;
+  }));
+
+  let xLabels, series; // Barra, y Serie en modo "%": siempre por nivel/grupo
+  let xLabelsAvgUnFoco = null, serieAvgUnFoco = null;       // Serie "promedio", un solo enfoque
+  let xLabelsAvgMultiFoco = null, serieAvgMultiFoco = null; // Serie "promedio", varios enfoques
   if (focos.length === 1) {
     // Un solo enfoque: eje x = año(s) académico(s) escogido(s) arriba; una
     // serie por nivel/grupo seleccionado, comparando su % año por año.
     const p = porFoco[0];
-    const anios = aniosSel.length ? aniosSel.slice().sort((a,b)=>+a-+b)
-      : [...new Set(p.evals.map(ev => { const av = avaluos.find(a => a.id === ev.avaluoId); return av ? getAcademicYear(_getSemestre(av)) : null; }).filter(Boolean))].sort((a,b)=>+a-+b).map(String);
+    const anios = aniosSel.length ? aniosSel.slice().sort((a,b)=>+a-+b) : _aniosDeEvals(p.evals);
+    const evalsPorAnio = _evalsPorAnio(p.evals, anios);
     series = nivelesSelIdx.map(i => {
       const col = columnas[i];
-      const pct = [], avg = [];
-      anios.forEach(ay => {
-        const evsAno = p.evals.filter(ev => {
-          const av = avaluos.find(a => a.id === ev.avaluoId);
-          return String(getAcademicYear(av ? _getSemestre(av) : ev.semestre)) === ay;
-        });
-        if (!evsAno.length) { pct.push(null); avg.push(null); return; }
+      const pct = evalsPorAnio.map(evsAno => {
+        if (!evsAno.length) return null;
         const enCol = evsAno.filter(ev => col.valores.includes(Math.round(ev.val)));
-        pct.push(Math.round(enCol.length / evsAno.length * 100));
-        avg.push(enCol.length ? _avgNivel(enCol.map(e => e.val)) : null);
+        return Math.round(enCol.length / evsAno.length * 100);
       });
-      return { label: col.label, pct, avg };
+      return { label: col.label, pct };
     });
     xLabels = anios.map(ay => 'AY' + ay);
+    // Serie "promedio de la puntuación": promediar solo las evaluaciones
+    // de un nivel/grupo no tiene sentido — por definición, lo que cayó en
+    // "Competente" siempre promedia ~3 (pedido explícito de Edgardo,
+    // 2026-10-26). En su lugar: UNA sola línea con el promedio REAL de
+    // TODAS las evaluaciones del enfoque, año por año.
+    xLabelsAvgUnFoco = xLabels;
+    serieAvgUnFoco = [{ label: p.foco.label, avg: evalsPorAnio.map(evsAno => evsAno.length ? _avgNivel(evsAno.map(e => e.val)) : null) }];
   } else {
     // Varios enfoques: eje x = los enfoques mismos; una serie por
     // nivel/grupo — comparación lado a lado (años ya filtrados arriba).
+    // Esto es lo que grafica la Barra (y lo que graficaría la Serie en
+    // modo "%", que no aplica aquí — ver el quinto ajuste).
     xLabels = porFoco.map(p => p.foco.label);
-    series = nivelesSelIdx.map(i => ({
-      label: columnas[i].label,
-      pct: porFoco.map(p => p.pcts[i]),
-      avg: porFoco.map(p => {
-        const enCol = p.vals.filter(v => columnas[i].valores.includes(Math.round(v)));
-        return enCol.length ? _avgNivel(enCol) : null;
-      }),
+    series = nivelesSelIdx.map(i => ({ label: columnas[i].label, pct: porFoco.map(p => p.pcts[i]) }));
+
+    // Serie "promedio de la puntuación" comparando VARIOS enfoques: pedido
+    // explícito de Edgardo (2026-10-26) — una línea de promedio por cada
+    // enfoque escogido, año por año. Aquí el eje x SÍ son los años
+    // académicos (no los enfoques, como en la Barra), así que usa su
+    // propio xLabels/series — y por tener un eje distinto, cuando está
+    // activa no convive con la Barra en el mismo panel (más abajo).
+    const aniosMulti = aniosSel.length ? aniosSel.slice().sort((a,b)=>+a-+b) : _aniosDeEvals(porFoco.flatMap(p => p.evals));
+    xLabelsAvgMultiFoco = aniosMulti.map(ay => 'AY' + ay);
+    serieAvgMultiFoco = porFoco.map(p => ({
+      label: p.foco.label,
+      avg: _evalsPorAnio(p.evals, aniosMulti).map(evsAno => evsAno.length ? _avgNivel(evsAno.map(e => e.val)) : null),
     }));
   }
 
-  // La gráfica de Serie (líneas) solo tiene sentido comparando un mismo
-  // enfoque A TRAVÉS DE años académicos — con un solo año no hay nada que
-  // trazar como línea, y comparando "entre enfoques" (varios focos) el eje
-  // x ya no son años, así que una "serie" ahí no es una comparación de
-  // años tampoco. Pedido explícito de Edgardo (2026-10-26): debe aparecer
-  // SOLO cuando se compara por año académico y hay más de un año.
-  const serieAplica = focos.length === 1 && xLabels.length > 1;
+  // ── Disponibilidad y datos de la Serie, según cuántos enfoques y qué
+  // métrica (pedido explícito de Edgardo, 2026-10-26 — ver arriba) ──
+  const metricEsAvg = _r1FocalSerieMetric === 'avg';
+  let serieAplica, xLabelsSerie, seriesSerie, serieMetricEfectivo, selectorMetricaVisible;
+  if (focos.length === 1) {
+    // Con un solo enfoque, % o promedio son ambos válidos — el selector
+    // decide, igual que antes.
+    serieAplica = xLabels.length > 1;
+    serieMetricEfectivo = _r1FocalSerieMetric;
+    xLabelsSerie = metricEsAvg ? xLabelsAvgUnFoco : xLabels;
+    seriesSerie = metricEsAvg ? serieAvgUnFoco : series;
+    selectorMetricaVisible = true;
+  } else {
+    // Con varios enfoques, la Serie solo existe en modo "promedio" — no
+    // depende de qué tenga escogido el selector global (que es para el
+    // caso de un enfoque), así que tampoco se muestra selector aquí.
+    serieAplica = !!(xLabelsAvgMultiFoco && xLabelsAvgMultiFoco.length > 1);
+    serieMetricEfectivo = 'avg';
+    xLabelsSerie = xLabelsAvgMultiFoco;
+    seriesSerie = serieAvgMultiFoco;
+    selectorMetricaVisible = false;
+  }
   const serieActiva = serieAplica && _r1FocalChartTipos.serie;
+  // Ejes distintos (enfoques vs. años) no pueden convivir en el mismo
+  // panel: con varios enfoques y la Serie-promedio activa, la Barra se
+  // desactiva mientras tanto (pedido explícito de Edgardo).
+  const barraYSerieChocan = focos.length > 1 && serieActiva;
+  const barraActiva = _r1FocalChartTipos.barra && !barraYSerieChocan;
+
   const nombreArchivoBase = 'R1_focalizado_' + (focos.length === 1 ? _nombreArchivoSeguro(focos[0].label) : 'comparativa');
   const graficaHtml = `<div class="rpt-focal-panel-head"><span>📈 Gráfica${focos.length > 1 ? ' — comparativa entre enfoques' : ' — comparativa por año académico'}</span></div>
     <div class="rpt-focal-chart-toggle">
-      <label><input type="checkbox" ${_r1FocalChartTipos.barra?'checked':''} onchange="r1FocalToggleChart('barra',this.checked)"> Barra</label>
+      <label><input type="checkbox" ${(!barraYSerieChocan && _r1FocalChartTipos.barra)?'checked':''} ${barraYSerieChocan?'disabled':''} onchange="r1FocalToggleChart('barra',this.checked)"> Barra</label>
       ${serieAplica ? `<label><input type="checkbox" ${_r1FocalChartTipos.serie?'checked':''} onchange="r1FocalToggleChart('serie',this.checked)"> Serie</label>
-      <select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r1FocalCambiarSerieMetric(this.value)" ${_r1FocalChartTipos.serie?'':'disabled'}>
+      ${selectorMetricaVisible ? `<select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r1FocalCambiarSerieMetric(this.value)" ${_r1FocalChartTipos.serie?'':'disabled'}>
         <option value="pct" ${_r1FocalSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
         <option value="avg" ${_r1FocalSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
-      </select>` : ''}
+      </select>` : `<span style="margin-left:6px;font-size:0.68rem;color:#797A7D">— promedio de la puntuación, por año académico</span>`}
+      ${barraYSerieChocan ? `<span style="margin-left:6px;font-size:0.68rem;color:#797A7D">(Barra desactivada: ejes distintos)</span>` : ''}` : ''}
     </div>
-    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r1FocalChartTipos.barra, serie: serieActiva, serieMetric: _r1FocalSerieMetric, nombreArchivo: nombreArchivoBase })}`;
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: barraActiva, serie: false, nombreArchivo: nombreArchivoBase })}
+    ${serieActiva ? _rptHtmlComparativaMulti(xLabelsSerie, seriesSerie, { barra: false, serie: true, serieMetric: serieMetricEfectivo, nombreArchivo: nombreArchivoBase }) : ''}`;
 
   body.innerHTML = `<div class="rpt-focal-grid">
     <div class="rpt-focal-panel">${tablaHtml}</div>
