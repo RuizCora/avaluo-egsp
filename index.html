@@ -14101,30 +14101,58 @@ function renderR2Secciones() {
     ${rows.map(r=>`<tr>${r.map(v=>`<td>${_alEsc(String(v))}</td>`).join('')}</tr>`).join('')}
     </tbody></table></div>`;
 
-  // ── Panel de gráfica: Barra siempre por % (por nivel/grupo); Serie por
-  // % (igual) o por el promedio real de todas las evaluaciones de cada
-  // sección (UNA sola línea — no partida por nivel/grupo, mismo fix que
-  // el sexto ajuste de R1). Mismo eje x en ambos casos (las secciones).
+  // ── Panel de gráfica: Barra siempre por % (por nivel/grupo, x = las
+  // secciones). Serie por % usa el mismo eje (x = secciones, una línea
+  // por nivel/grupo — compatible con Barra). Serie por PROMEDIO usa un
+  // eje distinto (x = año académico) con UNA LÍNEA POR SECCIÓN (corrección
+  // 2026-10-26 de Edgardo: "cada línea en la serie debe ser una sección"
+  // — antes colapsaba a una sola línea "Promedio" sobre el eje de
+  // secciones, lo cual no permitía ver la tendencia de cada sección por
+  // separado). Al chocar de eje con Barra, Barra se desactiva mientras
+  // la Serie-promedio esté activa (mismo patrón que el sexto ajuste de R1
+  // y el Informe Focalizado de R2 con varios enfoques).
   const xLabels = porSeccionCalc.map(s => s.label);
   const series = nivelesSelIdx.map(i => ({ label: columnas[i].label, pct: porSeccionCalc.map(s => s.pcts[i]) }));
-  const serieAvg = [{ label: 'Promedio', avg: porSeccionCalc.map(s => s.avg) }];
 
-  const serieAplica = xLabels.length > 1;
+  const _secNumero = (av) => {
+    const sec = (db.secciones || []).find(s => s.id === av.seccionId);
+    return sec?.numero ? String(sec.numero) : (av.seccionId || 'sin-seccion');
+  };
+  const evalsCtx = _allEvals(avaluos).map(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    return { val: ev.val, numero: av ? _secNumero(av) : 'sin-seccion', anio: av ? String(getAcademicYear(_getSemestre(av))) : null };
+  });
+  const numeros = [...new Set(evalsCtx.map(e => e.numero))].sort();
+  const aniosMulti = aniosSel.length ? aniosSel.slice().sort((a, b) => +a - +b) : [...new Set(evalsCtx.map(e => e.anio).filter(Boolean))].sort((a, b) => +a - +b);
+  const xLabelsAvgPorSeccion = aniosMulti.map(ay => 'AY' + ay);
+  const serieAvgPorSeccion = numeros.map(num => ({
+    label: 'Sección ' + num,
+    avg: aniosMulti.map(ay => {
+      const evsAno = evalsCtx.filter(e => e.numero === num && e.anio === ay);
+      return evsAno.length ? _avgNivel(evsAno.map(e => e.val)) : null;
+    }),
+  }));
+
   const metricEsAvg = _r2SecSerieMetric === 'avg';
-  const seriesSerie = metricEsAvg ? serieAvg : series;
+  const serieAplica = metricEsAvg ? xLabelsAvgPorSeccion.length > 1 : xLabels.length > 1;
+  const xLabelsSerie = metricEsAvg ? xLabelsAvgPorSeccion : xLabels;
+  const seriesSerie = metricEsAvg ? serieAvgPorSeccion : series;
   const serieActiva = serieAplica && _r2SecChartTipos.serie;
+  const barraYSerieChocan = metricEsAvg && serieActiva;
+  const barraActiva = _r2SecChartTipos.barra && !barraYSerieChocan;
 
   const graficaHtml = `<div class="rpt-focal-panel-head"><span>📈 Gráfica — comparativa entre secciones</span></div>
     <div class="rpt-focal-chart-toggle">
-      <label><input type="checkbox" ${_r2SecChartTipos.barra?'checked':''} onchange="r2SeccionesToggleChart('barra',this.checked)"> Barra</label>
+      <label><input type="checkbox" ${(!barraYSerieChocan && _r2SecChartTipos.barra)?'checked':''} ${barraYSerieChocan?'disabled':''} onchange="r2SeccionesToggleChart('barra',this.checked)"> Barra</label>
       ${serieAplica ? `<label><input type="checkbox" ${_r2SecChartTipos.serie?'checked':''} onchange="r2SeccionesToggleChart('serie',this.checked)"> Serie</label>
       <select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r2SeccionesCambiarSerieMetric(this.value)" ${_r2SecChartTipos.serie?'':'disabled'}>
-        <option value="pct" ${_r2SecSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
-        <option value="avg" ${_r2SecSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
-      </select>` : ''}
+        <option value="pct" ${_r2SecSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones (por sección)</option>
+        <option value="avg" ${_r2SecSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación (por año académico, una línea por sección)</option>
+      </select>
+      ${barraYSerieChocan ? `<span style="margin-left:6px;font-size:0.68rem;color:#797A7D">(Barra desactivada: ejes distintos)</span>` : ''}` : ''}
     </div>
-    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r2SecChartTipos.barra, serie: false, nombreArchivo: 'R2_secciones' })}
-    ${serieActiva ? _rptHtmlComparativaMulti(xLabels, seriesSerie, { barra: false, serie: true, serieMetric: metricEsAvg?'avg':'pct', nombreArchivo: 'R2_secciones' }) : ''}`;
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: barraActiva, serie: false, nombreArchivo: 'R2_secciones' })}
+    ${serieActiva ? _rptHtmlComparativaMulti(xLabelsSerie, seriesSerie, { barra: false, serie: true, serieMetric: metricEsAvg?'avg':'pct', nombreArchivo: 'R2_secciones' }) : ''}`;
 
   body.innerHTML = `<div class="rpt-focal-grid">
     <div class="rpt-focal-panel">${tablaHtml}</div>
