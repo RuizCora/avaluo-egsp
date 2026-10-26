@@ -2314,6 +2314,10 @@
           <option value="T2">T2</option><option value="T3">T3</option><option value="V">V</option>
         </select></div>
     </div>
+    <div class="rpt-subtabs">
+      <button class="rpt-subtab active" id="r3-sub-curso" onclick="r3SetSubview('curso')">Informe por Curso</button>
+      <button class="rpt-subtab" id="r3-sub-competencias" onclick="r3SetSubview('competencias')">Competencias Agrupadas</button>
+    </div>
     <div id="r3-body"></div>
   </div>
 
@@ -14174,10 +14178,167 @@ function renderR2Secciones() {
 }
 
 // ── R3 — Student Report ───────────────────────────────────────
+// ── R3 — Reporte por Estudiante — distintas vistas del mismo expediente
+// (Reconceptualización, 2026-10-26: "El R3 provee informes individuales
+// de estudiantes... diferentes maneras de visibilizar ese expediente" —
+// confirmado por Edgardo). Dos sub-pestañas sobre el mismo estudiante
+// (o estudiantes) que arroje la búsqueda: "Informe por Curso" (el
+// existente, con nota del curso y de los LAOs ahora visibles, ordenado
+// del período más reciente al más antiguo) y "Competencias Agrupadas"
+// (nuevo, independiente del curso). Un resumen (promedio de ejecución +
+// GPA en escala 4.00 ponderado por créditos) se muestra arriba de ambas,
+// por estudiante.
+let _r3Subview = 'curso';
+function r3SetSubview(view) {
+  _r3Subview = view;
+  document.getElementById('r3-sub-curso').classList.toggle('active', view === 'curso');
+  document.getElementById('r3-sub-competencias').classList.toggle('active', view === 'competencias');
+  renderR3();
+}
+// A=4, B=3, C=2, D=1, F=0 — escala de puntos de calidad estándar,
+// correspondiente 1:1 con los cortes de gradeToLetter().
+function gradeToQualityPoints(letra) {
+  return { A: 4, B: 3, C: 2, D: 1, F: 0 }[letra] ?? null;
+}
+// Agrupa los avalúos del estudiante por curso×semestre (sin duplicar el
+// curso si hay varios avalúos — uno por LAO — en el mismo curso y
+// período): junta todas sus evaluaciones de competencia, y guarda la
+// nota del curso UNA sola vez por grupo (se repite igual en cada avalúo
+// del mismo curso×semestre). Lo usan tanto el Informe por Curso como el
+// resumen (GPA: una nota final por curso, no una por LAO).
+function _r3AgruparPorCurso(estAvaluos) {
+  const byCurso = {};
+  estAvaluos.forEach(av => {
+    const key = av.cursoId + '|' + _getSemestre(av);
+    if (!byCurso[key]) {
+      const curso = db.cursos.find(c => c.id === av.cursoId);
+      const t = parseTermString(_getSemestre(av));
+      byCurso[key] = {
+        cursoId: av.cursoId, codigo: curso?.codigo || av.cursoId, nombre: curso?.nombre || '',
+        semestre: _getSemestre(av), creditos: curso?.creditos,
+        sortKey: t ? t.year * 10 + ['T1', 'T2', 'T3', 'V'].indexOf(t.term) : -1,
+        notaFinal: null, notaFinalLetra: null, evals: [],
+      };
+    }
+    const g = byCurso[key];
+    if (g.notaFinal === null && av.notaFinal !== '' && av.notaFinal !== undefined && av.notaFinal !== null) {
+      g.notaFinal = av.notaFinal;
+      g.notaFinalLetra = av.notaFinalLetra || gradeToLetter(parseFloat(av.notaFinal));
+    }
+    g.evals.push(..._allEvals([av]));
+  });
+  return byCurso;
+}
+// Competencias agrupadas por estudiante, independiente del curso
+// (decisión confirmada 2026-10-23: promedio simple del nivel final de la
+// competencia por curso — sin ponderar por créditos ni por cantidad de
+// LAOs, cada curso donde se evaluó pesa igual). Empareja la misma
+// competencia a través de cursos distintos por programa+código (el
+// código de cada competencia de curso, p.ej. "C1.1", se deriva 1:1 del
+// num de la banco-competencia del programa al vincularla — ver
+// guardarVinculacionFicha), para no mezclar competencias de programas
+// distintos que coincidan de número.
+function _r3CompetenciasAgrupadas(estAvaluos) {
+  const porCompetencia = {};
+  estAvaluos.forEach(av => {
+    const curso = db.cursos.find(c => c.id === av.cursoId);
+    const prog = curso?.programa || '';
+    _allEvals([av]).forEach(ev => {
+      const key = prog + '|' + ev.compCode;
+      if (!porCompetencia[key]) porCompetencia[key] = { code: ev.compCode, desc: ev.compDesc, porCurso: {} };
+      if (!porCompetencia[key].desc) porCompetencia[key].desc = ev.compDesc;
+      (porCompetencia[key].porCurso[av.cursoId] ||= []).push(ev.val);
+    });
+  });
+  return Object.values(porCompetencia).map(c => {
+    const finalesPorCurso = Object.values(c.porCurso).map(vals => _avgNivel(vals));
+    return { code: c.code, desc: c.desc, nCursos: finalesPorCurso.length, avg: _avgNivel(finalesPorCurso) };
+  }).sort((a, b) => a.code.localeCompare(b.code));
+}
+// Resumen del estudiante: promedio de ejecución de TODAS las
+// competencias evaluadas (agrupadas, cada una pesa igual) + GPA en
+// escala 4.00 ponderado por créditos (curso sin créditos asignados usa 1
+// provisional, con aviso — documento original).
+function _r3Resumen(byCurso, compsAgrupadas) {
+  const promedioEjecucion = _avgNivel(compsAgrupadas.map(c => c.avg).filter(v => v !== null && v !== undefined));
+  let sumaQP = 0, sumaCred = 0; const cursosProvisionales = [];
+  Object.values(byCurso).forEach(g => {
+    if (g.notaFinal === null) return;
+    const letra = g.notaFinalLetra || gradeToLetter(parseFloat(g.notaFinal));
+    const qp = gradeToQualityPoints(letra);
+    if (qp === null) return;
+    let cred = parseFloat(g.creditos);
+    if (!cred || isNaN(cred)) { cred = 1; cursosProvisionales.push(g.codigo); }
+    sumaQP += qp * cred; sumaCred += cred;
+  });
+  return { promedioEjecucion, gpa: sumaCred ? sumaQP / sumaCred : null, cursosProvisionales };
+}
+function _r3ResumenHtml(r) {
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:10px 0 14px">
+    <div class="dash-kpi"><div class="dash-kpi-accent" style="background:var(--egsp-coral)"></div>
+      <div class="dash-kpi-icon">📈</div><div class="dash-kpi-num" style="color:${_colorForAvg(r.promedioEjecucion)}">${r.promedioEjecucion!==null?r.promedioEjecucion.toFixed(2):'—'}</div>
+      <div class="dash-kpi-label">Promedio de Ejecución (todas las competencias evaluadas)</div></div>
+    <div class="dash-kpi"><div class="dash-kpi-accent" style="background:#3b82f6"></div>
+      <div class="dash-kpi-icon">🎓</div><div class="dash-kpi-num" style="color:#3b82f6">${r.gpa!==null?r.gpa.toFixed(2):'—'}</div>
+      <div class="dash-kpi-label">Promedio General (GPA, escala 4.00)</div></div>
+  </div>
+  ${r.cursosProvisionales.length ? `<div style="font-size:0.75rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin:-4px 0 14px">⚠️ ${r.cursosProvisionales.length} curso(s) sin créditos asignados (${_alEsc(r.cursosProvisionales.join(', '))}): se usó 1 crédito provisional para el GPA.</div>` : ''}`;
+}
+// Informe por Curso: ordenado del período académico más reciente al más
+// antiguo (antes ascendente); nota del curso visible una vez por grupo,
+// LAO y nota del LAO visibles por fila de competencia.
+function _r3CursoBlock(nombre, estId, byCurso) {
+  let html = `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+    <th>Curso</th><th>Trimestre</th><th>Nota del Curso</th><th>LAO</th><th>Nota LAO</th><th>Competencia</th><th>Descripción</th><th>Nivel</th><th>Valor</th>
+  </tr></thead><tbody>`;
+  const csvRows = [];
+  Object.values(byCurso).sort((a, b) => b.sortKey - a.sortKey).forEach(grupo => {
+    grupo.evals.forEach(ev => { ev.nivel = String(ev.nivel); ev.val = nvValor(ev.nivel) ?? ev.val; });
+    const visibleEvals = grupo.evals.filter(ev => ev.nivel !== '' && ev.nivel !== 'undefined' && ev.nivel !== 'null');
+    if (!visibleEvals.length) return;
+    const escalaGrupo = resolverEscalaParaCurso(grupo.cursoId);
+    const nfText = grupo.notaFinal !== null ? `${grupo.notaFinal} <strong>${grupo.notaFinalLetra || ''}</strong>` : '—';
+    visibleEvals.sort((a, b) => a.compCode.localeCompare(b.compCode)).forEach((ev, i) => {
+      html += `<tr>
+        ${i===0?`<td rowspan="${visibleEvals.length}" style="font-weight:700;vertical-align:top">${_alEsc(grupo.codigo)}<br><span style="font-size:0.7rem;font-weight:400">${_alEsc(grupo.nombre)}</span></td>
+        <td rowspan="${visibleEvals.length}" style="vertical-align:top;font-size:0.75rem">${_alEsc(grupo.semestre)}</td>
+        <td rowspan="${visibleEvals.length}" style="vertical-align:top">${nfText}</td>`:''}
+        <td style="font-size:0.75rem">${_alEsc(ev.lao || '—')}</td>
+        <td>${ev.laoGrade !== undefined && ev.laoGrade !== null && ev.laoGrade !== '' ? ev.laoGrade : '—'}</td>
+        <td><strong>${_alEsc(ev.compCode)}</strong></td>
+        <td style="font-size:0.75rem;max-width:220px">${_alEsc(ev.compDesc)}</td>
+        <td>${_nivelPill(ev.nivel, escalaGrupo)}</td>
+        <td>${ev.val}</td>
+      </tr>`;
+      csvRows.push([nombre, estId, grupo.codigo, grupo.semestre, grupo.notaFinal ?? '', grupo.notaFinalLetra || '', ev.lao || '', ev.laoGrade ?? '', ev.compCode, ev.compDesc, nivelInfo(ev.nivel, escalaGrupo).titulo, ev.val]);
+    });
+  });
+  html += '</tbody></table></div>';
+  return { html, csvRows };
+}
+function _r3CompetenciasBlock(nombre, estId, compsAgrupadas) {
+  if (!compsAgrupadas.length) return { html: '<div class="dash-empty"><p>Sin competencias evaluadas para este filtro</p></div>', csvRows: [] };
+  let html = `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+    <th>Competencia</th><th>Descripción</th><th>Cursos Evaluados</th><th>Avg</th>
+  </tr></thead><tbody>`;
+  const csvRows = [];
+  compsAgrupadas.forEach(c => {
+    html += `<tr>
+      <td><strong>${_alEsc(c.code)}</strong></td>
+      <td style="font-size:0.75rem;max-width:300px">${_alEsc(c.desc)}</td>
+      <td>${c.nCursos}</td>
+      <td>${_avgBadge(c.avg)}</td>
+    </tr>`;
+    csvRows.push([nombre, estId, c.code, c.desc, c.nCursos, c.avg !== null ? c.avg.toFixed(2) : '']);
+  });
+  html += '</tbody></table></div>';
+  return { html, csvRows };
+}
 function renderR3() {
   const query      = (document.getElementById('r3-search')?.value||'').trim().toLowerCase();
   const filterTerm = document.getElementById('r3-term')?.value||'';
-  document.getElementById('rpt-export-title').textContent = 'R3 · Reporte por Estudiante';
+  document.getElementById('rpt-export-title').textContent = _r3Subview === 'competencias'
+    ? 'R3 · Competencias Agrupadas por Estudiante' : 'R3 · Reporte por Estudiante';
 
   const el = document.getElementById('r3-body');
   if (!query) {
@@ -14202,7 +14363,9 @@ function renderR3() {
     _reportCSVData=[]; return;
   }
 
-  const csvRows=[['Estudiante','ID','Curso','Trimestre','Competencia','Descripción','Nivel','Valor']];
+  const csvRows = _r3Subview === 'competencias'
+    ? [['Estudiante','ID','Competencia','Descripción','Cursos Evaluados','Avg']]
+    : [['Estudiante','ID','Curso','Trimestre','Nota del Curso','Letra','LAO','Nota LAO','Competencia','Descripción','Nivel','Valor']];
   let html = '';
 
   matchingIds.forEach(estId => {
@@ -14215,55 +14378,29 @@ function renderR3() {
     const nombre = estAvaluos[0].estudiante || estId;
     const prog   = resolveStudentProgram(estAvaluos[0].programaEstudiante||'');
     const isAdvisee = myAdvisees.has(estId);
-    const allV = _allEvals(estAvaluos);
-    const overallAvg = _avgNivel(allV.map(e=>e.val));
+
+    const byCurso = _r3AgruparPorCurso(estAvaluos);
+    const compsAgrupadas = _r3CompetenciasAgrupadas(estAvaluos);
+    const resumen = _r3Resumen(byCurso, compsAgrupadas);
 
     html += `<div class="rpt-section-head">
-      <span>👤 ${nombre}</span>
-      <span class="badge badge-blue">${estId}</span>
-      ${prog&&prog!=='OTHER'?`<span class="badge badge-gold">${prog}</span>`:''}
+      <span>👤 ${_alEsc(nombre)}</span>
+      <span class="badge badge-blue">${_alEsc(estId)}</span>
+      ${prog&&prog!=='OTHER'?`<span class="badge badge-gold">${_alEsc(prog)}</span>`:''}
       ${isAdvisee?'<span class="badge badge-green">Asesoría</span>':''}
-      <span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(overallAvg)}">Avg general: ${overallAvg?.toFixed(2)||'—'}</span>
     </div>`;
+    html += _r3ResumenHtml(resumen);
 
-    // Group by course+term
-    const byCurso = {};
-    estAvaluos.forEach(av=>{
-      const key = av.cursoId+'|'+_getSemestre(av);
-      if (!byCurso[key]) {
-        const curso=db.cursos.find(c=>c.id===av.cursoId);
-        byCurso[key]={codigo:curso?.codigo||av.cursoId,nombre:curso?.nombre||'',semestre:_getSemestre(av),evals:[]};
-      }
-      byCurso[key].evals.push(..._allEvals([av]));
-    });
-
-    html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-      <th>Curso</th><th>Trimestre</th><th>Competencia</th><th>Descripción</th><th>Nivel</th><th>Valor</th>
-    </tr></thead><tbody>`;
-
-    Object.values(byCurso).sort((a,b)=>a.semestre.localeCompare(b.semestre)).forEach(grupo=>{
-      // Normalize nivel to string (guardarEdicionAvaluo saves it as parseInt)
-      grupo.evals.forEach(ev => { ev.nivel = String(ev.nivel); ev.val = nvValor(ev.nivel) ?? ev.val; });
-      const visibleEvals = grupo.evals.filter(ev => ev.nivel !== '' && ev.nivel !== 'undefined' && ev.nivel !== 'null');
-      if (!visibleEvals.length) return; // skip groups with no evaluated competencies
-      const escalaGrupo = resolverEscalaParaCurso(visibleEvals[0]?.cursoId);
-      visibleEvals.sort((a,b)=>a.compCode.localeCompare(b.compCode)).forEach((ev,i)=>{
-        html += `<tr>
-          ${i===0?`<td rowspan="${visibleEvals.length}" style="font-weight:700;vertical-align:top">${grupo.codigo}<br><span style="font-size:0.7rem;font-weight:400">${grupo.nombre}</span></td>
-          <td rowspan="${visibleEvals.length}" style="vertical-align:top;font-size:0.75rem">${grupo.semestre}</td>`:''}
-          <td><strong>${ev.compCode}</strong></td>
-          <td style="font-size:0.75rem;max-width:220px">${ev.compDesc}</td>
-          <td>${_nivelPill(ev.nivel, escalaGrupo)}</td>
-          <td>${ev.val}</td>
-        </tr>`;
-        csvRows.push([nombre,estId,grupo.codigo,grupo.semestre,ev.compCode,ev.compDesc,nivelInfo(ev.nivel, escalaGrupo).titulo,ev.val]);
-      });
-    });
-    html += '</tbody></table></div>';
+    const bloque = _r3Subview === 'competencias'
+      ? _r3CompetenciasBlock(nombre, estId, compsAgrupadas)
+      : _r3CursoBlock(nombre, estId, byCurso);
+    html += bloque.html;
+    csvRows.push(...bloque.csvRows);
   });
 
   el.innerHTML = html || '<div class="dash-empty"><p>Sin avalúos para este filtro</p></div>';
-  _reportCSVData = csvRows; _reportCSVName = 'R3_estudiante.csv';
+  _reportCSVData = csvRows;
+  _reportCSVName = _r3Subview === 'competencias' ? 'R3_competencias_agrupadas.csv' : 'R3_estudiante.csv';
 }
 
 // ── R4 — Cohort Trend ─────────────────────────────────────────
