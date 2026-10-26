@@ -2250,20 +2250,56 @@
     </div>
   </div>
 
-  <!-- R2 — Attainment by Course -->
+  <!-- R2 — Informe de Logro por Curso / Informe Focalizado / Comparativo entre Secciones -->
   <div id="rpt-r2" class="rpt-pane" style="display:none">
     <div class="rpt-filter-bar">
-      <div class="dash-filter-group"><label class="dash-filter-label">Curso</label>
-        <select id="r2-curso" class="dash-select" onchange="renderR2()"><option value="">Todos</option></select></div>
-      <div class="dash-filter-group"><label class="dash-filter-label">Año Acad.</label>
-        <select id="r2-ay" class="dash-select" onchange="renderR2()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group" style="min-width:210px"><label class="dash-filter-label">Año(s) Académico(s)</label>
+        <div id="r2-ay-wrap"></div></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Trimestre</label>
         <select id="r2-term" class="dash-select" onchange="renderR2()">
           <option value="">Todos</option><option value="T1">T1</option>
           <option value="T2">T2</option><option value="T3">T3</option><option value="V">V</option>
         </select></div>
+      <div class="dash-filter-group" style="flex:1;min-width:220px"><label class="dash-filter-label">Curso (escribe para buscar)</label>
+        <div class="ac-wrap" id="r2-curso-wrap"><input id="r2-curso" class="dash-select" style="width:100%"></div></div>
     </div>
-    <div id="r2-body"></div>
+    <div class="rpt-periodo-banner" id="r2-periodo-banner"></div>
+    <div class="rpt-subtabs">
+      <button class="rpt-subtab active" id="r2-sub-general" onclick="r2SetSubview('general')">Informe de Logro por Curso</button>
+      <button class="rpt-subtab" id="r2-sub-focal" onclick="r2SetSubview('focal')">Informe Focalizado</button>
+      <button class="rpt-subtab" id="r2-sub-secciones" onclick="r2SetSubview('secciones')">Comparativo entre Secciones</button>
+    </div>
+    <div id="r2-general-pane">
+      <div class="rpt-agrup-link-row">
+        <button type="button" class="rpt-agrup-link" onclick="_r1AbrirModalAgrupar('r2general')">⚙️ Agrupar niveles para esta vista</button>
+        <span class="rpt-agrup-link-sub" id="r2-agrup-resumen"></span>
+      </div>
+      <div id="r2-body"></div>
+    </div>
+    <div id="r2-focal-pane" style="display:none">
+      <div class="rpt-filter-bar">
+        <div class="dash-filter-group" style="min-width:220px"><label class="dash-filter-label">LAO(s)</label>
+          <div id="r2-focal-laos-wrap"></div></div>
+        <div class="dash-filter-group" style="min-width:220px"><label class="dash-filter-label">Criterio(s) de rúbrica</label>
+          <div id="r2-focal-criterios-wrap"></div></div>
+      </div>
+      <div class="rpt-agrup-link-row">
+        <button type="button" class="rpt-agrup-link" onclick="_r1AbrirModalAgrupar('r2focal')">⚙️ Agrupar niveles para esta vista</button>
+        <span class="rpt-agrup-link-sub" id="r2-focal-agrup-resumen"></span>
+        <label class="dash-filter-label" style="margin-left:6px">Nivel(es)/grupo(s) a comparar</label>
+        <div id="r2-focal-niveles-wrap" style="min-width:220px"></div>
+      </div>
+      <div id="r2-focal-body"></div>
+    </div>
+    <div id="r2-secciones-pane" style="display:none">
+      <div class="rpt-agrup-link-row">
+        <button type="button" class="rpt-agrup-link" onclick="_r1AbrirModalAgrupar('r2secciones')">⚙️ Agrupar niveles para esta vista</button>
+        <span class="rpt-agrup-link-sub" id="r2-sec-agrup-resumen"></span>
+        <label class="dash-filter-label" style="margin-left:6px">Nivel(es)/grupo(s) a comparar</label>
+        <div id="r2-sec-niveles-wrap" style="min-width:220px"></div>
+      </div>
+      <div id="r2-secciones-body"></div>
+    </div>
   </div>
 
   <!-- R3 — Student Report -->
@@ -12612,7 +12648,9 @@ function renderReportes() {
   multiSelectBuild('r1-ay', _ayOptions().map(v => ({ value: v, label: 'AY' + v })), {
     allLabel: 'Todos los años', defaultAll: true, onChange: () => renderR1(),
   });
-  _populateSelect('r2-ay',  _ayOptions(), v=>'AY '+v);
+  multiSelectBuild('r2-ay', _ayOptions().map(v => ({ value: v, label: 'AY' + v })), {
+    allLabel: 'Todos los años', defaultAll: true, onChange: () => renderR2(),
+  });
   const scoped = _filterAvaluosByRole(db.avaluos||[]);
   const progs  = _progOptions(scoped);
   const cursos = db.cursos.filter(c=>scoped.some(a=>a.cursoId===c.id));
@@ -12625,8 +12663,17 @@ function renderReportes() {
     initialValue: autocompleteValue('r1-prog'),
     onSelect: () => renderR1(),
   });
+  // R2 — Curso: mismo patrón de autocompletar que R1-Programa (pedido
+  // explícito de Edgardo, 2026-10-26: aplicar las correcciones de estilo
+  // de R1 a R2 donde apliquen).
+  autocompleteBuild('r2-curso', cursos.map(c => ({ value: c.id, label: c.codigo + (c.nombre ? ' — ' + c.nombre : '') })), {
+    allowAll: true, allLabel: 'Todos los cursos',
+    placeholder: 'Escribe para buscar un curso…',
+    initialValue: autocompleteValue('r2-curso'),
+    onSelect: () => renderR2(),
+  });
   ['r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id=>_populateSelect(id,progs));
-  ['r2-curso','r5-curso','r8-curso'].forEach(id=>_populateSelect(id,cursos.map(c=>c.id),id=>db.cursos.find(c=>c.id===id)?.codigo||id));
+  ['r5-curso','r8-curso'].forEach(id=>_populateSelect(id,cursos.map(c=>c.id),id=>db.cursos.find(c=>c.id===id)?.codigo||id));
   // R6 threshold global default
   const saved = localStorage.getItem('r6_threshold_global');
   if (saved) { const el=document.getElementById('r6-threshold-global'); if(el) el.value=saved; }
@@ -12904,12 +12951,27 @@ function renderR1() {
 // las dos modifica la Escala de Niveles real guardada — el cambio es solo
 // para esta vista del reporte, y ambas arrancan con todos los niveles
 // individuales (antes heredaban la agrupación default de la escala).
+// Un scope por vista con agrupación ad-hoc propia — R1 General/Focalizado,
+// y (2026-10-26, R2) el Informe de Logro por Curso, el Informe Focalizado
+// y el Comparativo entre Secciones de R2, cada uno independiente.
 let _r1Agrup = {
   general: { asignacion: {}, nombres: { A: '', B: '', C: '' }, escalaId: null, inicializada: false },
   focal:   { asignacion: {}, nombres: { A: '', B: '', C: '' }, escalaId: null, inicializada: false },
+  r2general:   { asignacion: {}, nombres: { A: '', B: '', C: '' }, escalaId: null, inicializada: false },
+  r2focal:     { asignacion: {}, nombres: { A: '', B: '', C: '' }, escalaId: null, inicializada: false },
+  r2secciones: { asignacion: {}, nombres: { A: '', B: '', C: '' }, escalaId: null, inicializada: false },
 };
 let _r1AgruparScopeActual = 'general';
-let _r1AgruparEscalaActual = { general: null, focal: null }; // la última escala que cada vista le pasó a su agrupación, para que el modal sepa qué pintar
+let _r1AgruparEscalaActual = { general: null, focal: null, r2general: null, r2focal: null, r2secciones: null }; // la última escala que cada vista le pasó a su agrupación, para que el modal sepa qué pintar
+// Título del modal y qué render* llamar al cambiar algo — un lugar central
+// para los 5 scopes en vez de ifs repetidos.
+const _AGRUP_SCOPE_INFO = {
+  general:     { titulo: '⚙️ Agrupar niveles — Informe de Programa General', rerender: () => renderR1General() },
+  focal:       { titulo: '⚙️ Agrupar niveles — Informe Focalizado (R1)',     rerender: () => renderR1Focal() },
+  r2general:   { titulo: '⚙️ Agrupar niveles — Informe de Logro por Curso',  rerender: () => renderR2General() },
+  r2focal:     { titulo: '⚙️ Agrupar niveles — Informe Focalizado (R2)',     rerender: () => renderR2Focal() },
+  r2secciones: { titulo: '⚙️ Agrupar niveles — Comparativo entre Secciones', rerender: () => renderR2Secciones() },
+};
 
 function _r1InitAgrupacionAdHoc(scope, escala) {
   const st = _r1Agrup[scope];
@@ -12971,18 +13033,19 @@ function _r1ResumenAgrupacion(scope) {
 function _r1CambiarAsignacion(scope, valor, letraOIndividual) {
   _r1Agrup[scope].asignacion[valor] = letraOIndividual;
   _r1PintarModalAgrupar();
-  if (scope === 'focal') renderR1Focal(); else renderR1General();
+  (_AGRUP_SCOPE_INFO[scope] || _AGRUP_SCOPE_INFO.general).rerender();
 }
 function _r1CambiarNombreGrupo(scope, letra, nombre) {
   _r1Agrup[scope].nombres[letra] = nombre;
   _r1PintarModalAgrupar();
-  if (scope === 'focal') renderR1Focal(); else renderR1General();
+  (_AGRUP_SCOPE_INFO[scope] || _AGRUP_SCOPE_INFO.general).rerender();
 }
-// Enlace "⚙️ Agrupar niveles" → abre la ventana modal compartida.
+// Enlace "⚙️ Agrupar niveles" → abre la ventana modal compartida (misma
+// para los 5 scopes: R1 General/Focalizado, R2 General/Focalizado/Secciones).
 function _r1AbrirModalAgrupar(scope) {
   _r1AgruparScopeActual = scope;
   const tituloEl = document.querySelector('#modal-r1-agrupar .modal-title');
-  if (tituloEl) tituloEl.textContent = scope === 'focal' ? '⚙️ Agrupar niveles — Informe Focalizado' : '⚙️ Agrupar niveles — Informe de Programa General';
+  if (tituloEl) tituloEl.textContent = (_AGRUP_SCOPE_INFO[scope] || _AGRUP_SCOPE_INFO.general).titulo;
   _r1PintarModalAgrupar();
   openModal('modal-r1-agrupar');
 }
@@ -13531,23 +13594,76 @@ function renderR1Focal() {
 }
 
 // ── R2 — Attainment by Course ─────────────────────────────────
+// ── R2 — Informe de Logro por Curso / Informe Focalizado / Comparativo
+// entre Secciones (Reconceptualización, 2026-10-26: mismo patrón "estilo
+// panel" de R1, aplicado donde corresponde — pedido explícito de Edgardo).
+function _r2PintarPeriodoBanner() {
+  const aniosSel = multiSelectValues('r2-ay');
+  const term = document.getElementById('r2-term')?.value || '';
+  const el = document.getElementById('r2-periodo-banner');
+  if (el) el.textContent = _periodoLabel(aniosSel, term);
+}
+let _r2Subview = 'general';
+function r2SetSubview(view) {
+  _r2Subview = view;
+  document.getElementById('r2-sub-general').classList.toggle('active', view === 'general');
+  document.getElementById('r2-sub-focal').classList.toggle('active', view === 'focal');
+  document.getElementById('r2-sub-secciones').classList.toggle('active', view === 'secciones');
+  document.getElementById('r2-general-pane').style.display = view === 'general' ? '' : 'none';
+  document.getElementById('r2-focal-pane').style.display = view === 'focal' ? '' : 'none';
+  document.getElementById('r2-secciones-pane').style.display = view === 'secciones' ? '' : 'none';
+  if (view === 'focal') renderR2Focal();
+  else if (view === 'secciones') renderR2Secciones();
+  else renderR2General();
+}
+// showReport()/los filtros de arriba llaman siempre a renderR2(): despacha
+// a la subvista activa para no pisar los datos de exportación de las otras.
 function renderR2() {
-  const filterCurso = document.getElementById('r2-curso')?.value||'';
-  const filterAY    = document.getElementById('r2-ay')?.value||'';
-  const filterTerm  = document.getElementById('r2-term')?.value||'';
-  document.getElementById('rpt-export-title').textContent = 'R2 · Logro por Curso';
+  if (_r2Subview === 'focal') renderR2Focal();
+  else if (_r2Subview === 'secciones') renderR2Secciones();
+  else renderR2General();
+}
+
+// ── R2 · Informe de Logro por Curso (antiguo renderR2, con los cambios de
+// estilo de R1: regla general de "nada hasta escoger", Año(s)
+// Académico(s) multi-select + banner de período, agrupación ad-hoc propia
+// en un modal, título multilínea de exportación) ───────────────────────
+function renderR2General() {
+  const aniosSel   = multiSelectValues('r2-ay');
+  const filterTerm = document.getElementById('r2-term')?.value||'';
+  const cursoVal = autocompleteValue('r2-curso');
+  document.getElementById('rpt-export-title').textContent = 'R2 · Informe de Logro por Curso';
+  _reportExportTituloLineas = null;
+  _r2PintarPeriodoBanner();
+  const el = document.getElementById('r2-body');
+  const resumenEl = document.getElementById('r2-agrup-resumen');
+
+  // Regla general (R1/R2/R3 — Reconceptualización de Reportes): nada se
+  // muestra hasta escoger algo arriba, con "Todos los cursos" como opción
+  // explícita de la lista (antes este informe mostraba todo por default).
+  if (cursoVal === null) {
+    el.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escribe y escoge un curso (o "Todos los cursos") arriba para ver el informe.</p></div>';
+    if (resumenEl) resumenEl.textContent = '';
+    _r1AgruparEscalaActual.r2general = null;
+    _reportCSVData = []; _reportCSVName = 'R2_logro_curso.csv';
+    return;
+  }
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[]);
-  if (filterCurso) avaluos = avaluos.filter(av=>av.cursoId===filterCurso);
-  if (filterAY||filterTerm) avaluos = avaluos.filter(av=>{
+  if (cursoVal) avaluos = avaluos.filter(av=>av.cursoId===cursoVal);
+  avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
-    if(filterAY && String(getAcademicYear(_getSemestre(av)))!==filterAY) return false;
+    if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
     if(filterTerm && t.term!==filterTerm) return false; return true;
   });
 
   const evals = _allEvals(avaluos);
-  const el = document.getElementById('r2-body');
-  if (!evals.length) { el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">📚</div><p>Sin datos</p></div>'; _reportCSVData=[]; return; }
+  if (!evals.length) {
+    el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">📚</div><p>Sin datos para los filtros seleccionados</p></div>';
+    if (resumenEl) resumenEl.textContent = '';
+    _r1AgruparEscalaActual.r2general = null;
+    _reportCSVData=[]; return;
+  }
 
   // Group by course → competency
   const byCurso = {};
@@ -13559,12 +13675,24 @@ function renderR2() {
     byCurso[key].comps[ev.compCode].vals.push(ev.val);
   });
 
+  // Agrupación ad-hoc propia (scope 'r2general'): solo tiene sentido con UN
+  // curso específico escogido, igual que en R1 General.
+  const cursosEnVista = Object.keys(byCurso);
+  let escalaUnica = null;
+  if (cursoVal && cursosEnVista.length) {
+    escalaUnica = resolverEscalaParaCurso(cursosEnVista[0]);
+    _r1AsegurarAgrupacion('r2general', escalaUnica);
+  }
+  _r1AgruparEscalaActual.r2general = escalaUnica;
+  if (resumenEl) resumenEl.textContent = escalaUnica ? _r1ResumenAgrupacion('r2general') : '';
+  if (document.getElementById('modal-r1-agrupar')?.classList.contains('open') && _r1AgruparScopeActual === 'r2general') _r1PintarModalAgrupar();
+
   let html = '';
   const csvRows=[];
   let csvHeaderEscrito = false;
   Object.values(byCurso).sort((a,b)=>a.codigo.localeCompare(b.codigo)).forEach(curso=>{
     const escala = resolverEscalaParaCurso(curso.id);
-    const columnas = construirColumnasNivel(escala);
+    const columnas = (escalaUnica && escala?.id === escalaUnica.id) ? construirColumnasNivelAdHoc('r2general', escala) : construirColumnasNivel(escala);
     if (!csvHeaderEscrito) { csvRows.push(['Curso','Código','Competencia','Descripción', ...columnas.map(c=>c.label), 'Total','Avg']); csvHeaderEscrito = true; }
     const nEst = new Set(avaluos.filter(a=>a.cursoId===curso.id).map(a=>a.estudianteId||a.estudiante)).size;
     const cursoAvg = _avgNivel(Object.values(curso.comps).flatMap(c=>c.vals));
@@ -13593,6 +13721,428 @@ function renderR2() {
   });
   el.innerHTML = html;
   _reportCSVData = csvRows; _reportCSVName = 'R2_logro_curso.csv';
+
+  // Título de varias líneas para la exportación Word/PDF (mismo patrón de
+  // R1 General).
+  _reportExportTituloLineas = [
+    { text: 'Informe de Logro por Curso', size: 26, bold: true, color: '1B365D' },
+    { text: cursoVal ? (db.cursos.find(c=>c.id===cursoVal)?.codigo || cursoVal) : 'Todos los Cursos', size: 22, bold: true, color: '1B365D' },
+    { text: _periodoLabel(aniosSel, filterTerm), size: 16, italic: true, color: '666666' },
+  ];
+}
+
+// ── R2 · Informe Focalizado — enfoque por LAO(s) o Criterio(s) de rúbrica
+// de un curso específico, con la misma comparativa "estilo panel" de R1
+// (tabla + gráfica, barra %, Serie %/promedio corregida — ver sexto
+// ajuste de R1). Dos drop-downs independientes (en vez de tres, porque R2
+// no tiene dominios/competencias — solo LAOs y, si aplica, sus criterios
+// de rúbrica), con la misma activación mutua.
+let _r2CriterioLaoMap = {}; // critId (posible sufijo __compId) → laoId de donde viene, para _r2EvalsParaFoco
+function _r2EnfoqueTipoActivo() {
+  if (multiSelectValues('r2-focal-laos').length) return 'lao';
+  if (multiSelectValues('r2-focal-criterios').length) return 'criterio';
+  return null;
+}
+function _r2PoblarFocalObjetivo() {
+  const cursoVal = autocompleteValue('r2-curso');
+  let opcLaos = [], opcCriterios = [];
+  _r2CriterioLaoMap = {};
+  if (cursoVal) { // "Todos los cursos" no aplica al foco — se necesita uno específico
+    const laosDelCurso = (db.laos || []).filter(l => l.cursoId === cursoVal);
+    const tieneDirecta = (db.avaluos || []).some(a => a.cursoId === cursoVal && a.laoId === laoDirectaCursoId(cursoVal));
+    const candidatos = laosDelCurso.slice();
+    if (tieneDirecta) candidatos.push({ id: laoDirectaCursoId(cursoVal), nombre: 'Evaluación Directa del Curso', cursoId: cursoVal });
+    candidatos.forEach(lao => {
+      opcLaos.push({ value: lao.id, label: lao.nombre });
+      const rubrica = lao.id === laoDirectaCursoId(cursoVal)
+        ? resolverRubricaDirectaCurso(cursoVal)?.rubrica
+        : (db.rubricas || []).find(r => r.laoId === lao.id);
+      (rubrica?.criterios || []).forEach(cr => {
+        opcCriterios.push({ value: cr.id, label: lao.nombre + ' · ' + (cr.codigo ? cr.codigo + ': ' : '') + (cr.nombre || '(sin nombre)') });
+        _r2CriterioLaoMap[cr.id] = lao.id;
+      });
+    });
+  }
+  // Purga selecciones obsoletas (p.ej. tras cambiar de curso) ANTES de
+  // decidir cuál drop-down queda activo — mismo fix que en R1.
+  const purgar = (id, opciones) => {
+    const st = _msState[id];
+    if (st) st.values = st.values.filter(v => opciones.some(o => String(o.value) === String(v)));
+  };
+  purgar('r2-focal-laos', opcLaos);
+  purgar('r2-focal-criterios', opcCriterios);
+  const activo = _r2EnfoqueTipoActivo();
+  multiSelectBuild('r2-focal-laos', opcLaos, {
+    emptyLabel: opcLaos.length ? 'Ningún LAO escogido' : 'Sin LAOs con datos en este curso',
+    defaultAll: false, disabled: !!activo && activo !== 'lao',
+    onChange: () => renderR2Focal(),
+  });
+  multiSelectBuild('r2-focal-criterios', opcCriterios, {
+    emptyLabel: opcCriterios.length ? 'Ningún criterio escogido' : 'Sin criterios de rúbrica en este curso',
+    defaultAll: false, disabled: !!activo && activo !== 'criterio',
+    onChange: () => renderR2Focal(),
+  });
+}
+// Evaluaciones que corresponden al foco (LAO o criterio) elegido, a partir
+// de los avalúos ya filtrados por curso/año/trimestre. Mismo patrón que
+// _evalsParaFoco de R1 para el caso "criterio" (av.criteriosResp, con el
+// sufijo __compId cuando un criterio aporta a varias competencias).
+function _r2EvalsParaFoco(avaluosScope, foco) {
+  if (foco.tipo === 'lao') {
+    return _allEvals(avaluosScope.filter(av => av.laoId === foco.valor));
+  }
+  if (foco.tipo === 'criterio') {
+    const laoId = _r2CriterioLaoMap[foco.valor];
+    const out = [];
+    avaluosScope.filter(av => av.laoId === laoId).forEach(av => {
+      const resp = av.criteriosResp || {};
+      Object.entries(resp).forEach(([k, v]) => {
+        if (v === '' || v === undefined || v === null) return;
+        if (k.split('__')[0] !== foco.valor) return;
+        const val = nvValor(v);
+        if (val === undefined) return;
+        out.push({ val, nivel: String(v), cursoId: av.cursoId, semestre: av.semestre, avaluoId: av.id });
+      });
+    });
+    return out;
+  }
+  return [];
+}
+let _r2FocalChartTipos = { barra: true, serie: true };
+function r2FocalToggleChart(tipo, checked) { _r2FocalChartTipos[tipo] = checked; renderR2Focal(); }
+let _r2FocalSerieMetric = 'pct';
+function r2FocalCambiarSerieMetric(v) { _r2FocalSerieMetric = v === 'avg' ? 'avg' : 'pct'; renderR2Focal(); }
+let _r2FocalTablaExport = null;
+function r2FocalDescargarTabla(formato) {
+  if (!_r2FocalTablaExport) return;
+  const d = _r2FocalTablaExport;
+  _descargarTablaPanel(d.tituloLineas, d.headers, d.rows, d.nombre, formato);
+}
+function renderR2Focal() {
+  _r2PoblarFocalObjetivo();
+  document.getElementById('rpt-export-title').textContent = 'R2 · Informe Focalizado';
+  _reportExportTituloLineas = null;
+  _r2PintarPeriodoBanner();
+  const body = document.getElementById('r2-focal-body');
+  const resumenEl = document.getElementById('r2-focal-agrup-resumen');
+  const cursoVal = autocompleteValue('r2-curso');
+  const tipo = _r2EnfoqueTipoActivo() || 'lao';
+  const focos = tipo === 'lao' ? multiSelectSelected('r2-focal-laos') : multiSelectSelected('r2-focal-criterios');
+
+  const limpiar = (msgHtml) => {
+    body.innerHTML = msgHtml;
+    if (resumenEl) resumenEl.textContent = '';
+    _r1AgruparEscalaActual.r2focal = null;
+    _reportCSVData = []; _reportCSVName = 'R2_focalizado.csv'; _r2FocalTablaExport = null;
+  };
+
+  if (cursoVal === null) {
+    limpiar('<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Primero escoge un curso arriba.</p></div>');
+    return;
+  }
+  if (!cursoVal) {
+    limpiar('<div class="rpt-empty-hint"><div class="dash-empty-icon">🎯</div><p>El Informe Focalizado trabaja un curso a la vez — escoge un curso específico (no "Todos los cursos") arriba.</p></div>');
+    return;
+  }
+
+  const aniosSel   = multiSelectValues('r2-ay');
+  const filterTerm = document.getElementById('r2-term')?.value||'';
+  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>av.cursoId===cursoVal);
+  avaluos = avaluos.filter(av=>{
+    const t=parseTermString(_getSemestre(av)); if(!t) return false;
+    if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
+    if(filterTerm && t.term!==filterTerm) return false; return true;
+  });
+
+  const escala = resolverEscalaParaCurso(cursoVal);
+  _r1AsegurarAgrupacion('r2focal', escala);
+  _r1AgruparEscalaActual.r2focal = escala;
+  if (resumenEl) resumenEl.textContent = _r1ResumenAgrupacion('r2focal');
+  if (document.getElementById('modal-r1-agrupar')?.classList.contains('open') && _r1AgruparScopeActual === 'r2focal') _r1PintarModalAgrupar();
+  const columnas = construirColumnasNivelAdHoc('r2focal', escala);
+
+  multiSelectBuild('r2-focal-niveles', columnas.map((c, i) => ({ value: i, label: c.label })), {
+    allLabel: 'Todos los niveles/grupos', defaultAll: true, onChange: () => renderR2Focal(),
+  });
+  const nivelesSelIdx = multiSelectValues('r2-focal-niveles').map(Number).filter(i => columnas[i]);
+
+  if (!focos.length) {
+    const nombreFoco = tipo === 'lao' ? 'uno o más LAOs' : 'uno o más criterios';
+    body.innerHTML = `<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escoge ${nombreFoco} arriba para ver su distribución de niveles.</p></div>`;
+    _reportCSVData = []; _reportCSVName = 'R2_focalizado.csv'; _r2FocalTablaExport = null; return;
+  }
+  if (!nivelesSelIdx.length) {
+    body.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escoge al menos un nivel/grupo a comparar arriba.</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R2_focalizado.csv'; _r2FocalTablaExport = null; return;
+  }
+
+  const porFoco = focos.map(f => {
+    const evals = _r2EvalsParaFoco(avaluos, { tipo, valor: f.value });
+    const vals = evals.map(e => e.val);
+    const total = vals.length, avg = total ? _avgNivel(vals) : null;
+    const counts = contarEnColumnas(vals, columnas);
+    const pcts = counts.map(n => total ? Math.round(n / total * 100) : 0);
+    return { foco: f, evals, vals, total, avg, counts, pcts };
+  });
+
+  if (!porFoco.some(p => p.total)) {
+    body.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin avalúos para los enfoques escogidos con los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R2_focalizado.csv'; _r2FocalTablaExport = null; return;
+  }
+
+  const headers = ['Enfoque', ...nivelesSelIdx.map(i => columnas[i].label), 'Total', 'Avg'];
+  const rows = porFoco.map(p => [
+    p.foco.label,
+    ...nivelesSelIdx.map(i => `${p.counts[i]} (${p.pcts[i]}%)`),
+    p.total, p.avg !== null ? p.avg.toFixed(2) : '—',
+  ]);
+  const tablaHtml = `<div class="rpt-focal-panel-head"><span>📋 Tabla</span>
+    <span><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem" onclick="r2FocalDescargarTabla('word')">⬇ Word</button>
+    <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem" onclick="r2FocalDescargarTabla('pdf')">⬇ PDF</button></span></div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>${headers.map(h=>`<th>${_alEsc(h)}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r=>`<tr>${r.map(v=>`<td>${_alEsc(String(v))}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>`;
+
+  // ── Panel de gráfica — mismo patrón de R1 Focalizado tras su sexto
+  // ajuste (Serie "promedio" no se parte por nivel/grupo). ──
+  const _aniosDeEvals = (evals) => [...new Set(evals.map(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    return av ? getAcademicYear(_getSemestre(av)) : null;
+  }).filter(Boolean))].sort((a, b) => +a - +b).map(String);
+  const _evalsPorAnio = (evals, anios) => anios.map(ay => evals.filter(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    return String(getAcademicYear(av ? _getSemestre(av) : ev.semestre)) === ay;
+  }));
+
+  let xLabels, series;
+  let xLabelsAvgUnFoco = null, serieAvgUnFoco = null;
+  let xLabelsAvgMultiFoco = null, serieAvgMultiFoco = null;
+  if (focos.length === 1) {
+    const p = porFoco[0];
+    const anios = aniosSel.length ? aniosSel.slice().sort((a,b)=>+a-+b) : _aniosDeEvals(p.evals);
+    const evalsPorAnio = _evalsPorAnio(p.evals, anios);
+    series = nivelesSelIdx.map(i => {
+      const col = columnas[i];
+      const pct = evalsPorAnio.map(evsAno => {
+        if (!evsAno.length) return null;
+        const enCol = evsAno.filter(ev => col.valores.includes(Math.round(ev.val)));
+        return Math.round(enCol.length / evsAno.length * 100);
+      });
+      return { label: col.label, pct };
+    });
+    xLabels = anios.map(ay => 'AY' + ay);
+    xLabelsAvgUnFoco = xLabels;
+    serieAvgUnFoco = [{ label: p.foco.label, avg: evalsPorAnio.map(evsAno => evsAno.length ? _avgNivel(evsAno.map(e => e.val)) : null) }];
+  } else {
+    xLabels = porFoco.map(p => p.foco.label);
+    series = nivelesSelIdx.map(i => ({ label: columnas[i].label, pct: porFoco.map(p => p.pcts[i]) }));
+    const aniosMulti = aniosSel.length ? aniosSel.slice().sort((a,b)=>+a-+b) : _aniosDeEvals(porFoco.flatMap(p => p.evals));
+    xLabelsAvgMultiFoco = aniosMulti.map(ay => 'AY' + ay);
+    serieAvgMultiFoco = porFoco.map(p => ({
+      label: p.foco.label,
+      avg: _evalsPorAnio(p.evals, aniosMulti).map(evsAno => evsAno.length ? _avgNivel(evsAno.map(e => e.val)) : null),
+    }));
+  }
+
+  const metricEsAvg = _r2FocalSerieMetric === 'avg';
+  let serieAplica, xLabelsSerie, seriesSerie, serieMetricEfectivo, selectorMetricaVisible;
+  if (focos.length === 1) {
+    serieAplica = xLabels.length > 1;
+    serieMetricEfectivo = _r2FocalSerieMetric;
+    xLabelsSerie = metricEsAvg ? xLabelsAvgUnFoco : xLabels;
+    seriesSerie = metricEsAvg ? serieAvgUnFoco : series;
+    selectorMetricaVisible = true;
+  } else {
+    serieAplica = !!(xLabelsAvgMultiFoco && xLabelsAvgMultiFoco.length > 1);
+    serieMetricEfectivo = 'avg';
+    xLabelsSerie = xLabelsAvgMultiFoco;
+    seriesSerie = serieAvgMultiFoco;
+    selectorMetricaVisible = false;
+  }
+  const serieActiva = serieAplica && _r2FocalChartTipos.serie;
+  const barraYSerieChocan = focos.length > 1 && serieActiva;
+  const barraActiva = _r2FocalChartTipos.barra && !barraYSerieChocan;
+
+  const nombreArchivoBase = 'R2_focalizado_' + (focos.length === 1 ? _nombreArchivoSeguro(focos[0].label) : 'comparativa');
+  const graficaHtml = `<div class="rpt-focal-panel-head"><span>📈 Gráfica${focos.length > 1 ? ' — comparativa entre enfoques' : ' — comparativa por año académico'}</span></div>
+    <div class="rpt-focal-chart-toggle">
+      <label><input type="checkbox" ${(!barraYSerieChocan && _r2FocalChartTipos.barra)?'checked':''} ${barraYSerieChocan?'disabled':''} onchange="r2FocalToggleChart('barra',this.checked)"> Barra</label>
+      ${serieAplica ? `<label><input type="checkbox" ${_r2FocalChartTipos.serie?'checked':''} onchange="r2FocalToggleChart('serie',this.checked)"> Serie</label>
+      ${selectorMetricaVisible ? `<select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r2FocalCambiarSerieMetric(this.value)" ${_r2FocalChartTipos.serie?'':'disabled'}>
+        <option value="pct" ${_r2FocalSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
+        <option value="avg" ${_r2FocalSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
+      </select>` : `<span style="margin-left:6px;font-size:0.68rem;color:#797A7D">— promedio de la puntuación, por año académico</span>`}
+      ${barraYSerieChocan ? `<span style="margin-left:6px;font-size:0.68rem;color:#797A7D">(Barra desactivada: ejes distintos)</span>` : ''}` : ''}
+    </div>
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: barraActiva, serie: false, nombreArchivo: nombreArchivoBase })}
+    ${serieActiva ? _rptHtmlComparativaMulti(xLabelsSerie, seriesSerie, { barra: false, serie: true, serieMetric: serieMetricEfectivo, nombreArchivo: nombreArchivoBase }) : ''}`;
+
+  body.innerHTML = `<div class="rpt-focal-grid">
+    <div class="rpt-focal-panel">${tablaHtml}</div>
+    <div class="rpt-focal-panel">${graficaHtml}</div>
+  </div>`;
+
+  _reportCSVData = [headers, ...rows];
+  _reportCSVName = 'R2_focalizado.csv';
+  const periodoTxt = _periodoLabel(aniosSel, filterTerm);
+  _r2FocalTablaExport = {
+    tituloLineas: [
+      { text: 'Informe Focalizado — Avalúo Competencias', size: 24, bold: true, color: '1B365D' },
+      { text: db.cursos.find(c=>c.id===cursoVal)?.codigo || cursoVal, size: 20, bold: true, color: '1B365D' },
+      { text: periodoTxt, size: 14, italic: true, color: '666666' },
+    ],
+    headers, rows,
+    nombre: 'R2_focalizado_' + _nombreArchivoSeguro(cursoVal),
+  };
+}
+
+// ── R2 · Comparativo entre Secciones — eje x = las secciones del curso
+// escogido dentro del período filtrado. No hay un segundo eje en juego
+// (a diferencia del Informe Focalizado con varios enfoques), así que
+// Barra y Serie comparten siempre el mismo eje x. ──────────────────────
+let _r2SecChartTipos = { barra: true, serie: true };
+function r2SeccionesToggleChart(tipo, checked) { _r2SecChartTipos[tipo] = checked; renderR2Secciones(); }
+let _r2SecSerieMetric = 'pct';
+function r2SeccionesCambiarSerieMetric(v) { _r2SecSerieMetric = v === 'avg' ? 'avg' : 'pct'; renderR2Secciones(); }
+let _r2SeccionesTablaExport = null;
+function r2SeccionesDescargarTabla(formato) {
+  if (!_r2SeccionesTablaExport) return;
+  const d = _r2SeccionesTablaExport;
+  _descargarTablaPanel(d.tituloLineas, d.headers, d.rows, d.nombre, formato);
+}
+function renderR2Secciones() {
+  document.getElementById('rpt-export-title').textContent = 'R2 · Comparativo entre Secciones';
+  _reportExportTituloLineas = null;
+  _r2PintarPeriodoBanner();
+  const body = document.getElementById('r2-secciones-body');
+  const resumenEl = document.getElementById('r2-sec-agrup-resumen');
+  const cursoVal = autocompleteValue('r2-curso');
+
+  const limpiar = (msgHtml) => {
+    body.innerHTML = msgHtml;
+    if (resumenEl) resumenEl.textContent = '';
+    _r1AgruparEscalaActual.r2secciones = null;
+    _reportCSVData = []; _reportCSVName = 'R2_secciones.csv'; _r2SeccionesTablaExport = null;
+  };
+
+  if (cursoVal === null) {
+    limpiar('<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Primero escoge un curso arriba.</p></div>');
+    return;
+  }
+  if (!cursoVal) {
+    limpiar('<div class="rpt-empty-hint"><div class="dash-empty-icon">🎯</div><p>El Comparativo entre Secciones trabaja un curso a la vez — escoge un curso específico (no "Todos los cursos") arriba.</p></div>');
+    return;
+  }
+
+  const aniosSel   = multiSelectValues('r2-ay');
+  const filterTerm = document.getElementById('r2-term')?.value||'';
+  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>av.cursoId===cursoVal);
+  avaluos = avaluos.filter(av=>{
+    const t=parseTermString(_getSemestre(av)); if(!t) return false;
+    if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
+    if(filterTerm && t.term!==filterTerm) return false; return true;
+  });
+
+  const escala = resolverEscalaParaCurso(cursoVal);
+  _r1AsegurarAgrupacion('r2secciones', escala);
+  _r1AgruparEscalaActual.r2secciones = escala;
+  if (resumenEl) resumenEl.textContent = _r1ResumenAgrupacion('r2secciones');
+  if (document.getElementById('modal-r1-agrupar')?.classList.contains('open') && _r1AgruparScopeActual === 'r2secciones') _r1PintarModalAgrupar();
+  const columnas = construirColumnasNivelAdHoc('r2secciones', escala);
+
+  multiSelectBuild('r2-sec-niveles', columnas.map((c, i) => ({ value: i, label: c.label })), {
+    allLabel: 'Todos los niveles/grupos', defaultAll: true, onChange: () => renderR2Secciones(),
+  });
+  const nivelesSelIdx = multiSelectValues('r2-sec-niveles').map(Number).filter(i => columnas[i]);
+
+  if (!nivelesSelIdx.length) {
+    body.innerHTML = '<div class="rpt-empty-hint"><div class="dash-empty-icon">🔎</div><p>Escoge al menos un nivel/grupo a comparar arriba.</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R2_secciones.csv'; _r2SeccionesTablaExport = null; return;
+  }
+
+  // Una "columna" x por cada secciónId presente entre los avalúos
+  // filtrados (sección + semestre, para no confundir secciones del mismo
+  // número en años/trimestres distintos).
+  const porSeccion = {};
+  _allEvals(avaluos).forEach(ev => {
+    const av = avaluos.find(a => a.id === ev.avaluoId);
+    const secId = av?.seccionId || 'sin-seccion';
+    if (!porSeccion[secId]) {
+      const sec = (db.secciones||[]).find(s=>s.id===secId);
+      porSeccion[secId] = { label: sec ? `Sec. ${sec.numero} (${sec.semestre})` : (av?.seccion ? `Sec. ${av.seccion}` : 'Sin sección'), evals: [] };
+    }
+    porSeccion[secId].evals.push(ev);
+  });
+  const secciones = Object.values(porSeccion).sort((a,b)=>a.label.localeCompare(b.label));
+
+  if (!secciones.length) {
+    body.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin avalúos para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R2_secciones.csv'; _r2SeccionesTablaExport = null; return;
+  }
+
+  const porSeccionCalc = secciones.map(s => {
+    const vals = s.evals.map(e => e.val);
+    const total = vals.length, avg = total ? _avgNivel(vals) : null;
+    const counts = contarEnColumnas(vals, columnas);
+    const pcts = counts.map(n => total ? Math.round(n / total * 100) : 0);
+    return { ...s, vals, total, avg, counts, pcts };
+  });
+
+  const headers = ['Sección', ...nivelesSelIdx.map(i => columnas[i].label), 'Total', 'Avg'];
+  const rows = porSeccionCalc.map(s => [
+    s.label,
+    ...nivelesSelIdx.map(i => `${s.counts[i]} (${s.pcts[i]}%)`),
+    s.total, s.avg !== null ? s.avg.toFixed(2) : '—',
+  ]);
+  const tablaHtml = `<div class="rpt-focal-panel-head"><span>📋 Tabla</span>
+    <span><button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem" onclick="r2SeccionesDescargarTabla('word')">⬇ Word</button>
+    <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem" onclick="r2SeccionesDescargarTabla('pdf')">⬇ PDF</button></span></div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>${headers.map(h=>`<th>${_alEsc(h)}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r=>`<tr>${r.map(v=>`<td>${_alEsc(String(v))}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>`;
+
+  // ── Panel de gráfica: Barra siempre por % (por nivel/grupo); Serie por
+  // % (igual) o por el promedio real de todas las evaluaciones de cada
+  // sección (UNA sola línea — no partida por nivel/grupo, mismo fix que
+  // el sexto ajuste de R1). Mismo eje x en ambos casos (las secciones).
+  const xLabels = porSeccionCalc.map(s => s.label);
+  const series = nivelesSelIdx.map(i => ({ label: columnas[i].label, pct: porSeccionCalc.map(s => s.pcts[i]) }));
+  const serieAvg = [{ label: 'Promedio', avg: porSeccionCalc.map(s => s.avg) }];
+
+  const serieAplica = xLabels.length > 1;
+  const metricEsAvg = _r2SecSerieMetric === 'avg';
+  const seriesSerie = metricEsAvg ? serieAvg : series;
+  const serieActiva = serieAplica && _r2SecChartTipos.serie;
+
+  const graficaHtml = `<div class="rpt-focal-panel-head"><span>📈 Gráfica — comparativa entre secciones</span></div>
+    <div class="rpt-focal-chart-toggle">
+      <label><input type="checkbox" ${_r2SecChartTipos.barra?'checked':''} onchange="r2SeccionesToggleChart('barra',this.checked)"> Barra</label>
+      ${serieAplica ? `<label><input type="checkbox" ${_r2SecChartTipos.serie?'checked':''} onchange="r2SeccionesToggleChart('serie',this.checked)"> Serie</label>
+      <select class="dash-select" style="margin-left:6px;padding:2px 6px;font-size:0.72rem;width:auto" onchange="r2SeccionesCambiarSerieMetric(this.value)" ${_r2SecChartTipos.serie?'':'disabled'}>
+        <option value="pct" ${_r2SecSerieMetric==='pct'?'selected':''}>Serie: % de evaluaciones</option>
+        <option value="avg" ${_r2SecSerieMetric==='avg'?'selected':''}>Serie: promedio de la puntuación</option>
+      </select>` : ''}
+    </div>
+    ${_rptHtmlComparativaMulti(xLabels, series, { barra: _r2SecChartTipos.barra, serie: false, nombreArchivo: 'R2_secciones' })}
+    ${serieActiva ? _rptHtmlComparativaMulti(xLabels, seriesSerie, { barra: false, serie: true, serieMetric: metricEsAvg?'avg':'pct', nombreArchivo: 'R2_secciones' }) : ''}`;
+
+  body.innerHTML = `<div class="rpt-focal-grid">
+    <div class="rpt-focal-panel">${tablaHtml}</div>
+    <div class="rpt-focal-panel">${graficaHtml}</div>
+  </div>`;
+
+  _reportCSVData = [headers, ...rows];
+  _reportCSVName = 'R2_secciones.csv';
+  const periodoTxt = _periodoLabel(aniosSel, filterTerm);
+  _r2SeccionesTablaExport = {
+    tituloLineas: [
+      { text: 'Comparativo entre Secciones — Avalúo Competencias', size: 24, bold: true, color: '1B365D' },
+      { text: db.cursos.find(c=>c.id===cursoVal)?.codigo || cursoVal, size: 20, bold: true, color: '1B365D' },
+      { text: periodoTxt, size: 14, italic: true, color: '666666' },
+    ],
+    headers, rows,
+    nombre: 'R2_secciones_' + _nombreArchivoSeguro(cursoVal),
+  };
 }
 
 // ── R3 — Student Report ───────────────────────────────────────
