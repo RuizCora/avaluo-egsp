@@ -2151,6 +2151,10 @@
       <label class="btn btn-outline btn-sm" style="cursor:pointer" title="Importar datos desde un JSON de respaldo">
         ⬆ Importar JSON<input type="file" accept=".json" style="display:none" onchange="importarJSON(this)">
       </label>
+      <span id="bd-admin-test-tools" style="display:none">
+        <button class="btn btn-outline btn-sm" onclick="sembrarDatosPruebaAlcanceAvaluo()" title="Crea un curso/sección ficticios compartidos entre MPH-General y MPH-Epidemiología para probar el Alcance de Avalúo">🧪 Sembrar datos de prueba</button>
+        <button class="btn btn-outline btn-sm" onclick="eliminarDatosPruebaAlcanceAvaluo()" title="Elimina el curso/sección de prueba creados arriba">🗑️ Eliminar datos de prueba</button>
+      </span>
     </div>
   </div>
   <div class="card" style="padding:16px 20px;margin-bottom:16px">
@@ -10116,6 +10120,84 @@ function guardarCompsEstudiante() {
   notify('Competencias actualizadas para este estudiante ✓');
 }
 
+// ──────────────── Datos de prueba para probar el alcance de Avalúo ────────────────
+// Solo para que un administrador pueda PROBAR el toggle en la app real (no
+// en una simulación), sin tocar ningún dato real. Crea un curso ficticio
+// compartido entre DOS programas de especialidad no-Core YA REALES del
+// catálogo (no inventa programas ni competencias nuevas): reutiliza
+// competencias que ya existen en el banco de MPH-General y MPH-Epidemiología,
+// para que lo que se vea al probar sea fiel a cómo luce un caso real. (El
+// "Core" de cada programa — MPH Core — no se mezcla aquí a propósito: en
+// este modelo las competencias núcleo se cubren en los cursos dedicados de
+// Core, no dentro de un curso electivo compartido como este; este dato de
+// prueba solo ejercita la unión/alcance ENTRE especialidades no-Core.)
+// Todo queda claramente marcado como "DATO DE PRUEBA" en nombres/códigos, y
+// eliminarDatosPruebaAlcanceAvaluo() lo retira por completo sin dejar rastro.
+const DEMO_ALCANCE_CURSO_ID = 'c_DEMO_ALCANCE_9001';
+function sembrarDatosPruebaAlcanceAvaluo() {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede sembrar datos de prueba', '🔒'); return; }
+  if ((db.cursos || []).some(c => c.id === DEMO_ALCANCE_CURSO_ID)) {
+    notify('Los datos de prueba ya existen — en Avalúo, busca el curso "DEMO 9001"', 'ℹ️');
+    return;
+  }
+  const progGeneral = (db.programas || []).find(p => p && p.nombre === 'MPH-General');
+  const progEpid = (db.programas || []).find(p => p && p.nombre === 'MPH-Epidemiología');
+  if (!progGeneral || !progEpid) { notify('No se encontraron los programas MPH-General/MPH-Epidemiología en el catálogo', '⚠️'); return; }
+  if (!confirm('Esto crea un curso, competencias vinculadas y una sección ficticios (claramente marcados "DATO DE PRUEBA") para probar el alcance de Avalúo entre MPH-General y MPH-Epidemiología. No toca ningún dato real. ¿Continuar?')) return;
+
+  const curso = {
+    id: DEMO_ALCANCE_CURSO_ID, codigo: 'DEMO 9001',
+    nombre: '🧪 DATO DE PRUEBA — curso compartido para probar Alcance de Avalúo',
+    departamento: 'Social Sciences', creditos: '3',
+    programa: progGeneral.nombre, programaId: progGeneral.id,
+    programas: [progGeneral.nombre, progEpid.nombre],
+    programasIds: [progGeneral.id, progEpid.id],
+  };
+  db.cursos.push(curso);
+
+  // Reutiliza 2 competencias reales de cada programa (las primeras del banco
+  // para cada uno), tal cual ya existen — no se inventa texto nuevo.
+  const compsGeneral = db.bancoCompetencias.filter(bc => bc.programa === progGeneral.nombre).slice(0, 2);
+  const compsEpid = db.bancoCompetencias.filter(bc => bc.programa === progEpid.nombre).slice(0, 2);
+  [...compsGeneral, ...compsEpid].forEach(bc => {
+    db.competencias.push({
+      id: 'comp_demo_alcance_' + bc.num, cursoId: curso.id, codigo: 'C' + bc.num,
+      descripcion: bc.texto, tipo: 'rubrica', peso: '',
+      fechaCreacion: new Date().toISOString(),
+    });
+  });
+
+  db.secciones.push({
+    id: 'sec_demo_alcance_1', cursoId: curso.id, numero: '900D', semestre: '2026 T3',
+    profesor: 'Prof. Demo (dato de prueba)', profesorEmail: 'demo.prueba@upr.edu',
+    estudiantes: [
+      { id: 'est_demo_alcance_1', nombre: 'Estudiante Prueba 1 (MPH-General)' },
+      { id: 'est_demo_alcance_2', nombre: 'Estudiante Prueba 2 (MPH-General)' },
+      { id: 'est_demo_alcance_3', nombre: 'Estudiante Prueba 3 (MPH-Epidemiología)' },
+      { id: 'est_demo_alcance_4', nombre: 'Estudiante Prueba 4 (MPH-Epidemiología)' },
+    ],
+  });
+
+  saveDB();
+  if (typeof populateCursoSelects === 'function') populateCursoSelects();
+  if (typeof renderBaseDatos === 'function') renderBaseDatos();
+  notify('✅ Datos de prueba creados — en Avalúo, elige el curso "DEMO 9001", sección 900D', '🧪');
+}
+
+function eliminarDatosPruebaAlcanceAvaluo() {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar datos de prueba', '🔒'); return; }
+  if (!(db.cursos || []).some(c => c.id === DEMO_ALCANCE_CURSO_ID)) { notify('No hay datos de prueba que eliminar', 'ℹ️'); return; }
+  if (!confirm('Esto borra el curso, competencias, sección y evaluaciones del dato de prueba "DEMO 9001". No afecta ningún dato real. ¿Continuar?')) return;
+  db.cursos = (db.cursos || []).filter(c => c.id !== DEMO_ALCANCE_CURSO_ID);
+  db.competencias = (db.competencias || []).filter(c => c.cursoId !== DEMO_ALCANCE_CURSO_ID);
+  db.secciones = (db.secciones || []).filter(s => s.cursoId !== DEMO_ALCANCE_CURSO_ID);
+  db.avaluos = (db.avaluos || []).filter(a => a.cursoId !== DEMO_ALCANCE_CURSO_ID);
+  saveDB();
+  if (typeof populateCursoSelects === 'function') populateCursoSelects();
+  if (typeof renderBaseDatos === 'function') renderBaseDatos();
+  notify('🗑️ Datos de prueba eliminados', '✅');
+}
+
 
 // ======================== FASE R3: RÚBRICA DE EVALUACIÓN DIRECTA ========================
 // La modalidad 'directa_con_rubrica' evalúa el "LAO grande" del curso (el LAO
@@ -12095,6 +12177,9 @@ let avEstudianteActual = null;
 
 // ======================== BASE DE DATOS ========================
 function renderBaseDatos() {
+  const bdAdminTools = document.getElementById('bd-admin-test-tools');
+  if (bdAdminTools) bdAdminTools.style.display = currentUser?.rol === 'admin' ? '' : 'none';
+
   // ── Populate Program filter ───────────────────────────────────
   const progSel = document.getElementById('filtro-bd-programa');
   if (progSel) {
