@@ -5339,6 +5339,39 @@ function _ensureProgramCatalogSeeded() {
   });
   if (changed) saveDB();
   _ensureFaseA_ProgramasEstudiantes();
+  _ensureProgramaCoreLinks();
+}
+
+// Revisión arquitectónica oct 2026 (punto 1 de Edgardo): un programa de
+// especialidad MPH/DrPH no se compone solo de sus "Specialty Competencies" —
+// el estudiante debe desarrollar también las competencias núcleo (MPH
+// Core / DrPH Core) compartidas por todos los programas de ese tipo. Se
+// modela con un campo real y editable en el catálogo (coreProgramaId),
+// no hardcodeado, para que sobreviva si se agregan programas nuevos.
+// Vincula por nombre canónico (post Fase A) — idempotente, no pisa un
+// vínculo ya puesto a mano desde la UI del catálogo.
+const PROGRAMAS_CORE_MPH_LINK = [
+  'MPH-General', 'MPH-Bioestadística', 'MPH-Epidemiología',
+  'MPH-Salud Ambiental', 'MPH-Gerontología', 'MPHE-Educación en Salud Pública',
+];
+const PROGRAMAS_CORE_DRPH_LINK = [
+  'DrPH-Salud Ambiental', 'DrPH-Análisis de Sistemas de Salud y Gerencia',
+  'DrPH-Determinantes Sociales de la Salud',
+];
+function _ensureProgramaCoreLinks() {
+  let changed = false;
+  const mphCore  = db.programas.find(p => p.nombre === 'MPH Core');
+  const drphCore = db.programas.find(p => p.nombre === 'DrPH Core');
+  const vincular = (nombres, core) => {
+    if (!core) return;
+    nombres.forEach(nombre => {
+      const prog = db.programas.find(p => p.nombre === nombre);
+      if (prog && prog.coreProgramaId === undefined) { prog.coreProgramaId = core.id; changed = true; }
+    });
+  };
+  vincular(PROGRAMAS_CORE_MPH_LINK, mphCore);
+  vincular(PROGRAMAS_CORE_DRPH_LINK, drphCore);
+  if (changed) saveDB();
 }
 
 // ======================== FASE A: Programas de Estudiantes (Avalúo) ========================
@@ -6841,12 +6874,15 @@ function _ordenNumComp(a, b) {
   }
   return 0;
 }
-function _modeloRubricaPrograma(programa) {
-  const escala = resolverEscalaParaPrograma(programa);
+function _modeloRubricaPrograma(programaOPrograms, labelOpcional) {
+  const programas = Array.isArray(programaOPrograms) ? programaOPrograms : [programaOPrograms];
+  const programa = labelOpcional || programas[0]; // solo para título/nombre de archivo
+  const escala = resolverEscalaParaPrograma(programas[0]);
   const nivelesR = _nivelesRubricaDesdeEscala(escala);
   const metaId = _nivelMetaId(nivelesR);
-  const comps = (db.bancoCompetencias || []).filter(c => c.programa === programa).sort(_ordenNumComp);
-  const doms = dominiosDePrograma(programa);
+  const comps = (db.bancoCompetencias || []).filter(c => programas.includes(c.programa))
+    .filter((c,i,arr) => arr.findIndex(x=>x.id===c.id)===i).sort(_ordenNumComp);
+  const doms = programas.flatMap(p => dominiosDePrograma(p)).filter((d,i,arr) => arr.findIndex(x=>x.id===d.id)===i);
   const filaDe = (bc, cr) => ({
     compKey: bc.id,
     competencia: `${bc.num} ${bc.texto || ''}`.trim(),
@@ -6886,7 +6922,14 @@ function _modeloRubricaPrograma(programa) {
 function accionRubricaPrograma(programaId, accion) {
   const prog = (db.programas || []).find(p => p.id === programaId);
   if (!prog) return;
-  const m = _modeloRubricaPrograma(prog.nombre);
+  // Punto 1 de la revisión arquitectónica (oct 2026): las competencias que
+  // el estudiante debe desarrollar son las del programa de especialidad MÁS
+  // las del Core (MPH Core / DrPH Core) si este programa está vinculado a
+  // uno — la rúbrica del programa, al ser de cara al estudiante, combina
+  // ambas por default (ver _coreProgramaStringParaPrograma()).
+  const core = prog.coreProgramaId ? (db.programas || []).find(p => p.id === prog.coreProgramaId) : null;
+  const programasAIncluir = core ? [prog.nombre, core.nombre] : [prog.nombre];
+  const m = _modeloRubricaPrograma(programasAIncluir, core ? `${prog.nombre} + ${core.nombre}` : prog.nombre);
   if (m.vacia) { notify('Este programa no tiene competencias en el banco', '⚠️'); return; }
   if (accion === 'ver') verModeloRubrica(m, '');
   else if (accion === 'docx') descargarRubricaDocx(m);
@@ -15828,7 +15871,13 @@ const RUBRIC_LEVELS = [
 ];
 
 const PRELOADED_CURSOS = [
-  // ── MPH & MPHE Core (9 shared courses) ──────────────────────────────────
+  // ── MPH & MPHE Core (10 shared courses) ─────────────────────────────────
+  // SALP 6006 agregado en fase de revisión arquitectónica (oct 2026): aparece
+  // como primer curso repetido en TODAS las tablas de currículo MPH/MPHE del
+  // catálogo (General, Biostatistics, Epidemiology, Environmental Health,
+  // Gerontology, MPHE), igual que los otros 9 cursos núcleo. No lleva
+  // competencia alineada (ver _fixSalp6006SinCompetencias()).
+  { id:'c_SALP6006', codigo:'SALP 6006', nombre:'Introduction to Public Health',                                        departamento:'Social Sciences',       creditos:'3',               programa:'MPH/MPHE' },
   { id:'c_EPID6523', codigo:'EPID 6523', nombre:'Epidemiological Methodology',                                          departamento:'Epidemiology',          creditos:'4',      programa:'MPH/MPHE' },
   { id:'c_BIOE6525', codigo:'BIOE 6525', nombre:'Statistical Analysis',                                                 departamento:'Biostatistics',         creditos:'5',            programa:'MPH/MPHE' },
   { id:'c_SALP6250', codigo:'SALP 6250', nombre:'Applied Public Health Research Methods',                               departamento:'Social Sciences',       creditos:'3',               programa:'MPH/MPHE' },
@@ -16033,6 +16082,53 @@ const PRELOADED_CURSOS = [
   { id:'c_DDIT6537', codigo:'DDIT 6537', nombre:'Service Coordination', departamento:'Developmental Disabilities', creditos:'4', programa:'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana' },
   { id:'c_DDIT6539', codigo:'DDIT 6539', nombre:'Legislation and Public Policy in the Developmental Disabilities - Early Intervention Area', departamento:'Developmental Disabilities', creditos:'4', programa:'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana' },
   { id:'c_DDIT6535', codigo:'DDIT 6535', nombre:'Seminar in the Management of Conditions and Specific Risks', departamento:'Developmental Disabilities', creditos:'4', programa:'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana' },
+
+  // ── Auditoría completa del catálogo (punto 4/6, oct 2026) ────────────────
+  // Cursos que SÍ pertenecen al currículo de cada programa según el catálogo
+  // pero que todavía no tenían competencia alineada (capstones, prácticas
+  // supervisadas, seminarios de investigación doctoral, disertación). Se
+  // incluyen para que cuenten en créditos/reportes de nota; la Matriz de
+  // Pareo los muestra con la etiqueta "Sin competencia alineada" hasta que
+  // se decida si deben medir alguna.
+  { id:'c_SALP6997', codigo:'SALP 6997', nombre:'Integrative Experience in General Public Health', departamento:'Social Sciences', creditos:'5', programa:'MPH General' },
+  { id:'c_SALP6995', codigo:'SALP 6995', nombre:'Applied Practice Experience: General Public Health', departamento:'Social Sciences', creditos:'1', programa:'MPH General' },
+  { id:'c_SALP6999B', codigo:'SALP 6999', nombre:'Capstone Project in Public Health: Epidemiology and Biostatistics', departamento:'Social Sciences', creditos:'5', programa:'MPH Biostatistics' },
+  { id:'c_EPID6995B', codigo:'EPID 6995', nombre:'Applied Practice Experience: Epidemiology and Biostatistics', departamento:'Epidemiology', creditos:'1', programa:'MPH Biostatistics' },
+  { id:'c_SALP6999E', codigo:'SALP 6999', nombre:'Capstone Project in Public Health: Epidemiology and Biostatistics', departamento:'Social Sciences', creditos:'5', programa:'MPH Epidemiology' },
+  { id:'c_EPID6995E', codigo:'EPID 6995', nombre:'Applied Practice Experience: Epidemiology and Biostatistics', departamento:'Epidemiology', creditos:'1', programa:'MPH Epidemiology' },
+  { id:'c_SAAM6999', codigo:'SAAM 6999', nombre:'Capstone Project in Public Health: Environmental Health', departamento:'Environmental Health', creditos:'3', programa:'MPH Environmental Health' },
+  { id:'c_SAAM6995', codigo:'SAAM 6995', nombre:'Applied Practice Experience: Environmental Health', departamento:'Environmental Health', creditos:'3', programa:'MPH Environmental Health' },
+  { id:'c_GERO6997', codigo:'GERO 6997', nombre:'Integrative Experience in Public Health: Gerontology', departamento:'Gerontology', creditos:'5', programa:'MPH Gerontology' },
+  { id:'c_GERO6995', codigo:'GERO 6995', nombre:'Applied Practice Experience: Gerontology', departamento:'Gerontology', creditos:'1', programa:'MPH Gerontology' },
+  { id:'c_EDSA6997', codigo:'EDSA 6997', nombre:'Integrative Experience in Health Promotion and Health Education', departamento:'Health Education', creditos:'2', programa:'MPHE' },
+  { id:'c_EDSA6996', codigo:'EDSA 6996', nombre:'Supervised Practice in Health Promotion and Health Education', departamento:'Health Education', creditos:'4', programa:'MPHE' },
+  { id:'c_SAAM8017', codigo:'SAAM 8017', nombre:'Health Risk Assessment', departamento:'Environmental Health', creditos:'3', programa:'DrPH Environmental Health' },
+  { id:'c_SAAM8995', codigo:'SAAM 8995', nombre:'Environmental Health Doctoral Research Seminar I', departamento:'Environmental Health', creditos:'1', programa:'DrPH Environmental Health' },
+  { id:'c_SAAM8996', codigo:'SAAM 8996', nombre:'Environmental Health Doctoral Research Seminar II', departamento:'Environmental Health', creditos:'1', programa:'DrPH Environmental Health' },
+  { id:'c_SAAM8198', codigo:'SAAM 8198', nombre:'Dissertation Proposal in Environmental Health', departamento:'Environmental Health', creditos:'3', programa:'DrPH Environmental Health' },
+  { id:'c_SAAM8199', codigo:'SAAM 8199', nombre:'Doctoral Dissertation in Environmental Health', departamento:'Environmental Health', creditos:'3', programa:'DrPH Environmental Health' },
+  { id:'c_ADSS8306', codigo:'ADSS 8306', nombre:'Dissertation Proposal in Health Systems Analysis and Management', departamento:'Health Services Admin', creditos:'3', programa:'DrPH HSAM' },
+  { id:'c_ADSS8401', codigo:'ADSS 8401', nombre:'Doctoral Dissertation in Health Systems Analysis and Management', departamento:'Health Services Admin', creditos:'3', programa:'DrPH HSAM' },
+  { id:'c_DESS8198', codigo:'DESS 8198', nombre:'Dissertation Proposal in Social Determinants of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  { id:'c_DESS8199', codigo:'DESS 8199', nombre:'Doctoral Dissertation in Social Determinants of Health', departamento:'Social Sciences', creditos:'3', programa:'DrPH Social Determinants of Health' },
+  // SALP 8006 es la práctica doctoral aplicada compartida por los TRES
+  // programas DrPH (Salud Ambiental, HSAM, Determinantes Sociales) — igual
+  // que SALP 6006 en MPH Core, se modela una sola vez en DrPH Core en vez
+  // de triplicarla, ya que no mide competencia propia de ninguna especialidad.
+  { id:'c_SALP8006', codigo:'SALP 8006', nombre:'Doctoral Applied Practice Experience in Public Health', departamento:'Social Sciences', creditos:'0', programa:'DrPH Core' },
+
+  // Certificado Graduado de Gerontología — tenía 0 cursos sembrados. Comparte
+  // 6 cursos con MPH-Gerontología (mismos códigos, mismo contenido) más 2
+  // cursos propios (GERO 6495 y GERO 6511). Ninguno tiene competencia propia
+  // del certificado (el certificado no tiene banco de competencias).
+  { id:'c_GERO6005_CCG', codigo:'GERO 6005', nombre:'Introductory Seminar in Gerontology', departamento:'Gerontology', creditos:'1', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6501_CCG', codigo:'GERO 6501', nombre:'Biological Aspects of Aging', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6503_CCG', codigo:'GERO 6503', nombre:'Psychological Aspects of Aging', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6505_CCG', codigo:'GERO 6505', nombre:'Clinical Aspects of Aging', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6507_CCG', codigo:'GERO 6507', nombre:'Social Aspects of Aging', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6509_CCG', codigo:'GERO 6509', nombre:'Administrative Aspects of Gerontology', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6495_CCG', codigo:'GERO 6495', nombre:'Planning the Interdisciplinary Intervention in Gerontology', departamento:'Gerontology', creditos:'1', programa:'Certificado Graduado de Gerontología' },
+  { id:'c_GERO6511_CCG', codigo:'GERO 6511', nombre:'Interdisciplinary Intervention', departamento:'Gerontology', creditos:'3', programa:'Certificado Graduado de Gerontología' },
 ];
 
 const ALL_COMPETENCIAS = [
@@ -16572,17 +16668,17 @@ const COURSE_DATA = {
   // ── MPH Epidemiology ─────────────────────────────────────────────────────
   'c_BIOE6526': { comps:['ME3','ME5'],              laos:['LAO 1: Project'] },
   'c_EPID6524': { comps:['ME2','ME3'],              laos:['LAO 1: Final Written Document (Proposal)'] },
-  'c_EPID6527': { comps:['ME1','ME4'],              laos:['LAO 1: Surveillance System Design – Oral and Written Presentation'] },
-  'c_EPID6528': { comps:['ME2','ME4'],              laos:['LAO 1: First Oral Presentation – Article Discussion','LAO 2: Second Oral Presentation – Discussion of Disorder'] },
-  'c_EPID6529': { comps:['ME1','ME2','ME4'],        laos:['LAO 1: Critical Analysis and Analytical Review – Written Report (Monograph)'] },
-  'c_EPID6535': { comps:['ME4'],                    laos:['LAO 1: Oral Presentation'] },
+  'c_EPID6527': { comps:['ME1','ME4','MSE1','MSE4','MSE5','MSE8'], laos:['LAO 1: Surveillance System Design – Oral and Written Presentation'] },
+  'c_EPID6528': { comps:['ME2','ME4','MSE2','MSE4','MSE7'], laos:['LAO 1: First Oral Presentation – Article Discussion','LAO 2: Second Oral Presentation – Discussion of Disorder'] },
+  'c_EPID6529': { comps:['ME1','ME2','ME4','MSE1','MSE2','MSE4','MSE5'], laos:['LAO 1: Critical Analysis and Analytical Review – Written Report (Monograph)'] },
+  'c_EPID6535': { comps:['ME4','MSE1','MSE2'],      laos:['LAO 1: Oral Presentation'] },
   'c_EPID6536': { comps:['ME2','ME4','ME5'],        laos:['LAO 1: Critical Analysis and Analytical Review – Written Report (Monograph)'] },
   // ── MPH Biostatistics ────────────────────────────────────────────────────
-  'c_BIOE6535': { comps:['MB1','MB3'],              laos:['LAO 1: Exam I','LAO 2: Exam 2','LAO 3: Exam 3'] },
+  'c_BIOE6535': { comps:['MB1','MB3','MSE3','MSE6','DEM4','DEM5','DEM8'], laos:['LAO 1: Exam I','LAO 2: Exam 2','LAO 3: Exam 3'] },
   'c_BIOE6537': { comps:['MB1','MB3','MB4'],        laos:['LAO 1: Project'] },
-  'c_BIOE6545': { comps:['MB2','MB3'],              laos:['LAO 1: Case Study'] },
-  'c_BIOE6555': { comps:['MB3'],                    laos:['LAO 1: Data Analysis – Individual Exam'] },
-  'c_BIOE6605': { comps:['MB1','MB3','MB4'],        laos:['LAO 1: Midterm Exam 2','LAO 2: Project'] },
+  'c_BIOE6545': { comps:['MB2','MB3','MSE3'],       laos:['LAO 1: Case Study'] },
+  'c_BIOE6555': { comps:['MB3','MSE3','MSE6'],      laos:['LAO 1: Data Analysis – Individual Exam'] },
+  'c_BIOE6605': { comps:['MB1','MB3','MB4','MSE6'], laos:['LAO 1: Midterm Exam 2','LAO 2: Project'] },
   'c_EPID6524B':{ comps:['MB1','MB2'],              laos:['LAO 1: Final Written Document (Proposal)'] },
   // ── MPH Environmental Health ─────────────────────────────────────────────
   'c_SAAM6531': { comps:['SA1','SA3','SA4','SA5'], laos:['LAO 1: Final Oral Presentation','LAO 2: Final Written Essay','LAO 3: Field Trip'] },
@@ -16662,26 +16758,26 @@ const COURSE_DATA = {
   // y los Seminarios II-V / Investigación I-III de Epidemiología no aparecen
   // en la Tabla D17 — por instrucción de Edgardo, se les quita el
   // alineamiento hasta verificarlos mejor (quedan sin entrada aquí).
-  'c_EPID6527E': { comps:['MSE1','MSE4','MSE5','MSE8'], laos:['LAO 1: Design of Surveillance System (Oral and Written Presentation)'] },
-  'c_EPID6528E': { comps:['MSE2','MSE4','MSE7'], laos:['LAO 1: Oral Presentations (Psychiatric Epidemiology & Mental Disorder Review)'] },
-  'c_EPID6529E': { comps:['MSE1','MSE2','MSE4','MSE5'], laos:['LAO 1: Critical Analysis and Written Report (Monograph)'] },
-  'c_EPID6535E': { comps:['MSE1','MSE2'], laos:['LAO 1: Oral Presentation (Infectious Disease)'] },
+  'c_EPID6527E': { comps:['ME1','ME4','MSE1','MSE4','MSE5','MSE8'], laos:['LAO 1: Design of Surveillance System (Oral and Written Presentation)'] },
+  'c_EPID6528E': { comps:['ME2','ME4','MSE2','MSE4','MSE7'], laos:['LAO 1: Oral Presentations (Psychiatric Epidemiology & Mental Disorder Review)'] },
+  'c_EPID6529E': { comps:['ME1','ME2','ME4','MSE1','MSE2','MSE4','MSE5'], laos:['LAO 1: Critical Analysis and Written Report (Monograph)'] },
+  'c_EPID6535E': { comps:['ME4','MSE1','MSE2'], laos:['LAO 1: Oral Presentation (Infectious Disease)'] },
   'c_EPID6539': { comps:['MSE2','MSE4','MSE5','MSE7','MSE8'], laos:['LAO 1: Reflections (Oral and Written)'] },
   'c_EPID6552': { comps:['MSE1','MSE2','MSE7'], laos:['LAO 1: Oral Presentations (Historical Development Seminar)'] },
-  'c_BIOE6535E': { comps:['MSE3','MSE6'], laos:['LAO 1: Individual Exams'] },
-  'c_BIOE6545E': { comps:['MSE3'], laos:['LAO 1: Case Study'] },
-  'c_BIOE6555E': { comps:['MSE3','MSE6'], laos:['LAO 1: Data Analysis (Individual Exams)'] },
-  'c_BIOE6605E': { comps:['MSE6'], laos:['LAO 1: Project'] },
-  'c_SALP6006D': { comps:['DEM3','DEM10'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_BIOE6535D': { comps:['DEM4','DEM5','DEM8'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_BIOE6535E': { comps:['MB1','MB3','MSE3','MSE6','DEM4','DEM5','DEM8'], laos:['LAO 1: Individual Exams'] },
+  'c_BIOE6545E': { comps:['MB2','MB3','MSE3'], laos:['LAO 1: Case Study'] },
+  'c_BIOE6555E': { comps:['MB3','MSE3','MSE6'], laos:['LAO 1: Data Analysis (Individual Exams)'] },
+  'c_BIOE6605E': { comps:['MB1','MB3','MB4','MSE6'], laos:['LAO 1: Project'] },
+  'c_BIOE6535D': { comps:['MB1','MB3','MSE3','MSE6','DEM4','DEM5','DEM8'], laos:['LAO 1: (pendiente de definir)'] },
   'c_CISO6547': { comps:['DEM3','DEM4','DEM5','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6500': { comps:['DEM1','DEM2','DEM3','DEM5','DEM7','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6546D': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_DEMO6546E': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6555': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6560': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM8','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6565': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6602': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_DEMO6606D': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_DEMO6606D': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','MSN2'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6607': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6615': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM7','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6621': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM7','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
@@ -16704,8 +16800,7 @@ const COURSE_DATA = {
   'c_SAAM6568': { comps:['IH1'], laos:['LAO 1: Midterm Exam','LAO 2: Final Exam'] },
   'c_SAAM6570': { comps:['IH5'], laos:['LAO 1: Risk/Emergency Management Operation Plan'] },
   'c_SAAM6572': { comps:['IH4','IH6'], laos:['LAO 1: Ergonomic Process Proposal','LAO 2: Proposal Oral Presentation'] },
-  'c_SALP6006N': { comps:['MSN3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_DEMO6606N': { comps:['MSN2'], laos:['LAO 1: (pendiente de definir)'] },
+  'c_DEMO6606N': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','MSN2'], laos:['LAO 1: (pendiente de definir)'] },
   'c_NUTR6521': { comps:['MSN1','MSN2','MSN3','MSN4'], laos:['LAO 1: (pendiente de definir)'] },
   'c_NUTR6523': { comps:['MSN1','MSN2','MSN3','MSN4'], laos:['LAO 1: (pendiente de definir)'] },
   'c_NUTR6528': { comps:['MSN4'], laos:['LAO 1: (pendiente de definir)'] },
@@ -16765,8 +16860,29 @@ function seleccionarNivel(compId, valor) {
 }
 
 // ======================== RENDER MATRIZ ========================
+// Estado de la vista Núcleo/Especialidad/Combinado por programa en la
+// Matriz de Pareo y la Alineación — en memoria nomás (no se persiste; cada
+// coordinador/director elige su vista preferida al entrar). Default:
+// 'combinado' (punto 1 y 5 de Edgardo: para el estudiante, el combinado es
+// lo correcto; coordinadores pueden alternar a "Núcleo" para ver el
+// desempeño agregado de sus estudiantes solo en los cursos núcleo).
+let _matrizVistaPrograma = {};
+
+// Dado el "programa" (texto usado para agrupar cursos/competencias, igual
+// al nombre canónico del catálogo tras Fase A), devuelve el "programa" del
+// Core vinculado (MPH Core / DrPH Core) si este programa es una
+// especialidad con coreProgramaId, o null si no aplica (MHSA, los MS-*,
+// certificados, o el propio Core).
+function _coreProgramaStringParaPrograma(progKey) {
+  const prog = (db.programas || []).find(p => p.nombre === progKey);
+  if (!prog || !prog.coreProgramaId) return null;
+  const core = (db.programas || []).find(p => p.id === prog.coreProgramaId);
+  return core ? core.nombre : null;
+}
+
 function renderMatriz() {
   _ensureBancoCompetenciasSeeded();
+  _ensureCursosMigratedToProgramCatalog(); // asegura que db.cursos ya tenga el nombre vigente del programa, aunque nunca se haya abierto la pestaña Cursos
   _ensureCompetenciasSinDuplicados();
   const el = document.getElementById('matriz-container');
   const allCursos = db.cursos;
@@ -16826,9 +16942,11 @@ function renderMatriz() {
     .filter(k => !filterVal || k === filterVal)
     .map(k => ({ key:k, ...(PROG_META[k] || { label:k, badge:'badge-blue', icon:'📋' }) }));
 
-  function buildMatrix(progKey) {
-    const cursos = allCursos.filter(c => c.programa === progKey);
-    const comps  = allComps.filter(c => c.programa === progKey);
+  function buildMatrix(progKeysArr) {
+    const cursos = allCursos.filter(c => progKeysArr.includes(c.programa))
+      .filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
+    const comps  = allComps.filter(c => progKeysArr.includes(c.programa))
+      .filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
     if (!cursos.length || !comps.length) return '';
     return `
       <div class="matriz-wrap" style="margin-bottom:28px">
@@ -16866,13 +16984,20 @@ function renderMatriz() {
           ${cursos.map(curso => {
             const covered = comps.filter(c => laosPara(c.num, curso.id).length).length;
             const pct = Math.round(covered/comps.length*100);
+            // Punto 4 de Edgardo (oct 2026): un curso que pertenece al
+            // currículo del programa pero no mide ninguna competencia (ej.
+            // capstones, prácticas, SALP 6006) no debe leerse como "0% de
+            // cobertura" — es una etiqueta distinta, no una falla de avalúo.
+            const sinCompetencia = covered === 0 && !(db.competencias||[]).some(dc => dc.cursoId === curso.id);
             return `<div style="margin-bottom:12px">
               <div style="display:flex;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:4px">
                 <span style="font-weight:600;font-size:0.82rem">${curso.codigo}</span>
-                <span class="badge ${pct>=40?'badge-green':pct>=20?'badge-gold':'badge-red'}">${covered}/${comps.length} (${pct}%)</span>
+                ${sinCompetencia
+                  ? `<span class="badge" style="background:#e5e7eb;color:#4b5563">Sin competencia alineada</span>`
+                  : `<span class="badge ${pct>=40?'badge-green':pct>=20?'badge-gold':'badge-red'}">${covered}/${comps.length} (${pct}%)</span>`}
               </div>
               <div style="font-size:0.72rem;color:var(--muted);margin-bottom:4px">${curso.nombre}</div>
-              <div class="progress-bar"><div class="progress-fill ${pct>=40?'fill-green':pct>=20?'fill-gold':'fill-red'}" style="width:${pct}%"></div></div>
+              ${sinCompetencia ? '' : `<div class="progress-bar"><div class="progress-fill ${pct>=40?'fill-green':pct>=20?'fill-gold':'fill-red'}" style="width:${pct}%"></div></div>`}
             </div>`;
           }).join('')}
         </div>
@@ -16901,18 +17026,30 @@ function renderMatriz() {
     </div>
 
     ${programs.map(prog => {
-      const pCursos = allCursos.filter(c => c.programa === prog.key).length;
-      const pComps  = allComps.filter(c => c.programa === prog.key).length;
+      const coreKey = _coreProgramaStringParaPrograma(prog.key);
+      const vista = coreKey ? (_matrizVistaPrograma[prog.key] || 'combinado') : null;
+      const vistaKeys = !coreKey ? [prog.key]
+        : vista === 'core' ? [coreKey]
+        : vista === 'especialidad' ? [prog.key]
+        : [prog.key, coreKey];
+      const pCursos = allCursos.filter(c => vistaKeys.includes(c.programa)).filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i).length;
+      const pComps  = allComps.filter(c => vistaKeys.includes(c.programa)).filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i).length;
       return `
         <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="font-family:'Montserrat',sans-serif;font-size:1.15rem;font-weight:600">${prog.icon} ${prog.label}</div>
           <span class="badge ${prog.badge}">${pComps} competencias · ${pCursos} cursos</span>
         </div>
+        ${coreKey ? `
+        <div class="vista-toggle" style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap">
+          ${[['especialidad','Especialidad'],['core','Núcleo (Core)'],['combinado','Combinado (recomendado)']].map(([v,label]) => `
+            <button type="button" class="btn ${vista===v?'btn-primary':'btn-secondary'}" style="font-size:0.75rem;padding:5px 10px"
+              onclick="_matrizVistaPrograma['${prog.key.replace(/'/g,"\\'")}']='${v}'; renderMatriz();">${label}</button>`).join('')}
+        </div>` : ''}
         <div class="legend" style="margin-bottom:12px">
           <div class="legend-item"><div class="legend-dot" style="background:#d1fae5;border:1px solid #a7f3d0"></div> Evaluada (con LAO)</div>
           <div class="legend-item"><div class="legend-dot" style="background:var(--cream);border:1px solid var(--border)"></div> No evaluada</div>
         </div>
-        ${buildMatrix(prog.key)}`;
+        ${buildMatrix(vistaKeys)}`;
     }).join('')}
   `;
 }
@@ -17074,8 +17211,29 @@ function _fixAlineamientoEpiIhD17() {
   return changed;
 }
 
+// Revisión arquitectónica oct 2026 (punto 7 de Edgardo): SALP 6006 no debe
+// llevar ninguna competencia alineada en ningún programa — se detectaron dos
+// cuentas ya sembradas con competencias erróneas (DEM3/DEM10 en
+// MS-Demografía, MSN3 en MS-Nutrición) desde una siembra anterior a esta
+// decisión. Como preloadExcelData() nunca sobrescribe, hay que borrarlas
+// explícitamente una vez.
+function _fixSalp6006SinCompetencias() {
+  if (_semillaAplicada('fix_salp6006_sin_competencias_2026_10_28')) return false;
+  let changed = false;
+  ['c_SALP6006D', 'c_SALP6006N'].forEach(cursoId => {
+    const stale = (db.competencias || []).filter(x => x.cursoId === cursoId);
+    if (!stale.length) return;
+    stale.forEach(dc => _sincronizarLaosDesdeTexto(dc, ''));
+    db.competencias = db.competencias.filter(x => x.cursoId !== cursoId);
+    changed = true;
+  });
+  _marcarSemilla('fix_salp6006_sin_competencias_2026_10_28');
+  return changed;
+}
+
 function preloadExcelData() {
   _fixAlineamientoEpiIhD17();
+  _fixSalp6006SinCompetencias();
   // Add cursos
   PRELOADED_CURSOS.forEach(c => {
     if (!db.cursos.find(x => x.id === c.id)) {
@@ -17556,6 +17714,7 @@ function renderAlBank(filterProg, isAdmin) {
     if (!comps.length) return;
     const dominios = dominiosDePrograma(prog);
     const totalCrit = comps.reduce((n, c) => n + criteriosDeCompetencia(c).length, 0);
+    const coreVinculado = _coreProgramaStringParaPrograma(prog);
     html += `<div style="margin-bottom:28px">
       <div class="al-prog-header">
         <span>${prog}</span>
@@ -17564,7 +17723,8 @@ function renderAlBank(filterProg, isAdmin) {
           <button class="btn btn-outline btn-sm" onclick="abrirDominiosPrograma('${_alEscAttr(prog)}')">🗂️ Dominios</button>
           <button class="btn btn-outline btn-sm" onclick="abrirNuevaCompetenciaBank('${_alEscAttr(prog)}')">＋ Nueva Competencia</button>
         </span>` : ''}
-      </div>`;
+      </div>
+      ${coreVinculado ? `<div style="font-size:0.72rem;color:var(--muted);margin:-4px 0 10px 0">ℹ️ Estas son solo las competencias de especialidad. El estudiante también debe desarrollar las de <strong>${coreVinculado}</strong> — ver la vista Combinado en Matriz de Pareo.</div>` : ''}`;
     // Fase R1: agrupar por dominio cuando el programa tiene dominios. Las
     // competencias sin dominio (o con un dominio que ya no existe) van al final.
     const grupos = dominios.length
