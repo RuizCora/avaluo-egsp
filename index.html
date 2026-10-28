@@ -17253,9 +17253,33 @@ function _fixSalp6006SinCompetencias() {
   return changed;
 }
 
+// Reporte de Edgardo (2026-10-28, punto 3): algunos cursos ya sembrados en
+// cuentas reales quedaron con los créditos de ANTES de una corrección contra
+// el catálogo (ej. BIOE 6525 en MPH Core guardado en 3 crs., cuando el
+// catálogo real son 5 — PRELOADED_CURSOS ya tiene el valor correcto en los 5
+// registros de BIOE 6525, pero preloadExcelData() nunca pisa un curso ya
+// guardado). Esta migración, de una sola vez, sincroniza db.cursos.creditos
+// al valor vigente en PRELOADED_CURSOS para TODO curso cuyos créditos ya
+// guardados no coincidan — así cubre BIOE 6525 y cualquier otro curso con el
+// mismo desfase histórico, sin tener que enumerarlos a mano.
+function _fixCreditosDesactualizados() {
+  if (_semillaAplicada('fix_creditos_desactualizados_2026_10_28')) return false;
+  let changed = false;
+  PRELOADED_CURSOS.forEach(c => {
+    const enDb = db.cursos.find(x => x.id === c.id);
+    if (enDb && c.creditos !== undefined && enDb.creditos !== c.creditos) {
+      enDb.creditos = c.creditos;
+      changed = true;
+    }
+  });
+  _marcarSemilla('fix_creditos_desactualizados_2026_10_28');
+  return changed;
+}
+
 function preloadExcelData() {
   _fixAlineamientoEpiIhD17();
   _fixSalp6006SinCompetencias();
+  _fixCreditosDesactualizados();
   // Add cursos
   PRELOADED_CURSOS.forEach(c => {
     if (!db.cursos.find(x => x.id === c.id)) {
