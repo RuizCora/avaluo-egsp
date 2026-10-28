@@ -5643,6 +5643,24 @@ function _programasIdsDeCurso(c) {
   return Array.isArray(c.programasIds) && c.programasIds.length ? c.programasIds : (c.programaId ? [c.programaId] : []);
 }
 
+// ¿Es un programa de Núcleo (Core)? Mismo criterio usado en toda la app
+// (badges, fusión de cursos compartidos, etc.) — acepta el nombre canónico
+// y el nombre viejo pre-Fase A de MPH Core.
+function _esProgramaCore(p) {
+  return p === 'MPH Core' || p === 'DrPH Core' || p === 'MPH/MPHE';
+}
+// Programas NO-Core de un curso (ver "curso como entidad única" arriba).
+function _programasNoCoreDeCurso(c) {
+  return _programasDeCurso(c).filter(p => !_esProgramaCore(p));
+}
+// Un curso "compartido no-Core" mide la UNIÓN de competencias de 2+
+// programas de especialidad (ninguno de ellos es Núcleo) — es el caso que
+// necesita el toggle de alcance en Avalúo (ver más abajo, Parte 2 del
+// rediseño de cursos compartidos, 2026-10-28).
+function _cursoEsCompartidoNoCore(c) {
+  return _programasNoCoreDeCurso(c).length >= 2;
+}
+
 // Traduce un nombre de programa (posiblemente pre-Fase A) al nombre vigente
 // en el catálogo. Si no lo encuentra en el catálogo, devuelve el nombre
 // canónico de Fase A (o el mismo nombre si no tiene renombre).
@@ -9768,6 +9786,7 @@ let avEscalaActual = null; // Escala de Niveles resuelta para el curso — usada
 let avDirectaCursoEntry = null; // {lao, comps} si el curso tiene permiteDirectaCurso — controla la columna compartida "Nivel Final por Competencia"
 let avCompsFinal = [];    // competencias mostradas en la columna compartida "Nivel Final por Competencia" (unión de las de avLaosGrid + avDirectaCursoEntry)
 let avModoManualNivel = {}; // { "laoId::compId": true } — columnas de nivel directo donde el profesor decidió usar entrada numérica exacta en vez de pastillas (decisión por columna, aplica a toda la sección)
+let avAlcanceActual = { alcance: 'combinado', aplica: false, programas: [] }; // Parte 2 (oct 2026): alcance de competencias vigente para un curso compartido no-Core — ver resolverAlcanceCompetenciasAvaluo()
 
 function setDefaultDate() {
   const f = document.getElementById('av-fecha');
@@ -9790,6 +9809,7 @@ function onCursoChange() {
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
   avLaosGrid = []; avDirectaCursoEntry = null; avModoManualNivel = {};
+  avAlcanceActual = { alcance: 'combinado', aplica: false, programas: [] };
   document.getElementById('av-grid-container').style.display = 'none';
   document.getElementById('av-meta-row').style.display = 'none';
   document.getElementById('av-lao-info').style.display = 'none';
@@ -9982,6 +10002,120 @@ function elegirModalidadAvaluo() {
   onSeccionChange();
 }
 
+// ======================== PARTE 2 (2026-10-28): ALCANCE DE COMPETENCIAS EN AVALÚO ========================
+// Para un curso compartido entre 2+ programas no-Core (ver
+// _cursoEsCompartidoNoCore), el profesor escoge qué competencias evaluar:
+//   'combinado'   → la unión de todos los programas (predeterminado — es
+//                   exactamente el comportamiento que ya existía antes de
+//                   este control, cero cambio para quien no lo toque). En
+//                   Combinado, además, el profesor puede decidir ESTUDIANTE
+//                   POR ESTUDIANTE cuáles de esas competencias le aplican
+//                   (botón "🎯 Competencias" en su fila) — por defecto,
+//                   todas; lo que desmarque no se guarda como evaluación de
+//                   ese estudiante en esa competencia.
+//   <nombre de un programa> → restringe la vista a SOLO ese programa, para
+//                   TODOS los estudiantes de la sección (útil cuando la
+//                   sección, aunque modelada como compartida, no tuvo
+//                   mezcla real de estudiantes de distintos programas).
+// Misma mecánica de almacenamiento que resolverModalidadEvaluacion(): una
+// elección por profesor (curso.eleccionesAlcancePrograma), vale para todas
+// sus secciones de ese curso.
+function resolverAlcanceCompetenciasAvaluo(cursoId, sec) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (!curso || !_cursoEsCompartidoNoCore(curso)) return { alcance: 'combinado', aplica: false, programas: [] };
+  const programas = _programasNoCoreDeCurso(curso);
+  const clave = _claveProfesorSeccion(sec);
+  const eleccion = clave && (curso.eleccionesAlcancePrograma || []).find(e => e.profesor === clave);
+  const alcance = (eleccion && (eleccion.alcance === 'combinado' || programas.includes(eleccion.alcance)))
+    ? eleccion.alcance : 'combinado';
+  return { alcance, aplica: true, programas };
+}
+
+function guardarEleccionAlcancePrograma(cursoId, sec, alcance) {
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  if (!curso || !sec) return false;
+  if (!(currentUser?.rol === 'admin' || _usuarioEsProfesorDeSeccion(sec))) return false;
+  const clave = _claveProfesorSeccion(sec);
+  if (!clave) return false;
+  if (!Array.isArray(curso.eleccionesAlcancePrograma)) curso.eleccionesAlcancePrograma = [];
+  const ex = curso.eleccionesAlcancePrograma.find(e => e.profesor === clave);
+  const registro = { profesor: clave, alcance, fecha: new Date().toISOString() };
+  if (ex) Object.assign(ex, registro); else curso.eleccionesAlcancePrograma.push(registro);
+  saveDB();
+  return true;
+}
+
+function elegirAlcanceAvaluo() {
+  const cursoId = document.getElementById('av-curso')?.value;
+  const sel = document.getElementById('av-alcance-sel');
+  const alcance = sel?.value || 'combinado';
+  if (!cursoId || !avSeccionActual) return;
+  if (avAlcanceActual.alcance === alcance) { notify('Ese ya es el alcance vigente', 'ℹ️'); return; }
+  if (!confirm('La cuadrícula se recargará con el nuevo alcance de competencias. Los cambios que no hayas guardado en esta sesión se perderán (lo ya guardado antes no se toca).\n\n¿Continuar?')) return;
+  if (!guardarEleccionAlcancePrograma(cursoId, avSeccionActual, alcance)) { notify('No se pudo guardar el alcance', '⚠️'); return; }
+  notify('Alcance de competencias guardado ✅');
+  onSeccionChange();
+}
+
+// Filtra un arreglo de competencias (db.competencias) de un curso compartido
+// según el alcance vigente. 'combinado' no filtra nada (la selección fina
+// por estudiante se maneja aparte, al guardar). Para un programa específico,
+// deja solo las competencias cuya entrada del banco pertenece a ese programa.
+function _filtrarCompsPorAlcance(comps, curso, alcance) {
+  if (!alcance || alcance === 'combinado') return comps;
+  return comps.filter(c => _bancoDeCompetenciaCurso(c, curso)?.programa === alcance);
+}
+
+function _htmlAlcanceAvaluo(alcanceRes) {
+  if (!alcanceRes.aplica) return '';
+  const opciones = ['combinado', ...alcanceRes.programas];
+  return `<div class="av-modalidad-box" style="margin-bottom:8px">
+    <div style="font-size:0.82rem;margin-bottom:4px">
+      🔀 <strong>Curso compartido entre ${alcanceRes.programas.length} programas.</strong> Competencias a evaluar:
+      <select id="av-alcance-sel" style="margin-left:6px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--border)">
+        ${opciones.map(o => `<option value="${_alEscAttr(o)}" ${o === alcanceRes.alcance ? 'selected' : ''}>${o === 'combinado' ? 'Combinado (todas)' : _alEsc(o)}</option>`).join('')}
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="elegirAlcanceAvaluo()">Aplicar</button>
+    </div>
+    <div style="font-size:0.74rem;color:var(--muted)">${alcanceRes.alcance === 'combinado'
+      ? `Se muestran las competencias de los ${alcanceRes.programas.length} programas (${_alEsc(alcanceRes.programas.join(', '))}). En Combinado puedes escoger, estudiante por estudiante (botón "🎯 Competencias" en su fila), cuáles de esas competencias le aplican a cada uno — por defecto, todas.`
+      : `Mostrando solo las competencias de <strong>${_alEsc(alcanceRes.alcance)}</strong> para todos los estudiantes de esta sección.`}</div>
+  </div>`;
+}
+
+// Panel por estudiante (solo visible en alcance "combinado"): cuáles de las
+// competencias combinadas le aplican a ESE estudiante. Se guarda en
+// avClaseData[estId]._compsExcluidas (ids NO evaluados para él) — por
+// defecto ninguna, es decir, todas aplican (retrocompatible).
+function abrirCompsEstudiante(estId) {
+  const est = avEstudiantesActuales.find(e => e.id === estId);
+  if (!est) return;
+  const curso = (db.cursos || []).find(c => c.id === document.getElementById('av-curso')?.value);
+  document.getElementById('cce-est-id').value = estId;
+  document.getElementById('cce-est-nombre').textContent = est.nombre;
+  const excluidas = new Set(avClaseData[estId]?._compsExcluidas || []);
+  document.getElementById('cce-lista').innerHTML = avCompsFinal.map(c => {
+    const bc = _bancoDeCompetenciaCurso(c, curso);
+    return `<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 2px;border-bottom:1px solid var(--border);font-size:0.82rem">
+      <input type="checkbox" data-comp="${c.id}" ${excluidas.has(c.id) ? '' : 'checked'} style="margin-top:3px;flex-shrink:0">
+      <span><strong>${_alEsc(c.codigo)}</strong>${bc ? ` <span class="badge badge-blue" style="font-size:0.66rem">${_alEsc(bc.programa)}</span>` : ''} — ${_alEsc(c.descripcion)}</span>
+    </label>`;
+  }).join('');
+  openModal('modal-comps-estudiante');
+}
+
+function guardarCompsEstudiante() {
+  const estId = document.getElementById('cce-est-id').value;
+  if (!estId) return;
+  const checks = [...document.querySelectorAll('#cce-lista input[type=checkbox]')];
+  const excluidas = checks.filter(ch => !ch.checked).map(ch => ch.dataset.comp);
+  if (!avClaseData[estId]) avClaseData[estId] = { porLao: {} };
+  avClaseData[estId]._compsExcluidas = excluidas;
+  closeModal('modal-comps-estudiante');
+  renderGridCombinado();
+  notify('Competencias actualizadas para este estudiante ✓');
+}
+
 
 // ======================== FASE R3: RÚBRICA DE EVALUACIÓN DIRECTA ========================
 // La modalidad 'directa_con_rubrica' evalúa el "LAO grande" del curso (el LAO
@@ -10108,6 +10242,7 @@ function onSeccionChange() {
 
   avSeccionActual = null; avClaseData = {}; avGuardados = new Set();
   avLaosGrid = []; avDirectaCursoEntry = null; avModoManualNivel = {};
+  avAlcanceActual = { alcance: 'combinado', aplica: false, programas: [] };
   document.getElementById('av-grid-container').style.display = 'none';
   const infoEl = document.getElementById('av-lao-info');
   infoEl.style.display = 'none';
@@ -10116,6 +10251,9 @@ function onSeccionChange() {
 
   avSeccionActual = (db.secciones || []).find(s => s.id === secId);
   if (!avSeccionActual) return;
+
+  const curso = (db.cursos || []).find(c => c.id === cursoId);
+  avAlcanceActual = resolverAlcanceCompetenciasAvaluo(cursoId, avSeccionActual);
 
   // Auto-fill metadata from section
   if (avSeccionActual.semestre) document.getElementById('av-semestre').value = avSeccionActual.semestre;
@@ -10139,7 +10277,10 @@ function onSeccionChange() {
   const resueltos = laos.map(lao => {
     const rubrica = db.rubricas.find(r => r.laoId === lao.id) || null;
     const modo = _modoLaoSegunModalidad(lao, rubrica, modalidad);
-    const comps = db.competencias.filter(c => (lao.competencias || []).some(cc => cc.competenciaId === c.id));
+    const comps = _filtrarCompsPorAlcance(
+      db.competencias.filter(c => (lao.competencias || []).some(cc => cc.competenciaId === c.id)),
+      curso, avAlcanceActual.alcance
+    );
     return { lao, rubrica, modo, comps };
   });
   avLaosGrid = resueltos.filter(r => r.modo && r.comps.length);
@@ -10160,7 +10301,20 @@ function onSeccionChange() {
   // de evaluación directa (del alineamiento o propia del curso). Si todavía
   // no hay rúbrica, se bloquea (igual que un LAO que exige rúbrica y no la tiene).
   let rubDirecta = null;
-  if (modalidad === 'directa_con_rubrica') rubDirecta = resolverRubricaDirectaCurso(cursoId);
+  if (modalidad === 'directa_con_rubrica') {
+    rubDirecta = resolverRubricaDirectaCurso(cursoId);
+    // Si el alcance restringe a un solo programa, los criterios de la
+    // rúbrica derivada del alineamiento deben quedar consistentes con las
+    // competencias que se van a mostrar (si no, aparecerían criterios de un
+    // programa que el profesor acaba de excluir de la vista).
+    if (rubDirecta?.rubrica && avAlcanceActual.alcance !== 'combinado') {
+      const idsPermitidos = new Set(
+        _filtrarCompsPorAlcance(db.competencias.filter(c => c.cursoId === cursoId), curso, avAlcanceActual.alcance).map(c => c.id)
+      );
+      const critFiltrados = rubDirecta.rubrica.criterios.filter(cr => (cr.competencias || []).some(cc => idsPermitidos.has(cc.competenciaId)));
+      rubDirecta = { ...rubDirecta, rubrica: critFiltrados.length ? { ...rubDirecta.rubrica, criterios: critFiltrados } : null };
+    }
+  }
   avDirectaCursoEntry = esModalidadDirecta(modalidad) ? {
     lao: {
       id: laoDirectaCursoId(cursoId), cursoId,
@@ -10171,14 +10325,14 @@ function onSeccionChange() {
       modoEvaluacion: modalidad === 'directa_con_rubrica' ? 'requiere_rubrica' : 'solo_directa',
       esOficial: true, compartido: true, isGenerico: false, esDirectaCurso: true,
     },
-    comps: db.competencias.filter(c => c.cursoId === cursoId),
+    comps: _filtrarCompsPorAlcance(db.competencias.filter(c => c.cursoId === cursoId), curso, avAlcanceActual.alcance),
     rubrica: rubDirecta?.rubrica || null,
     modo: modalidad === 'directa_con_rubrica' ? (rubDirecta?.rubrica ? 'rubrica' : null) : 'directa',
     compsSinCriterios: rubDirecta?.compsSinCriterios || [],
   } : null;
 
   infoEl.style.display = '';
-  infoEl.innerHTML = _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + _htmlRubricasAvaluo(cursoId, resueltos, modalidad) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo, comps: avDirectaCursoEntry.comps } : null]
+  infoEl.innerHTML = _htmlAlcanceAvaluo(avAlcanceActual) + _htmlModalidadAvaluo(cursoId, avSeccionActual, modalidadRes, resueltos) + _htmlRubricasAvaluo(cursoId, resueltos, modalidad) + [...resueltos, avDirectaCursoEntry ? { lao: avDirectaCursoEntry.lao, modo: avDirectaCursoEntry.modo, comps: avDirectaCursoEntry.comps } : null]
     .filter(Boolean).map(r => {
     let linea = `<div style="margin-bottom:4px"><strong>${r.lao.nombre}</strong>${r.lao.descripcion ? ' — ' + r.lao.descripcion : ''}`;
     if (r.lao.isGenerico) linea += '<br>⚠️ Este es un LAO genérico automático — considera pedir/crear uno oficial para este curso.';
@@ -10257,6 +10411,12 @@ function buildGridCombinado(cursoId) {
       if (avClaseData[est.id]?._comentario === undefined && existing.comentarioGeneral) {
         if (!avClaseData[est.id]) avClaseData[est.id] = {};
         avClaseData[est.id]._comentario = existing.comentarioGeneral;
+      }
+      // Parte 2 (oct 2026): competencias que el profesor excluyó para este
+      // estudiante en "Combinado" — se recupera de lo ya guardado.
+      if (avClaseData[est.id]?._compsExcluidas === undefined && Array.isArray(existing.competenciasExcluidas) && existing.competenciasExcluidas.length) {
+        if (!avClaseData[est.id]) avClaseData[est.id] = {};
+        avClaseData[est.id]._compsExcluidas = [...existing.competenciasExcluidas];
       }
     });
     if (!avClaseData[est.id]) avClaseData[est.id] = {};
@@ -10563,6 +10723,11 @@ function renderGridCombinado() {
         ${saved ? '<div class="grid-est-badge">✓ guardado</div>' : ''}
         <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px;font-size:0.66rem">
           <button type="button" class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.66rem;align-self:flex-start" onclick="gridLimpiarFila('${est.id}')" title="Borra lo que hayas entrado para este estudiante en esta sesión — no afecta evaluaciones que ya hayas guardado antes de ahora">🗑 Borrar</button>
+          ${(avAlcanceActual.aplica && avAlcanceActual.alcance === 'combinado') ? (() => {
+            const excl = (avClaseData[est.id]?._compsExcluidas || []).length;
+            const total = avCompsFinal.length;
+            return `<button type="button" class="btn btn-outline btn-sm" style="padding:1px 6px;font-size:0.66rem;align-self:flex-start" onclick="abrirCompsEstudiante('${est.id}')" title="Curso compartido — elige qué competencias de los programas combinados aplican a este estudiante">🎯 Competencias (${total - excl}/${total})</button>`;
+          })() : ''}
           <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="Marca que este estudiante no se va a evaluar (ej. dado de baja) — se excluye de Guardar toda la clase">
             <input type="checkbox" ${noAplica ? 'checked' : ''} onchange="gridToggleNoAplica('${est.id}', this.checked)">
             Sin evaluación
@@ -10815,8 +10980,14 @@ function guardarTodaLaClase() {
     const finalGradeV = document.getElementById(`fg-${est.id}`)?.value;
     const notaFinal   = finalGradeV !== '' && finalGradeV !== undefined ? parseFloat(finalGradeV) : '';
     let estTuvoAlgo = false;
+    // Parte 2 (oct 2026): en "Combinado", el profesor pudo haber excluido
+    // alguna competencia para ESTE estudiante en particular (botón "🎯
+    // Competencias" de su fila) — esas no se guardan como evaluación suya,
+    // aunque la columna siga visible para el resto de la clase.
+    const compsExcluidasEst = new Set(avClaseData[est.id]?._compsExcluidas || []);
 
-    avLaosGrid.forEach(({ lao, rubrica, modo, comps }) => {
+    avLaosGrid.forEach(({ lao, rubrica, modo, comps: compsLao }) => {
+      const comps = compsExcluidasEst.size ? compsLao.filter(c => !compsExcluidasEst.has(c.id)) : compsLao;
       const resp = avClaseData[est.id]?.porLao?.[lao.id] || {};
       const tieneAlgo = modo === 'rubrica'
         ? Object.values(resp._criterios || {}).some(v => v) || (resp._notaLaoManual && resp._notaLao !== '' && resp._notaLao !== undefined)
@@ -10892,19 +11063,21 @@ function guardarTodaLaClase() {
         laoNombre:     lao.nombre,
         modoEvaluacion: modo,
         esDirectaCurso: !!lao.esDirectaCurso,
-        criteriosResp: modo === 'rubrica' ? { ...resp._criterios } : undefined,
+        ...(modo === 'rubrica' ? { criteriosResp: { ...resp._criterios } } : {}),
         notaLao,
         ...(modo === 'rubrica' ? { notaLaoManual } : {}),
         comentarioGeneral: comentario,
         notaFinal,
         notaFinalLetra: notaFinal !== '' ? gradeToLetter(parseFloat(notaFinal)) : '',
         evaluaciones,
+        ...(compsExcluidasEst.size ? { competenciasExcluidas: [...compsExcluidasEst] } : {}),
         fechaRegistro: new Date().toISOString()
       });
     });
 
     if (avDirectaCursoEntry) {
-      const { lao, comps } = avDirectaCursoEntry;
+      const comps = compsExcluidasEst.size ? avDirectaCursoEntry.comps.filter(c => !compsExcluidasEst.has(c.id)) : avDirectaCursoEntry.comps;
+      const { lao } = avDirectaCursoEntry;
       const resp = avClaseData[est.id]?.porLao?.[lao.id] || {};
       const esRub = _directaEsRubrica();
       const tieneAlgo = esRub
@@ -10956,13 +11129,13 @@ function guardarTodaLaClase() {
           laoNombre:     lao.nombre,
           modoEvaluacion: esRub ? 'rubrica' : 'directa',
           esDirectaCurso: true,
-          criteriosResp: esRub ? { ...resp._criterios } : undefined,
+          ...(esRub ? { criteriosResp: { ...resp._criterios } } : {}),
           ...(esRub ? { fuenteRubricaDirecta: db.cursos.find(c => c.id === cursoId)?.fuenteRubricaDirecta === 'curso' ? 'curso' : 'alineamiento' } : {}),
-          notaLao: undefined,
           comentarioGeneral: comentario,
           notaFinal,
           notaFinalLetra: notaFinal !== '' ? gradeToLetter(parseFloat(notaFinal)) : '',
           evaluaciones,
+          ...(compsExcluidasEst.size ? { competenciasExcluidas: [...compsExcluidasEst] } : {}),
           fechaRegistro: new Date().toISOString()
         });
       }
@@ -22304,6 +22477,23 @@ function dummyShowStatus(msg, type) {
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-editar-laos')">Cancelar</button>
       <button class="btn btn-primary" onclick="guardarLAOs()">💾 Guardar LAOs</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: competencias a evaluar de UN estudiante (curso compartido, Combinado) -->
+<div id="modal-comps-estudiante" class="modal-overlay">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title">🎯 Competencias a evaluar — <span id="cce-est-nombre"></span></div>
+      <button class="modal-close" onclick="closeModal('modal-comps-estudiante')">✕</button>
+    </div>
+    <input type="hidden" id="cce-est-id">
+    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">Este curso combina varios programas. Por defecto se evalúan todas las competencias combinadas; desmarca las que no le apliquen a este estudiante.</div>
+    <div id="cce-lista" style="max-height:50vh;overflow-y:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-comps-estudiante')">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarCompsEstudiante()">💾 Guardar</button>
     </div>
   </div>
 </div>
