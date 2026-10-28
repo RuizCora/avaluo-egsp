@@ -2017,14 +2017,18 @@
 <div id="panel-competencias" class="panel">
   <div id="readonly-notice-competencias" class="readonly-notice" style="display:none">🔒 Vista de solo lectura — tu rol no permite editar competencias. <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="abrirSolicitudEdicion('competencias')">📝 Solicitar edición</button></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
-    <div class="section-title">Competencias por Curso</div>
-    <button id="btn-nueva-competencia" class="btn btn-primary" onclick="openModal('modal-competencia')">+ Nueva Competencia</button>
+    <div class="section-title">Competencias</div>
+    <button id="btn-nueva-competencia" class="btn btn-primary" onclick="abrirNuevaCompetenciaDesdeCompetencias()">+ Nueva Competencia</button>
   </div>
-  <div class="section-sub">Define las competencias que se miden en cada curso</div>
-  <div class="select-curso-bar">
+  <div class="section-sub">Banco de Competencias del programa — crear, editar, vincular a curso(s) o eliminar. Es la misma información que "Alineación Curricular → Banco de Competencias": un cambio aquí se refleja allí y viceversa. Selecciona un programa en el filtro para crear su primera competencia.</div>
+  <div class="select-curso-bar" style="flex-wrap:wrap;gap:10px">
     <label>🔍 Filtrar por curso:</label>
     <select id="filtro-curso-comp" onchange="renderCompetencias()">
       <option value="">— Todos los cursos —</option>
+    </select>
+    <label>🎓 Filtrar por programa:</label>
+    <select id="filtro-programa-comp" onchange="renderCompetencias()">
+      <option value="">— Todos los programas —</option>
     </select>
   </div>
   <div id="lista-competencias">
@@ -3113,57 +3117,6 @@
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-importar-estudiantes')">Cancelar</button>
       <button class="btn btn-primary" onclick="confirmarImportarEstudiantes()">✓ Importar seleccionados</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Competencia -->
-<div id="modal-competencia" class="modal-overlay">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="modal-comp-title">🎯 Registrar Competencia</div>
-      <button class="modal-close" onclick="closeModal('modal-competencia')">✕</button>
-    </div>
-    <input type="hidden" id="comp-edit-id">
-    <div class="form-row">
-      <div class="form-group">
-        <label>Curso *</label>
-        <select id="comp-curso">
-          <option value="">— Seleccionar —</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Código de Competencia *</label>
-        <input type="text" id="comp-codigo" placeholder="ej. C1, COM-01">
-      </div>
-    </div>
-    <div class="form-group">
-      <label>Descripción de la Competencia *</label>
-      <textarea id="comp-desc" placeholder="Describe la competencia que se evaluará..."></textarea>
-    </div>
-    <div class="form-group">
-      <label>LAOs (Learning Assessment Opportunities) — uno por línea</label>
-      <textarea id="comp-criterios" placeholder="ej.&#10;Examen I&#10;Examen II&#10;Proyecto Final"></textarea>
-      <div style="font-size:0.72rem;color:var(--muted);margin-top:2px">Cada línea crea o vincula un LAO real, editable después desde la pestaña LAOs.</div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Tipo de Medición</label>
-        <select id="comp-tipo">
-          <option value="rubrica">Rúbrica (L/P/N)</option>
-          <option value="numerica">Escala Numérica (1-10)</option>
-          <option value="cotejo">Lista de Cotejo (Sí/No)</option>
-          <option value="combinada">Combinada (Rúbrica + Numérica)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Peso (%)</label>
-        <input type="number" id="comp-peso" placeholder="ej. 25" min="0" max="100">
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeModal('modal-competencia')">Cancelar</button>
-      <button class="btn btn-primary" onclick="guardarCompetencia()">💾 Guardar Competencia</button>
     </div>
   </div>
 </div>
@@ -4517,101 +4470,49 @@ function eliminarCurso(id) {
 }
 
 // ======================== COMPETENCIAS ========================
-function guardarCompetencia() {
-  if (authIsReadonly('competencias')) { notify('Tu rol no permite crear o editar competencias', '🔒'); return; }
-  const cursoId = document.getElementById('comp-curso').value;
-  const codigo = document.getElementById('comp-codigo').value.trim();
-  const desc = document.getElementById('comp-desc').value.trim();
-  if (!cursoId || !codigo || !desc) { notify('Complete los campos requeridos', '⚠️'); return; }
-  const laosTexto = document.getElementById('comp-criterios').value;
-  const editId = document.getElementById('comp-edit-id')?.value || '';
-  let dc = null;
-  if (editId) {
-    const idx = db.competencias.findIndex(x => x.id === editId);
-    if (idx !== -1) {
-      db.competencias[idx] = { ...db.competencias[idx],
-        cursoId, codigo, descripcion: desc,
-        tipo: document.getElementById('comp-tipo').value,
-        peso: document.getElementById('comp-peso').value,
-      };
-      dc = db.competencias[idx];
-    }
-    notify('Competencia actualizada correctamente ✏️');
-  } else {
-    const comp = {
-      id: Date.now().toString(),
-      cursoId, codigo, descripcion: desc,
-      tipo: document.getElementById('comp-tipo').value,
-      peso: document.getElementById('comp-peso').value,
-      fechaCreacion: new Date().toISOString()
-    };
-    db.competencias.push(comp);
-    dc = comp;
-    notify('Competencia "' + codigo + '" registrada correctamente');
-  }
-  if (dc) _sincronizarLaosDesdeTexto(dc, laosTexto);
-  saveDB(); closeModal('modal-competencia'); renderCompetencias(); populateCursoSelects();
-  ['comp-codigo','comp-desc','comp-criterios','comp-peso','comp-edit-id'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  const t = document.getElementById('modal-comp-title'); if(t) t.textContent='🎯 Registrar Competencia';
-}
+// (oct 2026) "Competencias" y "Alineación Curricular → Banco de
+// Competencias" quedaron unificadas: ambas gestionan la MISMA tabla
+// (db.bancoCompetencias + los vínculos en db.competencias) a través de
+// _renderBancoLista()/_htmlBancoCompCard(). Ya no existe aquí un modelo
+// paralelo de competencias "sueltas" por curso — crear, editar, vincular a
+// curso(s) o borrar desde esta pantalla es exactamente lo mismo que hacerlo
+// desde Alineación, y se refleja al instante en ambas.
 
-function abrirEditarCompetencia(id) {
-  const comp = db.competencias.find(x => x.id === id);
-  if (!comp) return;
-  // Populate selects first so the curso option exists
-  populateCursoSelects();
-  document.getElementById('comp-edit-id').value = id;
-  document.getElementById('comp-codigo').value = comp.codigo || '';
-  document.getElementById('comp-desc').value = comp.descripcion || '';
-  document.getElementById('comp-criterios').value = laosDeCompetencia(comp).join('\n');
-  document.getElementById('comp-tipo').value = comp.tipo || 'rubrica';
-  document.getElementById('comp-peso').value = comp.peso || '';
-  // Set curso after selects are populated
-  const sel = document.getElementById('comp-curso');
-  if (sel) sel.value = comp.cursoId || '';
-  const t = document.getElementById('modal-comp-title');
-  if (t) t.textContent = '✏️ Editar Competencia';
-  openModal('modal-competencia');
+// Botón "+ Nueva Competencia" de esta pantalla: como una competencia es del
+// PROGRAMA, se necesita saber en cuál crearla — se usa el programa
+// seleccionado en el filtro.
+function abrirNuevaCompetenciaDesdeCompetencias() {
+  if (authIsReadonly('competencias')) { notify('Tu rol no permite crear o editar competencias', '🔒'); return; }
+  const prog = document.getElementById('filtro-programa-comp')?.value || '';
+  if (!prog) { notify('Selecciona primero un programa en el filtro para crear su competencia', '⚠️'); return; }
+  abrirNuevaCompetenciaBank(prog);
 }
 
 function renderCompetencias() {
-  const filtro = document.getElementById('filtro-curso-comp')?.value || '';
-  const comps = filtro ? db.competencias.filter(c => c.cursoId === filtro) : db.competencias;
-  const el = document.getElementById('lista-competencias');
-  if (!comps.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><p>No hay competencias para este filtro</p></div>';
-    return;
+  _ensureBancoCompetenciasSeeded();
+  // Filtro de curso: todos los cursos del catálogo.
+  // Filtro de programa: todo el catálogo de programas + cualquier programa
+  // que ya tenga competencias en el banco (por si hay programas "legacy"
+  // fuera del catálogo), para poder crear la primera competencia de un
+  // programa que aún no tiene ninguna.
+  const progSelComp = document.getElementById('filtro-programa-comp');
+  if (progSelComp) {
+    const prev = progSelComp.value;
+    const PROG_ORDER = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
+      'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM'];
+    const catalogo = [...new Set([
+      ...PROG_ORDER,
+      ...(db.programas||[]).filter(p=>p && p.nombre).map(p=>p.nombre),
+      ...(db.bancoCompetencias||[]).map(c=>c.programa),
+    ])];
+    progSelComp.innerHTML = '<option value="">— Todos los programas —</option>' + catalogo.map(p => `<option value="${p}">${p}</option>`).join('');
+    progSelComp.value = catalogo.includes(prev) ? prev : '';
   }
-  el.innerHTML = comps.map(c => {
-    const curso = db.cursos.find(x => x.id === c.cursoId);
-    const tipoLabels = { rubrica:'Rúbrica L/P/N', numerica:'Numérica 1-10', cotejo:'Cotejo Sí/No', combinada:'Combinada' };
-    const bcC = _bancoDeCompCurso(c);
-    return `<div class="competencia-item">
-      <div class="competencia-header">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="competencia-code">${bcC ? `<a href="#" class="ficha-link" ${fichaAttr('competencia', bcC.id, bcC.texto)}>${_alEsc(c.codigo)}</a>` : c.codigo}</span>
-            <span class="badge badge-gold">${tipoLabels[c.tipo]}</span>
-            ${c.peso ? `<span class="badge badge-blue">${c.peso}%</span>` : ''}
-            ${curso ? `<span style="font-size:0.78rem;color:var(--muted)">${fichaLink('curso', curso.id, curso.codigo)} · ${_alEsc(curso.nombre)}</span>` : ''}
-          </div>
-          <div class="competencia-desc">${c.descripcion}</div>
-          ${(() => { const ln = laosDeCompetencia(c); return ln.length ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px">📋 ${ln.join(' | ')}</div>` : ''; })()}
-        </div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarCompetencia('${c.id}')">✏️</button>` : ''}
-          ${currentUser?.rol==='admin' ? `<button class="btn btn-danger btn-sm" onclick="eliminarCompetencia('${c.id}')">🗑</button>` : ''}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-}
 
-function eliminarCompetencia(id) {
-  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar competencias', '🔒'); return; }
-  if (!confirm('¿Eliminar esta competencia?')) return;
-  db.competencias = db.competencias.filter(c => c.id !== id);
-  saveDB(); renderCompetencias(); notify('Competencia eliminada', '🗑');
+  const filtroCurso = document.getElementById('filtro-curso-comp')?.value || '';
+  const filtroPrograma = document.getElementById('filtro-programa-comp')?.value || '';
+  const isAdmin = currentUser?.rol === 'admin';
+  _renderBancoLista('lista-competencias', { filterProg: filtroPrograma, filterCurso: filtroCurso, isAdmin });
 }
 
 // ======================== SECCIONES ========================
@@ -5690,6 +5591,40 @@ function _ensureBancoCompetenciasSeeded() {
   }
 
   if (_ensureAlineamientoSemillaMHSA()) changed = true;
+
+  // Unificación Competencias ⇄ Banco de Competencias (2026-10-28, pedido de
+  // Edgardo): antes, la pantalla "Competencias" creaba vínculos en
+  // db.competencias por fuera del banco (código libre, sin programa), así
+  // que podía haber entradas "huérfanas" sin contraparte en
+  // db.bancoCompetencias — invisibles ahora que ambas pantallas muestran
+  // solo lo que está en el banco. De una sola vez, por cada vínculo huérfano
+  // se crea su entrada correspondiente en el banco (programa = el principal
+  // del curso, num = su código sin la "C" inicial), para no perder esos
+  // datos históricos ni la posibilidad de gestionarlos desde la UI.
+  if (!_semillaAplicada('competencias_huerfanas_a_banco_2026_10_28')) {
+    let creadas = 0;
+    (db.competencias || []).forEach(dc => {
+      const curso = (db.cursos || []).find(c => c.id === dc.cursoId);
+      if (!curso) return;
+      if (_bancoDeCompetenciaCurso(dc, curso)) return; // ya resuelve a una del banco
+      const progs = _programasDeCurso(curso);
+      if (!progs.length) return;
+      const programa = progs[0];
+      const num = String(dc.codigo || '').replace(/^C/i, '').trim() || String(dc.codigo || '').trim();
+      if (!num) return;
+      const yaExiste = db.bancoCompetencias.some(bc => bc.programa === programa && (bc.num === num || 'C' + bc.num === dc.codigo));
+      if (yaExiste) return;
+      db.bancoCompetencias.push({
+        id: 'banco_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + creadas,
+        num, texto: dc.descripcion || dc.codigo, programa,
+        fechaCreacion: new Date().toISOString(),
+      });
+      creadas++;
+    });
+    _marcarSemilla('competencias_huerfanas_a_banco_2026_10_28');
+    changed = true;
+  }
+
   if (changed) saveDB();
 }
 
@@ -10081,8 +10016,14 @@ function _nivelesRubricaDesdeEscala(escala) {
 
 // Competencia del banco que corresponde a una competencia vinculada al curso
 function _bancoDeCompetenciaCurso(comp, curso) {
-  const prog = curso?.programa || '';
-  return (db.bancoCompetencias || []).find(bc => bc.programa === prog &&
+  // "Curso como entidad única" (oct 2026): un curso fusionado puede estar en
+  // varios programas — se busca en TODOS los programas del curso, no solo
+  // en el principal (`curso.programa`), para que una competencia compartida
+  // (ej. de MS-Epidemiología en un curso cuyo programa principal quedó en
+  // MPH-Bioestadística) siga resolviendo su ficha/enlace correctamente.
+  const progs = curso ? _programasDeCurso(curso) : [];
+  if (!progs.length) return null;
+  return (db.bancoCompetencias || []).find(bc => progs.includes(bc.programa) &&
     (comp.codigo === 'C' + bc.num || comp.codigo === bc.num)) || null;
 }
 
@@ -15905,7 +15846,7 @@ function populateCursoSelects() {
       }
     });
   }
-  const ids = ['filtro-curso-comp','av-curso','comp-curso','filtro-bd-curso','sec-curso','filtro-curso-sec','roster-curso-sel','lao-curso','filtro-curso-lao'];
+  const ids = ['filtro-curso-comp','av-curso','filtro-bd-curso','sec-curso','filtro-curso-sec','roster-curso-sel','lao-curso','filtro-curso-lao'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -17769,7 +17710,9 @@ function canSeeSeccion(sec) {
   // Director/coordinator: check if course program matches
   if (e.isDirector || e.isCoordinator) {
     const curso = db.cursos.find(c => c.id === sec.cursoId);
-    if (curso && canSeeProgram(curso.programa)) return true;
+    // Curso fusionado (oct 2026): puede estar en varios programas — basta
+    // con que el coordinador/director vea UNO de ellos para ver la sección.
+    if (curso && _programasDeCurso(curso).some(p => canSeeProgram(p))) return true;
   }
   // Professor: their own sections
   if (sec.profesorEmail && currentUser.email) {
@@ -17992,6 +17935,11 @@ function renderAlineacion() {
 
   if (alView === 'bank') renderAlBank(filterProg, isAdmin);
   else renderAlMatrix(filterProg, isAdmin);
+  // Unificación Competencias ⇄ Banco de Competencias (oct 2026): ambas
+  // pantallas gestionan la MISMA tabla (db.bancoCompetencias), así que
+  // cualquier cambio hecho aquí (crear, editar, vincular, borrar) también
+  // debe quedar reflejado de inmediato si el usuario está en "Competencias".
+  renderCompetencias();
  } catch (e) {
    console.error('renderAlineacion falló:', e);
    const elErr = document.getElementById('al-bank-content') || document.getElementById('al-matrix-content');
@@ -17999,18 +17947,78 @@ function renderAlineacion() {
  }
 }
 
-// ── BANK VIEW ─────────────────────────────────────────────────────────────────
-function renderAlBank(filterProg, isAdmin) {
-  const el = document.getElementById('al-bank-content');
+// Cursos (ids) vinculados a una competencia del banco. El match es por
+// código (igual que en toda la Alineación); no se filtra por programa aquí
+// porque el llamador ya sabe en qué programa está parado.
+function _linkedCourseIdsDeBancoComp(comp) {
+  return [...new Set(db.competencias.filter(dc =>
+    dc.codigo === 'C'+comp.num || dc.codigo === comp.num
+  ).map(dc => dc.cursoId))];
+}
+
+// Tarjeta de una competencia del banco. La usan tanto "Alineación Curricular
+// → Banco de Competencias" como la pantalla "Competencias" (oct 2026,
+// unificación pedida por Edgardo: el banco vive en ambos lados, es la misma
+// data, así que gestionar desde cualquiera de los dos lugares es
+// equivalente y se refleja al instante en el otro).
+function _htmlBancoCompCard(comp, prog, isAdmin) {
+  const linkedComps = db.competencias.filter(dc =>
+    dc.codigo === 'C'+comp.num || dc.codigo === comp.num
+  );
+  const linkedCourseIds = [...new Set(linkedComps.map(dc => dc.cursoId))];
+  const linkedCourses = linkedCourseIds.map(id => db.cursos.find(c => c.id === id)).filter(Boolean);
+
+  return `<div class="al-comp-card">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div style="flex:1">
+        <span class="al-comp-num ficha-clic" ${fichaAttr('competencia', comp.id, comp.texto)}>C${comp.num}</span>
+        <div class="al-comp-text">${comp.texto}</div>
+        <div class="al-comp-courses">
+          ${linkedCourses.map(cu => {
+            const dc = linkedComps.find(x => x.cursoId === cu.id);
+            const laoText = laosDeCompetencia(dc).map(l =>
+              `<span class="al-lao-tag">${l}</span>`).join('');
+            return `<div>
+              <div class="al-course-chip">
+                <span class="ficha-clic" ${fichaAttr('curso', cu.id)}>${cu.codigo}</span>
+                ${isAdmin ? `<span class="al-chip-remove" onclick="desvincularCompCurso('${comp.num}','${cu.id}')" title="Desvincular">×</span>` : ''}
+              </div>
+              ${laoText ? `<div class="al-lao-list">${laoText}</div>` : ''}
+            </div>`;
+          }).join('')}
+          ${linkedCourses.length === 0 ? `<span style="font-size:0.75rem;color:var(--muted);font-style:italic">Sin cursos vinculados</span>` : ''}
+        </div>
+        ${_alResumenCriteriosHtml(comp)}
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn btn-outline btn-sm" onclick="abrirCriteriosCompetencia('${comp.id}')" title="${isAdmin ? 'Editar criterios de evaluación' : 'Ver criterios de evaluación'}">📐 Criterios</button>
+        ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${comp.num}','${prog}')" title="Vincular curso">＋ Curso</button>
+        <button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${comp.num}','${prog}')" title="Editar competencia">✏️</button>
+        <button class="btn btn-outline btn-sm" onclick="eliminarCompetenciaBank('${comp.id}')" title="Eliminar competencia del banco">🗑️</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// Lista completa del Banco de Competencias, agrupada por programa y
+// dominio, con filtro opcional de programa y/o curso. Es el motor compartido
+// de "Alineación Curricular → Banco de Competencias" y de "Competencias".
+function _renderBancoLista(elId, opts) {
+  const { filterProg = '', filterCurso = '', isAdmin = false } = opts || {};
+  const el = document.getElementById(elId);
+  if (!el) return;
   const PROG_ORDER = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
     'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM'];
   const customProgs = (db.programas||[]).map(p=>p.nombre).filter(p=>!PROG_ORDER.includes(p));
-  const allProgOrder = [...PROG_ORDER, ...customProgs];
+  const bancoProgs = [...new Set((db.bancoCompetencias||[]).map(c=>c.programa))]
+    .filter(p=>!PROG_ORDER.includes(p) && !customProgs.includes(p));
+  const allProgOrder = [...PROG_ORDER, ...customProgs, ...bancoProgs];
   const progs = allProgOrder.filter(p => !filterProg || p === filterProg);
 
   let html = '';
   progs.forEach(prog => {
-    const comps = db.bancoCompetencias.filter(c => c.programa === prog);
+    let comps = db.bancoCompetencias.filter(c => c.programa === prog);
+    if (filterCurso) comps = comps.filter(c => _linkedCourseIdsDeBancoComp(c).includes(filterCurso));
     if (!comps.length) return;
     const dominios = dominiosDePrograma(prog);
     const totalCrit = comps.reduce((n, c) => n + criteriosDeCompetencia(c).length, 0);
@@ -18032,63 +18040,23 @@ function renderAlBank(filterProg, isAdmin) {
          { dom: null, comps: comps.filter(c => !c.dominioId || !dominios.some(d => d.id === c.dominioId)) }]
       : [{ dom: null, comps }];
     grupos.forEach(g => {
-    if (!g.comps.length) return;
-    if (dominios.length) {
-      html += `<div class="al-dom-header">${g.dom
-        ? `Dominio ${_alEsc(g.dom.numero)}: ${_alEsc(g.dom.nombre)}`
-        : 'Sin dominio asignado'}<span class="al-dom-count">${g.comps.length}</span></div>`;
-    }
-    g.comps.forEach(comp => {
-      // Find which db courses have this competency linked
-      const linkedComps = db.competencias.filter(dc =>
-        dc.codigo === 'C'+comp.num || dc.codigo === comp.num
-      );
-      const linkedCourseIds = [...new Set(linkedComps.map(dc => dc.cursoId))];
-      const linkedCourses = linkedCourseIds.map(id => db.cursos.find(c => c.id === id)).filter(Boolean);
-
-      // Available courses for this program (to link) — incluye cursos
-      // fusionados que compartan este programa entre varios (ver
-      // _programasDeCurso)
-      const availCourses = db.cursos.filter(cu =>
-        _programasDeCurso(cu).includes(prog) && !linkedCourseIds.includes(cu.id)
-      );
-
-      html += `<div class="al-comp-card">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
-          <div style="flex:1">
-            <span class="al-comp-num ficha-clic" ${fichaAttr('competencia', comp.id, comp.texto)}>C${comp.num}</span>
-            <div class="al-comp-text">${comp.texto}</div>
-            <div class="al-comp-courses">
-              ${linkedCourses.map(cu => {
-                const dc = linkedComps.find(x => x.cursoId === cu.id);
-                const laoText = laosDeCompetencia(dc).map(l =>
-                  `<span class="al-lao-tag">${l}</span>`).join('');
-                return `<div>
-                  <div class="al-course-chip">
-                    <span class="ficha-clic" ${fichaAttr('curso', cu.id)}>${cu.codigo}</span>
-                    ${isAdmin ? `<span class="al-chip-remove" onclick="desvincularCompCurso('${comp.num}','${cu.id}')" title="Desvincular">×</span>` : ''}
-                  </div>
-                  ${laoText ? `<div class="al-lao-list">${laoText}</div>` : ''}
-                </div>`;
-              }).join('')}
-              ${linkedCourses.length === 0 ? `<span style="font-size:0.75rem;color:var(--muted);font-style:italic">Sin cursos vinculados</span>` : ''}
-            </div>
-            ${_alResumenCriteriosHtml(comp)}
-          </div>
-          <div style="display:flex;gap:6px;flex-shrink:0">
-            <button class="btn btn-outline btn-sm" onclick="abrirCriteriosCompetencia('${comp.id}')" title="${isAdmin ? 'Editar criterios de evaluación' : 'Ver criterios de evaluación'}">📐 Criterios</button>
-            ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="abrirVincularCurso('${comp.num}','${prog}')" title="Vincular curso">＋ Curso</button>
-            <button class="btn btn-outline btn-sm" onclick="abrirEditarCompetenciaBank('${comp.num}','${prog}')" title="Editar competencia">✏️</button>
-            <button class="btn btn-outline btn-sm" onclick="eliminarCompetenciaBank('${comp.id}')" title="Eliminar competencia del banco">🗑️</button>` : ''}
-          </div>
-        </div>
-      </div>`;
-    });
+      if (!g.comps.length) return;
+      if (dominios.length) {
+        html += `<div class="al-dom-header">${g.dom
+          ? `Dominio ${_alEsc(g.dom.numero)}: ${_alEsc(g.dom.nombre)}`
+          : 'Sin dominio asignado'}<span class="al-dom-count">${g.comps.length}</span></div>`;
+      }
+      g.comps.forEach(comp => { html += _htmlBancoCompCard(comp, prog, isAdmin); });
     });
     html += '</div>';
   });
 
   el.innerHTML = html || '<div class="empty-state"><p>No hay competencias para este filtro.</p></div>';
+}
+
+// ── BANK VIEW ─────────────────────────────────────────────────────────────────
+function renderAlBank(filterProg, isAdmin) {
+  _renderBancoLista('al-bank-content', { filterProg, filterCurso: '', isAdmin });
 }
 
 // ── MATRIX VIEW ───────────────────────────────────────────────────────────────
@@ -18106,8 +18074,10 @@ function renderAlMatrix(filterProg, isAdmin) {
     const cursos = db.cursos.filter(c => _programasDeCurso(c).includes(prog));
     if (!comps.length || !cursos.length) return;
 
+    const coreVinculadoMatrix = _coreProgramaStringParaPrograma(prog);
     html += `<div style="margin-bottom:32px">
       <div class="al-prog-header"><span>${prog}</span></div>
+      ${coreVinculadoMatrix ? `<div style="font-size:0.72rem;color:var(--muted);margin:-4px 0 10px 0">ℹ️ Estas son solo las competencias de especialidad. El estudiante también debe desarrollar las de <strong>${coreVinculadoMatrix}</strong> — ver la vista Combinado en Matriz de Pareo.</div>` : ''}
       <div style="overflow-x:auto">
       <table class="al-matrix-table">
         <thead><tr>
@@ -18370,7 +18340,7 @@ function eliminarCompetenciaBank(compId) {
   if (!bc) return;
   const vinculos = db.competencias.filter(dc => dc.codigo === 'C' + bc.num || dc.codigo === bc.num);
   const cursosVinc = [...new Set(vinculos.map(v => v.cursoId))]
-    .map(id => db.cursos.find(c => c.id === id)).filter(c => c && c.programa === bc.programa);
+    .map(id => db.cursos.find(c => c.id === id)).filter(c => c && _programasDeCurso(c).includes(bc.programa));
   if (cursosVinc.length) {
     notify(`No se puede eliminar C${bc.num}: está vinculada a ${cursosVinc.map(c => c.codigo).join(', ')}. Desvincúlala primero.`, '⚠️');
     return;
@@ -20540,7 +20510,7 @@ function _renderFichaCompetencia(bcId) {
   // Cursos del programa que la desarrollan, con los LAOs que la miden
   const vinc = (db.competencias || []).filter(dc => (dc.codigo === 'C' + bc.num || dc.codigo === bc.num))
     .map(dc => ({ dc, curso: (db.cursos || []).find(c => c.id === dc.cursoId) }))
-    .filter(x => x.curso && x.curso.programa === bc.programa)
+    .filter(x => x.curso && _programasDeCurso(x.curso).includes(bc.programa))
     .sort((a, b) => String(a.curso.codigo).localeCompare(String(b.curso.codigo), undefined, { numeric: true }));
   const cursosHtml = vinc.length ? vinc.map(({ dc, curso }) => {
     const laos = laosDisponiblesPara(curso.id, currentUser?.username, isAdmin)
