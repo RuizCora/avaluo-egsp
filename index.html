@@ -2151,10 +2151,6 @@
       <label class="btn btn-outline btn-sm" style="cursor:pointer" title="Importar datos desde un JSON de respaldo">
         ⬆ Importar JSON<input type="file" accept=".json" style="display:none" onchange="importarJSON(this)">
       </label>
-      <span id="bd-admin-test-tools" style="display:none">
-        <button class="btn btn-outline btn-sm" onclick="sembrarDatosPruebaAlcanceAvaluo()" title="Crea un curso/sección ficticios compartidos entre MPH-General y MPH-Epidemiología para probar el Alcance de Avalúo">🧪 Sembrar datos de prueba</button>
-        <button class="btn btn-outline btn-sm" onclick="eliminarDatosPruebaAlcanceAvaluo()" title="Elimina el curso/sección de prueba creados arriba">🗑️ Eliminar datos de prueba</button>
-      </span>
     </div>
   </div>
   <div class="card" style="padding:16px 20px;margin-bottom:16px">
@@ -10120,85 +10116,6 @@ function guardarCompsEstudiante() {
   notify('Competencias actualizadas para este estudiante ✓');
 }
 
-// ──────────────── Datos de prueba para probar el alcance de Avalúo ────────────────
-// Solo para que un administrador pueda PROBAR el toggle en la app real (no
-// en una simulación), sin tocar ningún dato real. Crea un curso ficticio
-// compartido entre DOS programas de especialidad no-Core YA REALES del
-// catálogo (no inventa programas ni competencias nuevas): reutiliza
-// competencias que ya existen en el banco de MPH-General y MPH-Epidemiología,
-// para que lo que se vea al probar sea fiel a cómo luce un caso real. (El
-// "Core" de cada programa — MPH Core — no se mezcla aquí a propósito: en
-// este modelo las competencias núcleo se cubren en los cursos dedicados de
-// Core, no dentro de un curso electivo compartido como este; este dato de
-// prueba solo ejercita la unión/alcance ENTRE especialidades no-Core.)
-// Todo queda claramente marcado como "DATO DE PRUEBA" en nombres/códigos, y
-// eliminarDatosPruebaAlcanceAvaluo() lo retira por completo sin dejar rastro.
-const DEMO_ALCANCE_CURSO_ID = 'c_DEMO_ALCANCE_9001';
-function sembrarDatosPruebaAlcanceAvaluo() {
-  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede sembrar datos de prueba', '🔒'); return; }
-  if ((db.cursos || []).some(c => c.id === DEMO_ALCANCE_CURSO_ID)) {
-    notify('Los datos de prueba ya existen — en Avalúo, busca el curso "DEMO 9001"', 'ℹ️');
-    return;
-  }
-  const progGeneral = (db.programas || []).find(p => p && p.nombre === 'MPH-General');
-  const progEpid = (db.programas || []).find(p => p && p.nombre === 'MPH-Epidemiología');
-  if (!progGeneral || !progEpid) { notify('No se encontraron los programas MPH-General/MPH-Epidemiología en el catálogo', '⚠️'); return; }
-  if (!confirm('Esto crea un curso, competencias vinculadas y una sección ficticios (claramente marcados "DATO DE PRUEBA") para probar el alcance de Avalúo entre MPH-General y MPH-Epidemiología. No toca ningún dato real. ¿Continuar?')) return;
-
-  const curso = {
-    id: DEMO_ALCANCE_CURSO_ID, codigo: 'DEMO 9001',
-    nombre: '🧪 DATO DE PRUEBA — curso compartido para probar Alcance de Avalúo',
-    departamento: 'Social Sciences', creditos: '3',
-    programa: progGeneral.nombre, programaId: progGeneral.id,
-    programas: [progGeneral.nombre, progEpid.nombre],
-    programasIds: [progGeneral.id, progEpid.id],
-  };
-  db.cursos.push(curso);
-
-  // Reutiliza 2 competencias reales de cada programa (las primeras del banco
-  // para cada uno), tal cual ya existen — no se inventa texto nuevo.
-  const compsGeneral = db.bancoCompetencias.filter(bc => bc.programa === progGeneral.nombre).slice(0, 2);
-  const compsEpid = db.bancoCompetencias.filter(bc => bc.programa === progEpid.nombre).slice(0, 2);
-  [...compsGeneral, ...compsEpid].forEach(bc => {
-    db.competencias.push({
-      id: 'comp_demo_alcance_' + bc.num, cursoId: curso.id, codigo: 'C' + bc.num,
-      descripcion: bc.texto, tipo: 'rubrica', peso: '',
-      fechaCreacion: new Date().toISOString(),
-    });
-  });
-
-  db.secciones.push({
-    id: 'sec_demo_alcance_1', cursoId: curso.id, numero: '900D', semestre: '2026 T3',
-    profesor: 'Prof. Demo (dato de prueba)', profesorEmail: 'demo.prueba@upr.edu',
-    estudiantes: [
-      { id: 'est_demo_alcance_1', nombre: 'Estudiante Prueba 1 (MPH-General)' },
-      { id: 'est_demo_alcance_2', nombre: 'Estudiante Prueba 2 (MPH-General)' },
-      { id: 'est_demo_alcance_3', nombre: 'Estudiante Prueba 3 (MPH-Epidemiología)' },
-      { id: 'est_demo_alcance_4', nombre: 'Estudiante Prueba 4 (MPH-Epidemiología)' },
-    ],
-  });
-
-  saveDB();
-  if (typeof populateCursoSelects === 'function') populateCursoSelects();
-  if (typeof renderBaseDatos === 'function') renderBaseDatos();
-  notify('✅ Datos de prueba creados — en Avalúo, elige el curso "DEMO 9001", sección 900D', '🧪');
-}
-
-function eliminarDatosPruebaAlcanceAvaluo() {
-  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar datos de prueba', '🔒'); return; }
-  if (!(db.cursos || []).some(c => c.id === DEMO_ALCANCE_CURSO_ID)) { notify('No hay datos de prueba que eliminar', 'ℹ️'); return; }
-  if (!confirm('Esto borra el curso, competencias, sección y evaluaciones del dato de prueba "DEMO 9001". No afecta ningún dato real. ¿Continuar?')) return;
-  db.cursos = (db.cursos || []).filter(c => c.id !== DEMO_ALCANCE_CURSO_ID);
-  db.competencias = (db.competencias || []).filter(c => c.cursoId !== DEMO_ALCANCE_CURSO_ID);
-  db.secciones = (db.secciones || []).filter(s => s.cursoId !== DEMO_ALCANCE_CURSO_ID);
-  db.avaluos = (db.avaluos || []).filter(a => a.cursoId !== DEMO_ALCANCE_CURSO_ID);
-  saveDB();
-  if (typeof populateCursoSelects === 'function') populateCursoSelects();
-  if (typeof renderBaseDatos === 'function') renderBaseDatos();
-  notify('🗑️ Datos de prueba eliminados', '✅');
-}
-
-
 // ======================== FASE R3: RÚBRICA DE EVALUACIÓN DIRECTA ========================
 // La modalidad 'directa_con_rubrica' evalúa el "LAO grande" del curso (el LAO
 // virtual directa_<cursoId>) con una rúbrica en el MISMO formato que las
@@ -12177,9 +12094,6 @@ let avEstudianteActual = null;
 
 // ======================== BASE DE DATOS ========================
 function renderBaseDatos() {
-  const bdAdminTools = document.getElementById('bd-admin-test-tools');
-  if (bdAdminTools) bdAdminTools.style.display = currentUser?.rol === 'admin' ? '' : 'none';
-
   // ── Populate Program filter ───────────────────────────────────
   const progSel = document.getElementById('filtro-bd-programa');
   if (progSel) {
@@ -21840,9 +21754,30 @@ async function dummyLoadAll() {
     if (!compByCurso[c.cursoId]) compByCurso[c.cursoId] = [];
     compByCurso[c.cursoId].push(c);
   });
-  const cursos = (db.cursos || [])
-    .filter(c => !c[DUMMY_TAG] && (compByCurso[c.id] || []).length > 0)
-    .slice(0, 8);
+  const elegibles = (db.cursos || []).filter(c => !c[DUMMY_TAG] && (compByCurso[c.id] || []).length > 0);
+  // Prioriza incluir un curso real "compartido no-Core" (ver Parte 2,
+  // 2026-10-28) cuyas competencias YA estén repartidas por programa
+  // individual (no solo las de MPH Core) Y YA tengan LAO asignado para cada
+  // programa (una competencia sin LAO nunca aparece en la cuadrícula de
+  // Avalúo, así que no sirve para la prueba) — así, al cargar los datos de
+  // prueba, Edgardo tiene de inmediato una sección real donde probar el
+  // toggle de Alcance en Avalúo, sin fabricar ningún curso ni competencia
+  // ficticia aparte. Si no hay ninguno así en los datos reales, no se añade
+  // nada especial — el resto del comportamiento queda igual que siempre.
+  const _compsConLaoDeCurso = c => {
+    const ids = new Set();
+    (db.laos || []).filter(l => l.cursoId === c.id).forEach(l => (l.competencias || []).forEach(cc => ids.add(cc.competenciaId)));
+    return ids;
+  };
+  const cursoAlcanceDemo = elegibles.find(c => {
+    if (!_cursoEsCompartidoNoCore(c)) return false;
+    const conLao = _compsConLaoDeCurso(c);
+    return _programasNoCoreDeCurso(c).every(p =>
+      compByCurso[c.id].some(comp => conLao.has(comp.id) && _bancoDeCompetenciaCurso(comp, c)?.programa === p));
+  });
+  const cursos = cursoAlcanceDemo
+    ? [cursoAlcanceDemo, ...elegibles.filter(c => c !== cursoAlcanceDemo)].slice(0, 8)
+    : elegibles.slice(0, 8);
 
   // ── Estudiantes de prueba — generado programáticamente (en vez de una
   // lista fija de 16 nombres) para poder escalar el volumen de datos de
@@ -22333,7 +22268,10 @@ async function dummyLoadAll() {
   const resumenCursos = cursos.length
     ? `<strong>${avaluoEntries.length} avalúos</strong> en <strong>${secciones.length} secciones</strong> de tus cursos reales (<strong>${cursos.map(c => c.codigo).join(', ')}</strong>) a lo largo de 5 trimestres (2023T2 → 2025T1).`
     : `⚠ No se generaron secciones ni avalúos de prueba: no encontré ningún curso real con al menos una competencia definida. Crea un curso en la pestaña "Cursos" y sus competencias en "Competencias", y vuelve a cargar los datos de prueba.`;
-  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> y <strong>${facultadDummy.length} profesores/as</strong> de prueba cargados. ${resumenCursos}<br>También se crearon 2 programas ficticios para probar el Informe Focalizado de R1 — <strong>${progConDom.nombre}</strong> y <strong>${progSinDom.nombre}</strong> — cada uno con su curso, 5 secciones y avalúos propios.<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
+  const notaAlcanceDemo = cursoAlcanceDemo
+    ? `<br>🔀 El curso <strong>${cursoAlcanceDemo.codigo}</strong> es un curso real compartido entre <strong>${_programasNoCoreDeCurso(cursoAlcanceDemo).join(', ')}</strong> — úsalo en Avalúo para probar el toggle de Alcance de Competencias (Combinado/por programa) y la selección por estudiante dentro de "Combinado".`
+    : '';
+  dummyShowStatus(`✅ <strong>${estudiantesDummy.length} estudiantes</strong> y <strong>${facultadDummy.length} profesores/as</strong> de prueba cargados. ${resumenCursos}${notaAlcanceDemo}<br>También se crearon 2 programas ficticios para probar el Informe Focalizado de R1 — <strong>${progConDom.nombre}</strong> y <strong>${progSinDom.nombre}</strong> — cada uno con su curso, 5 secciones y avalúos propios.<br>Cuentas de prueba (contraseña <code>Test1234!</code>): <strong>avillanueva.dummy@rcm.upr.edu</strong> (profesor), <strong>msoto.dummy@rcm.upr.edu</strong> (director), <strong>ereyes.dummy@rcm.upr.edu</strong> (coordinador), <strong>cruiz.dummy@rcm.upr.edu</strong> (decano/a), <strong>visitante.dummy@rcm.upr.edu</strong> (visitante)`, cursos.length ? 'success' : 'warning');
   document.getElementById('dummy-load-btn').style.display = 'none';
   document.getElementById('dummy-delete-btn').style.display = '';
   btn.disabled = false;
@@ -22417,7 +22355,7 @@ function dummyShowStatus(msg, type) {
       Añade un conjunto completo de datos ficticios <strong>sin borrar</strong> los existentes. Cubre todos los campos del sistema:
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;font-size:0.82rem;margin-bottom:16px">
-      <div><strong style="color:var(--egsp-coral)">Cursos</strong><br>8 cursos, 5 programas, 4 departamentos</div>
+      <div><strong style="color:var(--egsp-coral)">Cursos</strong><br>8 cursos, 5 programas, 4 departamentos (incluye, si existe, un curso real compartido entre 2+ programas para probar el toggle de Alcance en Avalúo)</div>
       <div><strong style="color:var(--egsp-coral)">Competencias</strong><br>24 competencias, múltiples LAOs por cada una</div>
       <div><strong style="color:var(--egsp-coral)">Secciones</strong><br>21 secciones en 5 trimestres (2023T2–2025T1)</div>
       <div><strong style="color:var(--egsp-coral)">Estudiantes</strong><br>16 perfiles con ID, nombre y asesoría asignada</div>
