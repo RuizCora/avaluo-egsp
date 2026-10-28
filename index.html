@@ -4498,14 +4498,8 @@ function renderCompetencias() {
   const progSelComp = document.getElementById('filtro-programa-comp');
   if (progSelComp) {
     const prev = progSelComp.value;
-    const PROG_ORDER = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','MPH Epidemiology',
-      'MPH Biostatistics','MPH Environmental Health','DrPH Core','DrPH Environmental Health','DrPH HSAM'];
-    const catalogo = [...new Set([
-      ...PROG_ORDER,
-      ...(db.programas||[]).filter(p=>p && p.nombre).map(p=>p.nombre),
-      ...(db.bancoCompetencias||[]).map(c=>c.programa),
-    ])];
-    progSelComp.innerHTML = '<option value="">— Todos los programas —</option>' + catalogo.map(p => `<option value="${p}">${p}</option>`).join('');
+    const catalogo = _programasConBancoVigente();
+    progSelComp.innerHTML = '<option value="">— Todos los programas —</option>' + catalogo.map(p => `<option value="${_alEsc(p)}">${_alEsc(p)}</option>`).join('');
     progSelComp.value = catalogo.includes(prev) ? prev : '';
   }
 
@@ -17915,21 +17909,18 @@ function renderAlineacion() {
   const migCount = document.getElementById('migracion-laos-count');
   if (migCount) migCount.textContent = _contarMigracionesPendientes();
 
-  // Populate program filter
+  // Populate program filter. Se reconstruye por completo en cada render (no
+  // solo se agregan opciones nuevas) para que un programa renombrado o
+  // canonicalizado (ej. el viejo "MPH Gerontology" → "MPH-Gerontología")
+  // no deje una opción fantasma acumulada en el <select> — ver
+  // _programasConBancoVigente().
   const filterSel = document.getElementById('al-prog-filter');
   if (filterSel) {
-    // Always repopulate to catch newly added custom programs
-    const existingVals = [...filterSel.options].map(o=>o.value);
-    const allProgs = [...new Set([
-      ...db.bancoCompetencias.map(c => c.programa),
-      ...(db.programas||[]).filter(p=>p && p.nombre).map(p=>p.nombre)
-    ])];
-    allProgs.forEach(p => {
-      if (!existingVals.includes(p)) {
-        const o = document.createElement('option'); o.value = p; o.textContent = p;
-        filterSel.appendChild(o);
-      }
-    });
+    const prevSel = filterSel.value;
+    const progsVigentes = _programasConBancoVigente();
+    filterSel.innerHTML = '<option value="">— Todos los programas —</option>' +
+      progsVigentes.map(p => `<option value="${_alEsc(p)}">${_alEsc(p)}</option>`).join('');
+    filterSel.value = progsVigentes.includes(prevSel) ? prevSel : '';
   }
   const filterProg = filterSel?.value || '';
 
@@ -17945,6 +17936,18 @@ function renderAlineacion() {
    const elErr = document.getElementById('al-bank-content') || document.getElementById('al-matrix-content');
    if (elErr) elErr.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Ocurrió un error mostrando la Alineación. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${(e && e.message || e).toString().replace(/</g,'&lt;')}</code></p></div>`;
  }
+}
+
+// Programas que hoy tienen competencias reales en el banco, o que están en
+// el catálogo de programas vigente (`db.programas`) — usado para poblar los
+// filtros de programa en "Competencias" y en "Alineación Curricular", sin
+// incluir nombres viejos/pre-canonización (ej. "MPH Gerontology") que ya no
+// tienen ninguna competencia bajo ese nombre tras `banco_nombres_canonicos_v1`.
+function _programasConBancoVigente() {
+  return [...new Set([
+    ...(db.programas||[]).filter(p=>p && p.nombre).map(p=>p.nombre),
+    ...(db.bancoCompetencias||[]).map(c=>c.programa),
+  ])].sort();
 }
 
 // Cursos (ids) vinculados a una competencia del banco. El match es por
