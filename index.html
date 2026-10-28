@@ -3596,7 +3596,7 @@ function _ensureCursosMigratedToProgramCatalog() {
       // buscar el emparejamiento — si no, nunca encuentra el programa
       // (ya renombrado) y el curso queda "sin programa asignado".
       const nombreCanonico = PROG_RENAME_MAP_FASE_A[c.programa] || c.programa;
-      const match = db.programas.find(p => p.nombre.toLowerCase() === nombreCanonico.toLowerCase());
+      const match = db.programas.find(p => p.nombre && p.nombre.toLowerCase() === nombreCanonico.toLowerCase());
       if (match) {
         c.programaId = match.id;
         // Corrige también el texto denormalizado al nombre vigente, para que
@@ -5306,6 +5306,14 @@ const PROG_ORDER_DEFAULT = ['MPH/MPHE','MPHE','MPH Gerontology','MPH General','M
 function _ensureProgramCatalogSeeded() {
   if (!db.programas) db.programas = [];
   let changed = false;
+  // Defensivo: Firebase puede dejar huecos (null) en un arreglo si un
+  // registro se borró por índice en vez de por filter(), y cualquier
+  // registro sin nombre rompería el resto de esta función (y, en cascada,
+  // la Matriz de Pareo y la Alineación completas). Se descartan silenciosamente.
+  if (db.programas.some(p => !p || !p.nombre)) {
+    db.programas = db.programas.filter(p => p && p.nombre);
+    changed = true;
+  }
   // Asegura que todo programa existente tenga id (los agregados antes de esta
   // fase no lo tenían, ya que solo se identificaban por nombre)
   db.programas.forEach(p => {
@@ -5339,7 +5347,7 @@ function _ensureProgramCatalogSeeded() {
   });
   if (changed) saveDB();
   _ensureFaseA_ProgramasEstudiantes();
-  _ensureProgramaCoreLinks();
+  try { _ensureProgramaCoreLinks(); } catch (e) { console.error('_ensureProgramaCoreLinks falló (no bloqueante):', e); }
 }
 
 // Revisión arquitectónica oct 2026 (punto 1 de Edgardo): un programa de
@@ -5359,13 +5367,14 @@ const PROGRAMAS_CORE_DRPH_LINK = [
   'DrPH-Determinantes Sociales de la Salud',
 ];
 function _ensureProgramaCoreLinks() {
+  if (!Array.isArray(db.programas)) return; // defensivo: nunca debe tumbar el resto de la siembra
   let changed = false;
-  const mphCore  = db.programas.find(p => p.nombre === 'MPH Core');
-  const drphCore = db.programas.find(p => p.nombre === 'DrPH Core');
+  const mphCore  = db.programas.find(p => p && p.nombre === 'MPH Core');
+  const drphCore = db.programas.find(p => p && p.nombre === 'DrPH Core');
   const vincular = (nombres, core) => {
     if (!core) return;
     nombres.forEach(nombre => {
-      const prog = db.programas.find(p => p.nombre === nombre);
+      const prog = db.programas.find(p => p && p.nombre === nombre);
       if (prog && prog.coreProgramaId === undefined) { prog.coreProgramaId = core.id; changed = true; }
     });
   };
@@ -6927,7 +6936,7 @@ function accionRubricaPrograma(programaId, accion) {
   // las del Core (MPH Core / DrPH Core) si este programa está vinculado a
   // uno — la rúbrica del programa, al ser de cara al estudiante, combina
   // ambas por default (ver _coreProgramaStringParaPrograma()).
-  const core = prog.coreProgramaId ? (db.programas || []).find(p => p.id === prog.coreProgramaId) : null;
+  const core = prog.coreProgramaId ? (db.programas || []).find(p => p && p.id === prog.coreProgramaId) : null;
   const programasAIncluir = core ? [prog.nombre, core.nombre] : [prog.nombre];
   const m = _modeloRubricaPrograma(programasAIncluir, core ? `${prog.nombre} + ${core.nombre}` : prog.nombre);
   if (m.vacia) { notify('Este programa no tiene competencias en el banco', '⚠️'); return; }
@@ -16874,15 +16883,23 @@ let _matrizVistaPrograma = {};
 // especialidad con coreProgramaId, o null si no aplica (MHSA, los MS-*,
 // certificados, o el propio Core).
 function _coreProgramaStringParaPrograma(progKey) {
-  const prog = (db.programas || []).find(p => p.nombre === progKey);
-  if (!prog || !prog.coreProgramaId) return null;
-  const core = (db.programas || []).find(p => p.id === prog.coreProgramaId);
-  return core ? core.nombre : null;
+  try {
+    if (!Array.isArray(db.programas)) return null;
+    const prog = db.programas.find(p => p && p.nombre === progKey);
+    if (!prog || !prog.coreProgramaId) return null;
+    const core = db.programas.find(p => p && p.id === prog.coreProgramaId);
+    return core ? core.nombre : null;
+  } catch (e) { console.error('_coreProgramaStringParaPrograma falló (no bloqueante):', e); return null; }
 }
 
 function renderMatriz() {
+ try {
   _ensureBancoCompetenciasSeeded();
-  _ensureCursosMigratedToProgramCatalog(); // asegura que db.cursos ya tenga el nombre vigente del programa, aunque nunca se haya abierto la pestaña Cursos
+  // asegura que db.cursos ya tenga el nombre vigente del programa, aunque
+  // nunca se haya abierto la pestaña Cursos — en try/catch porque esta
+  // llamada es nueva aquí (antes solo corría desde renderCursos) y un dato
+  // inesperado en una cuenta real no debe tumbar toda la Matriz.
+  try { _ensureCursosMigratedToProgramCatalog(); } catch (e) { console.error('_ensureCursosMigratedToProgramCatalog falló (no bloqueante):', e); }
   _ensureCompetenciasSinDuplicados();
   const el = document.getElementById('matriz-container');
   const allCursos = db.cursos;
@@ -17052,6 +17069,11 @@ function renderMatriz() {
         ${buildMatrix(vistaKeys)}`;
     }).join('')}
   `;
+ } catch (e) {
+   console.error('renderMatriz falló:', e);
+   const elErr = document.getElementById('matriz-container');
+   if (elErr) elErr.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Ocurrió un error mostrando la Matriz de Pareo. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${(e && e.message || e).toString().replace(/</g,'&lt;')}</code></p></div>`;
+ }
 }
 
 function showAssessmentDetail(compNum, cursoId, assessmentName) {
@@ -17666,6 +17688,7 @@ function setAlView(view) {
 }
 
 function renderAlineacion() {
+ try {
   _ensureBancoCompetenciasSeeded();
   const isAdmin = currentUser?.rol === 'admin';
   const hint = document.getElementById('al-admin-hint');
@@ -17684,7 +17707,7 @@ function renderAlineacion() {
     const existingVals = [...filterSel.options].map(o=>o.value);
     const allProgs = [...new Set([
       ...db.bancoCompetencias.map(c => c.programa),
-      ...(db.programas||[]).map(p=>p.nombre)
+      ...(db.programas||[]).filter(p=>p && p.nombre).map(p=>p.nombre)
     ])];
     allProgs.forEach(p => {
       if (!existingVals.includes(p)) {
@@ -17697,6 +17720,11 @@ function renderAlineacion() {
 
   if (alView === 'bank') renderAlBank(filterProg, isAdmin);
   else renderAlMatrix(filterProg, isAdmin);
+ } catch (e) {
+   console.error('renderAlineacion falló:', e);
+   const elErr = document.getElementById('al-bank-content') || document.getElementById('al-matrix-content');
+   if (elErr) elErr.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Ocurrió un error mostrando la Alineación. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${(e && e.message || e).toString().replace(/</g,'&lt;')}</code></p></div>`;
+ }
 }
 
 // ── BANK VIEW ─────────────────────────────────────────────────────────────────
