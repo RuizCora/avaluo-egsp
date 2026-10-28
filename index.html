@@ -3012,10 +3012,8 @@
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Programa</label>
-        <select id="c-programa" onchange="_renderSelectModalidadCurso()">
-          <option value="">— Seleccionar —</option>
-        </select>
+        <label>Programas <span style="font-weight:400;color:var(--muted)">— puede elegir varios (Ctrl/Cmd+clic) si el curso es compartido</span></label>
+        <select id="c-programa" multiple size="5" onchange="_renderSelectModalidadCurso()"></select>
       </div>
       <div class="form-group">
         <label>Descripción del curso</label>
@@ -3288,7 +3286,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes','dominiosCompetencias','semillasAplicadas'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes','dominiosCompetencias','semillasAplicadas','cursosConsolidadosEliminados'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -3329,6 +3327,7 @@ function loadDB() {
   if (!db.cursos)       db.cursos = [];
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
+  if (!db.cursosConsolidadosEliminados) db.cursosConsolidadosEliminados = [];
 
   if (!window._fb) {
     // Sin Firebase disponible (ej. red caída): usa localStorage como fallback
@@ -3485,12 +3484,17 @@ function guardarCurso() {
   const codigo = document.getElementById('c-codigo').value.trim();
   const nombre = document.getElementById('c-nombre').value.trim();
   if (!codigo || !nombre) { notify('Complete los campos requeridos', '⚠️'); return; }
-  const programaId = document.getElementById('c-programa').value || null;
-  const programaObj = programaId ? db.programas.find(p => p.id === programaId) : null;
-  // 'programa' se mantiene como texto (nombre del programa) por compatibilidad
-  // con los badges/filtros/reportes existentes que ya lo leen como string;
-  // 'programaId' es la referencia real al catálogo (Departamentos y Programas)
-  // que usan los permisos por programa.
+  // Revisión "curso como entidad única" (oct 2026): el curso puede estar en
+  // varios programas a la vez — `c-programa` es ahora un <select multiple>.
+  // `programasIds`/`programas` (arreglos) son la fuente de verdad;
+  // `programaId`/`programa` (singular, el primero elegido) se mantienen
+  // por compatibilidad con pantallas que todavía los leen como string único
+  // (plantillas de Avalúo, permisos de coordinador, badges existentes).
+  const programaIds = [...document.getElementById('c-programa').selectedOptions].map(o => o.value);
+  const programaObjs = programaIds.map(id => db.programas.find(p => p.id === id)).filter(Boolean);
+  const programas = programaObjs.map(p => p.nombre);
+  const programaId = programaIds[0] || null;
+  const programa = programas[0] || '';
   const editId = document.getElementById('c-edit-id')?.value || '';
   if (editId) {
     // Edit mode
@@ -3501,8 +3505,7 @@ function guardarCurso() {
         departamento: document.getElementById('c-dept').value.trim(),
         creditos: document.getElementById('c-creditos').value,
         descripcion: document.getElementById('c-desc').value.trim(),
-        programaId,
-        programa: programaObj ? programaObj.nombre : '',
+        programaId, programa, programasIds: programaIds, programas,
       };
       _aplicarModalidadCursoDesdeForm(db.cursos[idx]);
     }
@@ -3515,8 +3518,7 @@ function guardarCurso() {
       departamento: document.getElementById('c-dept').value.trim(),
       creditos: document.getElementById('c-creditos').value,
       descripcion: document.getElementById('c-desc').value.trim(),
-      programaId,
-      programa: programaObj ? programaObj.nombre : '',
+      programaId, programa, programasIds: programaIds, programas,
       fechaCreacion: new Date().toISOString()
     };
     _aplicarModalidadCursoDesdeForm(curso);
@@ -3528,6 +3530,7 @@ function guardarCurso() {
   renderCursos();
   populateCursoSelects();
   ['c-codigo','c-nombre','c-dept','c-creditos','c-desc','c-edit-id'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  const progSel = document.getElementById('c-programa'); if (progSel) [...progSel.options].forEach(o => o.selected = false);
   const selMod = document.getElementById('c-modalidad'); if (selMod) selMod.value = '';
   const t = document.getElementById('modal-curso-title'); if(t) t.textContent = '📚 Registrar Curso';
 }
@@ -3537,7 +3540,7 @@ function guardarCurso() {
 // del curso editado y "guardar" sobrescribía ese curso en vez de crear uno.
 function abrirNuevoCurso() {
   ['c-codigo','c-nombre','c-dept','c-creditos','c-desc','c-edit-id'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  const prog = document.getElementById('c-programa'); if (prog) prog.value = '';
+  const prog = document.getElementById('c-programa'); if (prog) [...prog.options].forEach(o => o.selected = false);
   const selMod = document.getElementById('c-modalidad'); if (selMod) { selMod.value = ''; selMod.dataset.valor = ''; }
   const t = document.getElementById('modal-curso-title'); if (t) t.textContent = '📚 Registrar Curso';
   _renderFuenteRubricaCurso(null);
@@ -3556,7 +3559,10 @@ function abrirEditarCurso(id) {
   _ensureModalidadMigrada();
   _populateCursoProgramaSelect();
   const prog = document.getElementById('c-programa');
-  if (prog) prog.value = cur.programaId || '';
+  if (prog) {
+    const idsCurso = new Set(Array.isArray(cur.programasIds) && cur.programasIds.length ? cur.programasIds : (cur.programaId ? [cur.programaId] : []));
+    [...prog.options].forEach(o => { o.selected = idsCurso.has(o.value); });
+  }
   const selMod = document.getElementById('c-modalidad');
   if (selMod) selMod.dataset.valor = _modalidadValida(cur.modalidadEvaluacion) ? cur.modalidadEvaluacion : '';
   _renderFuenteRubricaCurso(cur);
@@ -3571,11 +3577,12 @@ function _populateCursoProgramaSelect() {
   _ensureProgramCatalogSeeded();
   const sel = document.getElementById('c-programa');
   if (!sel) return;
-  const prev = sel.value;
+  // Es un <select multiple> (curso puede tener varios programas) — conserva
+  // lo que ya estaba marcado antes de reconstruir las opciones.
+  const prevSeleccionados = new Set([...sel.selectedOptions].map(o => o.value));
   const ordenados = [...db.programas].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  sel.innerHTML = '<option value="">— Seleccionar —</option>' +
-    ordenados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
-  sel.value = prev;
+  sel.innerHTML = ordenados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  [...sel.options].forEach(o => { o.selected = prevSeleccionados.has(o.value); });
 }
 
 // Migración (Fase 2): cursos creados antes de que "programa" fuera una
@@ -4413,7 +4420,7 @@ function renderCursos() {
   const deptSel = document.getElementById('cursos-filtro-departamento');
   if (progSel) {
     const prev = progSel.value;
-    const progs = [...new Set(db.cursos.map(c => c.programa).filter(Boolean))].sort();
+    const progs = [...new Set(db.cursos.flatMap(c => _programasDeCurso(c)))].sort();
     progSel.innerHTML = '<option value="">Todos</option>' + progs.map(p => `<option value="${p}">${p}</option>`).join('');
     progSel.value = prev;
   }
@@ -4431,7 +4438,7 @@ function renderCursos() {
 
   let cursosFiltrados = db.cursos.filter(c => {
     if (busqueda && !`${c.codigo} ${c.nombre}`.toLowerCase().includes(busqueda)) return false;
-    if (filtroPrograma && c.programa !== filtroPrograma) return false;
+    if (filtroPrograma && !_programasDeCurso(c).includes(filtroPrograma)) return false;
     if (filtroDepto && _deptoDeCurso(c).nombre !== filtroDepto) return false;
     return true;
   });
@@ -4449,7 +4456,7 @@ function renderCursos() {
   }
 
   const sinCompetencias = db.cursos.filter(c => !db.competencias.some(x => x.cursoId === c.id));
-  const sinPrograma = db.cursos.filter(c => !c.programaId);
+  const sinPrograma = db.cursos.filter(c => !_programasDeCurso(c).length);
   const banner = (sinCompetencias.length ? `
     <div style="margin-bottom:10px;padding:12px 16px;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;font-size:0.85rem">
       ⚠️ <strong>${sinCompetencias.length} curso(s) sin competencias asignadas:</strong>
@@ -4459,23 +4466,36 @@ function renderCursos() {
       ⚠️ <strong>${sinPrograma.length} curso(s) sin programa asignado</strong> (esto afecta los permisos de coordinador por programa):
       ${sinPrograma.map(c => `<span class="badge badge-red" style="margin:2px">${c.codigo}</span>`).join(' ')}
     </div>` : '');
+  const progBadgeMap = {
+    'MPH/MPHE':'badge-gold','MPH Core':'badge-gold','MPHE':'badge-blue','MPH Gerontology':'badge-green','MPH-Gerontología':'badge-green',
+    'MPH General':'badge-blue','MPH-General':'badge-blue','MPH Epidemiology':'badge-rust','MPH-Epidemiología':'badge-rust',
+    'MPH Biostatistics':'badge-gold','MPH-Bioestadística':'badge-gold',
+    'MPH Environmental Health':'badge-green','MPH-Salud Ambiental':'badge-green','DrPH Core':'badge-rust',
+    'DrPH Environmental Health':'badge-green','DrPH-Salud Ambiental':'badge-green',
+    'DrPH HSAM':'badge-purple','DrPH-Análisis de Sistemas de Salud y Gerencia':'badge-purple',
+  };
   el.innerHTML = banner + `<div class="table-wrap"><table>
-    <thead><tr><th>Código</th><th>Nombre</th><th>Programa</th><th>Departamento</th><th>Competencias</th><th>Acciones</th></tr></thead>
+    <thead><tr><th>Código</th><th>Nombre</th><th>Programas</th><th>Departamento</th><th>Competencias</th><th>Acciones</th></tr></thead>
     <tbody>${cursosFiltrados.map(c => {
       const comps = db.competencias.filter(x => x.cursoId === c.id).length;
-      const progBadgeMap = {
-        'MPH/MPHE':'badge-gold','MPHE':'badge-blue','MPH Gerontology':'badge-green',
-        'MPH General':'badge-blue','MPH Epidemiology':'badge-rust','MPH Biostatistics':'badge-gold',
-        'MPH Environmental Health':'badge-green','DrPH Core':'badge-rust',
-        'DrPH Environmental Health':'badge-green','DrPH HSAM':'badge-purple'
-      };
-      const progBadge = progBadgeMap[c.programa] || 'badge-gold';
-      const progCat = _programaDeCurso(c.id);
+      // "Curso como entidad única" (oct 2026): un curso puede pertenecer a
+      // varios programas — se listan todos como badges, cada uno con enlace
+      // a la ficha de ese programa cuando existe en el catálogo.
+      const nombresProgramas = _programasDeCurso(c);
+      const programasHtml = nombresProgramas.length
+        ? nombresProgramas.map(nombre => {
+            const progCat = (db.programas || []).find(p => p.nombre === nombre);
+            const badge = progBadgeMap[nombre] || 'badge-gold';
+            return progCat
+              ? `<span class="badge ${badge}" style="cursor:pointer;margin:1px" title="Ver ficha del programa" onclick="abrirFicha('programa','${progCat.id}')">${nombre}</span>`
+              : `<span class="badge ${badge}" style="margin:1px">${nombre}</span>`;
+          }).join(' ')
+        : `<span class="badge badge-red">Sin programa</span>`;
       const depto = _deptoDeCurso(c);
       return `<tr>
         <td><strong style="font-family:'Montserrat',sans-serif">${fichaLink('curso', c.id, c.codigo)}</strong></td>
         <td>${c.nombre}</td>
-        <td>${progCat ? `<span class="badge ${progBadge}" style="cursor:pointer" title="Ver ficha del programa" onclick="abrirFicha('programa','${progCat.id}')">${c.programa || progCat.nombre}</span>` : `<span class="badge ${progBadge}">${c.programa || 'MPH/MPHE'}</span>`}</td>
+        <td>${programasHtml}</td>
         <td>${depto.id ? fichaLink('departamento', depto.id, depto.nombre) : (_alEsc(depto.nombre) || '—')}</td>
         <td><span class="badge ${comps === 0 ? 'badge-gold' : 'badge-blue'}">${comps} comp.</span></td>
         <td class="actions-cell">
@@ -5680,6 +5700,18 @@ function _semillaAplicada(id) {
 function _marcarSemilla(id) {
   if (!Array.isArray(db.semillasAplicadas)) db.semillasAplicadas = [];
   if (!db.semillasAplicadas.includes(id)) db.semillasAplicadas.push(id);
+}
+
+// Revisión "curso como entidad única" (oct 2026): un curso fusionado ya no
+// tiene un solo `programa` — carga `programas` (arreglo, ver
+// _fusionarCursosCompartidos). Se mantiene el fallback a `c.programa` por si
+// quedara algún curso sin fusionar (ej. recién creado a mano sin programas
+// asignados aún).
+function _programasDeCurso(c) {
+  return Array.isArray(c.programas) && c.programas.length ? c.programas : (c.programa ? [c.programa] : []);
+}
+function _programasIdsDeCurso(c) {
+  return Array.isArray(c.programasIds) && c.programasIds.length ? c.programasIds : (c.programaId ? [c.programaId] : []);
 }
 
 // Traduce un nombre de programa (posiblemente pre-Fase A) al nombre vigente
@@ -9098,7 +9130,7 @@ function renderDepartamentosProgramas() {
 
   function progRow(p) {
     if (search && !p.nombre.toLowerCase().includes(search)) return '';
-    const nc = db.cursos.filter(c => c.programaId === p.id).length;
+    const nc = db.cursos.filter(c => _programasIdsDeCurso(c).includes(p.id)).length;
     return `<div class="prog-tree-prog" data-prog-id="${p.id}" onclick="selectPrograma('${p.id}')">
       <div style="flex:1;min-width:0"><div class="prog-card-name" style="font-size:0.84rem">${p.nombre}</div></div>
       <span style="font-size:0.72rem;color:var(--muted);white-space:nowrap">${nc} curso${nc!==1?'s':''}</span>
@@ -9159,7 +9191,7 @@ function selectDept(deptId) {
   const dept = db.departamentos.find(d => d.id === deptId);
   if (!dept) { detail.innerHTML = '<div class="prog-detail-empty"><p>No encontrado</p></div>'; return; }
   const progs = db.programas.filter(p => p.departamentoId === deptId);
-  const cursos = db.cursos.filter(c => progs.some(p => p.id === c.programaId));
+  const cursos = db.cursos.filter(c => progs.some(p => _programasIdsDeCurso(c).includes(p.id)));
   const numFacultad = new Set((db.facultad || []).filter(f => f.departamentoId === deptId).map(f => f.id)).size;
 
   detail.innerHTML = `
@@ -9187,7 +9219,7 @@ function selectDept(deptId) {
     </div>
     <div class="prog-section-title">🎓 Programas (${progs.length})</div>
     ${progs.length ? progs.map(p => {
-      const nc = db.cursos.filter(c => c.programaId === p.id).length;
+      const nc = db.cursos.filter(c => _programasIdsDeCurso(c).includes(p.id)).length;
       return `<div class="prog-course-row" style="cursor:pointer" onclick="selectPrograma('${p.id}')">
         <div style="flex:1;min-width:0"><div style="font-size:0.84rem;font-weight:700">${p.nombre}</div></div>
         <span style="font-size:0.72rem;color:var(--muted)">${nc} curso${nc !== 1 ? 's' : ''}</span>
@@ -9208,25 +9240,37 @@ function selectPrograma(programaId) {
   const prog = db.programas.find(p => p.id === programaId);
   if (!prog) { detail.innerHTML = '<div class="prog-detail-empty"><p>No encontrado</p></div>'; return; }
 
-  const cursos = db.cursos.filter(c => c.programaId === programaId);
+  const cursos = db.cursos.filter(c => _programasIdsDeCurso(c).includes(programaId));
   const comps = db.bancoCompetencias.filter(c => c.programa === prog.nombre);
   const deptNombre = prog.departamentoId ? (db.departamentos.find(d => d.id === prog.departamentoId)?.nombre || '') : '';
-  const otrosProgramas = db.programas.filter(p => p.id !== programaId);
-  const progOpts = otrosProgramas.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
 
+  // "Curso como entidad única" (oct 2026, decisión de Edgardo): ya no es un
+  // "either/or" — un curso puede estar en varios programas a la vez. Aquí
+  // ya no se "mueve" un curso a otro programa; se quita/agrega este programa
+  // en su lista de programas (sin borrar el curso ni sus competencias/avalúos,
+  // que pueden seguir usándose desde otro programa que también lo tenga).
   const cursosHtml = cursos.length ? cursos.map(c => `
     <div class="prog-course-row">
       <span class="prog-course-code">${fichaLink('curso', c.id, c.codigo)}</span>
       <div style="flex:1;min-width:0">
         <div class="prog-course-name" title="${c.nombre}">${c.nombre}</div>
-        <div class="prog-course-dept">${_alEsc(_deptoDeCurso(c).nombre) || '—'} · ${c.creditos || '—'} cr.</div>
+        <div class="prog-course-dept">${_alEsc(_deptoDeCurso(c).nombre) || '—'} · ${c.creditos || '—'} cr.${_programasIdsDeCurso(c).length > 1 ? ` · compartido con ${_programasIdsDeCurso(c).length - 1} programa(s) más` : ''}</div>
       </div>
-      ${isAdmin ? `<select style="font-size:0.72rem;border:1.5px solid var(--border);border-radius:6px;padding:3px 8px;font-family:'Montserrat',sans-serif;background:var(--paper);cursor:pointer"
-        onchange="reassignCurso('${c.id}',this.value,this)" title="Mover a otro programa">
-        <option value="">Mover a…</option>${progOpts}
-      </select>` : ''}
+      ${isAdmin ? `<button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.7rem" onclick="quitarCursoDePrograma('${c.id}','${programaId}')" title="Quitar este curso de ${_alEscAttr(prog.nombre)} (no lo borra, solo lo desvincula de este programa)">✕ Quitar</button>` : ''}
     </div>`).join('')
     : '<div style="color:var(--muted);font-size:0.82rem;padding:10px 0">Sin cursos en este programa.</div>';
+
+  const cursosDisponibles = db.cursos.filter(c => !_programasIdsDeCurso(c).includes(programaId))
+    .sort((a,b) => (a.codigo||'').localeCompare(b.codigo||''));
+  const agregarCursoHtml = isAdmin ? `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 2px">
+      <select id="dp-add-curso-sel-${programaId}" style="flex:1;min-width:180px;font-size:0.78rem;border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;font-family:'Montserrat',sans-serif;background:var(--paper)">
+        <option value="">— Agregar curso ya existente —</option>
+        ${cursosDisponibles.map(c => `<option value="${c.id}">${c.codigo} — ${c.nombre}</option>`).join('')}
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="agregarCursoAPrograma(document.getElementById('dp-add-curso-sel-${programaId}').value,'${programaId}')">＋ Agregar</button>
+      <button class="btn btn-outline btn-sm" onclick="abrirNuevoCursoParaPrograma('${programaId}')">📚 Crear curso nuevo</button>
+    </div>` : '';
 
   const compsHtml = comps.length
     ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${comps.map(c => `<span class="badge badge-blue" style="font-size:0.72rem">C${c.num}</span>`).join('')}</div>`
@@ -9247,6 +9291,7 @@ function selectPrograma(programaId) {
     </div>
     <div class="prog-section-title">📚 Cursos (${cursos.length})</div>
     <div style="max-height:320px;overflow-y:auto">${cursosHtml}</div>
+    ${agregarCursoHtml}
     <div class="prog-section-title">🎯 Competencias (${comps.length})</div>
     ${compsHtml}
     ${comps.length ? (() => {
@@ -9275,18 +9320,54 @@ function selectPrograma(programaId) {
   `;
 }
 
-function reassignCurso(cursoId, newProgramaId, selEl) {
-  if (!newProgramaId) return;
-  const nuevoPrograma = db.programas.find(p => p.id === newProgramaId);
-  if (!nuevoPrograma) return;
-  if (!confirm(`¿Mover este curso al programa "${nuevoPrograma.nombre}"?`)) { selEl.value = ''; return; }
+// "Curso como entidad única" (oct 2026, decisión de Edgardo): un curso no
+// se "mueve" entre programas — se marca/desmarca en cada programa que lo
+// tiene en su currículo, sin tocar el curso en sí ni sus competencias o
+// avalúos (que pueden pertenecer a otro programa que también lo comparte).
+function _syncProgramaIdPrincipal(curso) {
+  // Mantiene programaId/programa (singular) sincronizados con el primero
+  // del arreglo, por compatibilidad con pantallas que todavía los leen como
+  // string único (plantillas de Avalúo, permisos de coordinador, etc.)
+  const ids = curso.programasIds || [];
+  const nombres = curso.programas || [];
+  curso.programaId = ids[0] || null;
+  curso.programa = nombres[0] || '';
+}
+
+function quitarCursoDePrograma(cursoId, programaId) {
   const curso = db.cursos.find(c => c.id === cursoId);
-  if (!curso) return;
-  curso.programaId = newProgramaId;
-  curso.programa = nuevoPrograma.nombre; // mantiene el string sincronizado para badges/filtros existentes
+  const prog = db.programas.find(p => p.id === programaId);
+  if (!curso || !prog) return;
+  if (!confirm(`¿Quitar "${curso.codigo}" del programa "${prog.nombre}"? El curso no se borra — sigue existiendo (y disponible para otros programas que lo compartan).`)) return;
+  curso.programasIds = _programasIdsDeCurso(curso).filter(id => id !== programaId);
+  curso.programas = _programasDeCurso(curso).filter(n => n !== prog.nombre);
+  _syncProgramaIdPrincipal(curso);
   saveDB();
-  notify('Curso movido a "' + nuevoPrograma.nombre + '" ✓');
+  notify(`"${curso.codigo}" quitado de ${prog.nombre} ✓`);
   renderDepartamentosProgramas();
+}
+
+function agregarCursoAPrograma(cursoId, programaId) {
+  if (!cursoId) { notify('Selecciona un curso', '⚠️'); return; }
+  const curso = db.cursos.find(c => c.id === cursoId);
+  const prog = db.programas.find(p => p.id === programaId);
+  if (!curso || !prog) return;
+  const ids = _programasIdsDeCurso(curso);
+  if (ids.includes(programaId)) { notify('Ese curso ya está en este programa', 'ℹ️'); return; }
+  curso.programasIds = [...ids, programaId];
+  curso.programas = [..._programasDeCurso(curso), prog.nombre];
+  _syncProgramaIdPrincipal(curso);
+  saveDB();
+  notify(`"${curso.codigo}" agregado a ${prog.nombre} ✓`);
+  renderDepartamentosProgramas();
+}
+
+// Abre el modal de curso nuevo con este programa ya pre-seleccionado en el
+// multi-select, para crearlo directamente desde Departamentos y Programas.
+function abrirNuevoCursoParaPrograma(programaId) {
+  abrirNuevoCurso();
+  const sel = document.getElementById('c-programa');
+  if (sel) [...sel.options].forEach(o => { o.selected = (o.value === programaId); });
 }
 
 
@@ -16996,7 +17077,7 @@ function renderMatriz() {
     .map(k => ({ key:k, ...(PROG_META[k] || { label:k, badge:'badge-blue', icon:'📋' }) }));
 
   function buildMatrix(progKeysArr) {
-    const cursos = allCursos.filter(c => progKeysArr.includes(c.programa))
+    const cursos = allCursos.filter(c => _programasDeCurso(c).some(p => progKeysArr.includes(p)))
       .filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
     const comps  = allComps.filter(c => progKeysArr.includes(c.programa))
       .filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
@@ -17085,7 +17166,7 @@ function renderMatriz() {
         : vista === 'core' ? [coreKey]
         : vista === 'especialidad' ? [prog.key]
         : [prog.key, coreKey];
-      const pCursos = allCursos.filter(c => vistaKeys.includes(c.programa)).filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i).length;
+      const pCursos = allCursos.filter(c => _programasDeCurso(c).some(p => vistaKeys.includes(p))).filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i).length;
       const pComps  = allComps.filter(c => vistaKeys.includes(c.programa)).filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i).length;
       return `
         <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -17312,12 +17393,142 @@ function _fixCreditosDesactualizados() {
   return changed;
 }
 
+// Revisión arquitectónica oct 2026 (decisión de Edgardo, "curso como entidad
+// única"): un curso compartido por varios programas existía como N
+// registros con el mismo "codigo" (uno por programa) — insostenible al
+// confirmar que hay SECCIONES COMBINADAS (estudiantes de más de un programa
+// en la misma sección física de ese curso): con filas separadas, la sección
+// se crea bajo UNA copia y cualquier estudiante de otro programa matriculado
+// ahí se evalúa/cuenta bajo el programa equivocado. Esta migración, de una
+// sola vez, fusiona cada grupo de copias que comparten "codigo" en UN solo
+// registro de db.cursos, con `programasIds`/`programas` (arreglos) además
+// del `programaId`/`programa` (singular, se conserva — ahora apunta al
+// programa "principal" del superviviente, para no romper pantallas que
+// todavía leen el singular, ej. plantillas de Avalúo, permisos de
+// coordinador). Criterio de superviviente (confirmado por Edgardo): la
+// copia de MPH Core/DrPH Core si el grupo tiene una (sus créditos ya
+// quedan alineados por `_fixCreditosDesactualizados`, que corre antes); si
+// no, la primera copia en el orden de `PRELOADED_CURSOS`. Todo curso sin
+// pareja (no comparte "codigo" con nadie) también recibe programasIds/
+// programas como arreglo de 1, para que el resto del código (Matriz,
+// Alineación, Departamentos y Programas) pueda asumir siempre el arreglo.
+//
+// Los ids fusionados se guardan en `db.cursosConsolidadosEliminados` (no
+// solo la marca de siembra) porque `preloadExcelData()` corre en cada carga
+// y, sin esa lista, volvería a sembrar esas copias desde PRELOADED_CURSOS
+// (que no se tocó) la próxima vez que cargue la app — resucitando la
+// duplicación que esta migración elimina.
+function _fusionarCursosCompartidos() {
+  if (!Array.isArray(db.cursos) || !db.cursos.length) return false;
+  if (!Array.isArray(db.cursosConsolidadosEliminados)) db.cursosConsolidadosEliminados = [];
+  if (_semillaAplicada('fusion_cursos_multiprograma_2026_10_28')) return false;
+
+  // Asegura que el catálogo de programas (con el renombre de Fase A) y el
+  // `programaId`/`programa` canónico de cada curso ya estén poblados ANTES
+  // de agrupar/fusionar — si no, esta migración (que corre UNA sola vez)
+  // podría quedarse con `programasIds` vacío para siempre si corre antes de
+  // que algo más haya llamado a estas dos funciones.
+  try { _ensureProgramCatalogSeeded(); } catch (e) { console.error('_ensureProgramCatalogSeeded falló dentro de _fusionarCursosCompartidos (no bloqueante):', e); }
+  try { _ensureCursosMigratedToProgramCatalog(); } catch (e) { console.error('_ensureCursosMigratedToProgramCatalog falló dentro de _fusionarCursosCompartidos (no bloqueante):', e); }
+
+  const ordenPreload = new Map(PRELOADED_CURSOS.map((c, i) => [c.id, i]));
+  // Acepta tanto el nombre canónico como el nombre viejo pre-Fase A de MPH
+  // Core ('MPH/MPHE'), por si esta migración llegara a correr antes de que
+  // el renombre haya alcanzado a aplicarse en algún escenario inesperado.
+  const esCore = p => p === 'MPH Core' || p === 'DrPH Core' || p === 'MPH/MPHE';
+
+  const grupos = {};
+  db.cursos.forEach(c => {
+    const codigo = (c.codigo || '').trim();
+    if (!codigo) return;
+    (grupos[codigo] = grupos[codigo] || []).push(c);
+  });
+
+  let changed = false;
+  Object.values(grupos).forEach(copias => {
+    if (copias.length <= 1) {
+      const c = copias[0];
+      if (!Array.isArray(c.programasIds)) {
+        c.programasIds = c.programaId ? [c.programaId] : [];
+        c.programas = c.programa ? [c.programa] : [];
+        changed = true;
+      }
+      return;
+    }
+
+    let superviviente = copias.find(c => esCore(c.programa));
+    if (!superviviente) {
+      superviviente = copias.slice().sort((a, b) =>
+        (ordenPreload.has(a.id) ? ordenPreload.get(a.id) : 9e9) -
+        (ordenPreload.has(b.id) ? ordenPreload.get(b.id) : 9e9))[0];
+    }
+    const eliminadas = copias.filter(c => c.id !== superviviente.id);
+    if (!eliminadas.length) return;
+
+    const programasIds = [];
+    const programas = [];
+    copias.forEach(c => {
+      if (c.programaId && !programasIds.includes(c.programaId)) programasIds.push(c.programaId);
+      if (c.programa && !programas.includes(c.programa)) programas.push(c.programa);
+    });
+    if (superviviente.programaId) {
+      const i = programasIds.indexOf(superviviente.programaId);
+      if (i > 0) { programasIds.splice(i, 1); programasIds.unshift(superviviente.programaId); }
+    }
+    if (superviviente.programa) {
+      const i = programas.indexOf(superviviente.programa);
+      if (i > 0) { programas.splice(i, 1); programas.unshift(superviviente.programa); }
+    }
+    superviviente.programasIds = programasIds;
+    superviviente.programas = programas;
+
+    const idsEliminados = new Set(eliminadas.map(c => c.id));
+
+    (db.competencias || []).forEach(dc => { if (idsEliminados.has(dc.cursoId)) dc.cursoId = superviviente.id; });
+    (db.avaluos || []).forEach(av => { if (idsEliminados.has(av.cursoId)) av.cursoId = superviviente.id; });
+    (db.secciones || []).forEach(se => { if (idsEliminados.has(se.cursoId)) se.cursoId = superviviente.id; });
+
+    // Fusiona competencias que pudieran chocar en el superviviente tras la
+    // reasignación (mismo curso+código ya existía en más de una copia) —
+    // mismo criterio que _ensureCompetenciasSinDuplicados: se prefiere la
+    // que tenga criterios/LAOs, y si hay empate la más reciente.
+    const porCodigo = {};
+    (db.competencias || []).filter(dc => dc.cursoId === superviviente.id).forEach(dc => {
+      const norm = (dc.codigo || '').replace(/^C(?=\d)/, '');
+      (porCodigo[norm] = porCodigo[norm] || []).push(dc);
+    });
+    const aEliminarDup = new Set();
+    Object.values(porCodigo).forEach(grupo => {
+      if (grupo.length <= 1) return;
+      const conCriterios = grupo.filter(x => laosDeCompetencia(x).length || x.criterios);
+      const candidatos = conCriterios.length ? conCriterios : grupo;
+      const ganador = candidatos.slice().sort((a, b) =>
+        new Date(b.fechaCreacion || 0) - new Date(a.fechaCreacion || 0))[0];
+      grupo.forEach(x => { if (x.id !== ganador.id) aEliminarDup.add(x.id); });
+    });
+    if (aEliminarDup.size) db.competencias = db.competencias.filter(x => !aEliminarDup.has(x.id));
+
+    db.cursos = db.cursos.filter(c => !idsEliminados.has(c.id));
+    idsEliminados.forEach(id => {
+      if (!db.cursosConsolidadosEliminados.includes(id)) db.cursosConsolidadosEliminados.push(id);
+    });
+    changed = true;
+  });
+
+  _marcarSemilla('fusion_cursos_multiprograma_2026_10_28');
+  return changed;
+}
+
 function preloadExcelData() {
   _fixAlineamientoEpiIhD17();
   _fixSalp6006SinCompetencias();
   _fixCreditosDesactualizados();
-  // Add cursos
+  // Add cursos (se omiten los ids ya fusionados por _fusionarCursosCompartidos
+  // — si no, PRELOADED_CURSOS, que no se tocó, los volvería a sembrar como
+  // copias separadas en cada carga)
+  const _cursosEliminadosSet = new Set(db.cursosConsolidadosEliminados || []);
   PRELOADED_CURSOS.forEach(c => {
+    if (_cursosEliminadosSet.has(c.id)) return;
     if (!db.cursos.find(x => x.id === c.id)) {
       db.cursos.push({ ...c, fechaCreacion: new Date().toISOString() });
     }
@@ -17351,6 +17562,7 @@ function preloadExcelData() {
   });
   // Competencias del programa MHSA se insertan vía COURSE_DATA (mismo
   // mecanismo que el resto de los programas) — ver constante COURSE_DATA.
+  _fusionarCursosCompartidos();
   saveDB();
 }
 
@@ -17834,9 +18046,11 @@ function renderAlBank(filterProg, isAdmin) {
       const linkedCourseIds = [...new Set(linkedComps.map(dc => dc.cursoId))];
       const linkedCourses = linkedCourseIds.map(id => db.cursos.find(c => c.id === id)).filter(Boolean);
 
-      // Available courses for this program (to link)
+      // Available courses for this program (to link) — incluye cursos
+      // fusionados que compartan este programa entre varios (ver
+      // _programasDeCurso)
       const availCourses = db.cursos.filter(cu =>
-        cu.programa === prog && !linkedCourseIds.includes(cu.id)
+        _programasDeCurso(cu).includes(prog) && !linkedCourseIds.includes(cu.id)
       );
 
       html += `<div class="al-comp-card">
@@ -17889,7 +18103,7 @@ function renderAlMatrix(filterProg, isAdmin) {
   let html = '';
   progs.forEach(prog => {
     const comps  = db.bancoCompetencias.filter(c => c.programa === prog);
-    const cursos = db.cursos.filter(c => c.programa === prog);
+    const cursos = db.cursos.filter(c => _programasDeCurso(c).includes(prog));
     if (!comps.length || !cursos.length) return;
 
     html += `<div style="margin-bottom:32px">
@@ -17973,7 +18187,7 @@ function toggleAlignment(compNum, cursoId, prog) {
 
 // ── VINCULAR desde bank view ──────────────────────────────────────────────────
 function abrirVincularCurso(compNum, prog) {
-  const cursos = db.cursos.filter(c => c.programa === prog);
+  const cursos = db.cursos.filter(c => _programasDeCurso(c).includes(prog));
   const linked = db.competencias
     .filter(dc => dc.codigo === 'C'+compNum || dc.codigo === compNum)
     .map(dc => dc.cursoId);
@@ -19836,8 +20050,18 @@ function _renderFichaCurso(cursoId) {
   const mod = resolverModalidadEvaluacion(c.id, null);
   const modInfo = modalidadInfo(mod.modalidad);
   const fuente = c.fuenteRubricaDirecta === 'curso' ? 'rúbrica propia del curso' : 'alineamiento del programa';
+  // "Curso como entidad única" (oct 2026): un curso puede estar en varios
+  // programas — se listan todos (cada uno con enlace a su ficha cuando está
+  // en el catálogo), no solo el principal.
+  const nombresProgramasFicha = _programasDeCurso(c);
+  const programasFichaHtml = nombresProgramasFicha.length
+    ? nombresProgramasFicha.map(nombre => {
+        const p = (db.programas || []).find(x => x.nombre === nombre);
+        return p ? fichaLink('programa', p.id, p.nombre) : `${_alEsc(nombre)} <span class="ficha-muted">(no está en el catálogo)</span>`;
+      }).join(' · ')
+    : '<span class="ficha-muted">Sin programa asignado</span>';
   const info = `<div class="ficha-kv">
-    <div>Programa</div><div>${prog ? fichaLink('programa', prog.id, prog.nombre) : (c.programa ? _alEsc(c.programa) + ' <span class="ficha-muted">(no está en el catálogo)</span>' : '<span class="ficha-muted">Sin programa asignado</span>')}</div>
+    <div>Programas</div><div>${programasFichaHtml}</div>
     <div>Departamento</div><div>${depto.id ? fichaLink('departamento', depto.id, depto.nombre) : (depto.nombre ? _alEsc(depto.nombre) + ' <span class="ficha-muted">(el programa no tiene departamento)</span>' : '<span class="ficha-muted">—</span>')}</div>
     <div>Créditos</div><div>${_alEsc(c.creditos || '—')}</div>
     <div>Modalidad de evaluación</div><div>${_alEsc(modInfo?.corto || modInfo?.label || mod.modalidad || '—')}<div class="ficha-muted">${_alEsc(_origenModalidadTexto(mod.origen))}</div></div>
