@@ -5633,6 +5633,42 @@ function _ensureBancoCompetenciasSeeded() {
     changed = true;
   }
 
+  // Diagnóstico con Edgardo (2026-10-28): en su cuenta real, Matriz de Pareo
+  // y Alineación solo mostraban MPH Core (con 1 competencia), los 4 MS y el
+  // certificado de deficiencias — exactamente los programas cubiertos por
+  // `banco_competencias_v1` y `..._programas_nuevos_2026_10_27b`. El resto
+  // (MPH-General/Bioestadística/Epidemiología/Salud Ambiental/Gerontología,
+  // MPHE, DrPH Core y sus 3 especialidades, MHSA, Certificado de Gerontología)
+  // nunca se copió a db.bancoCompetencias: `banco_competencias_v1` corrió una
+  // sola vez, hace tiempo, cuando ALL_COMPETENCIAS probablemente todavía no
+  // tenía esas competencias — y al quedar la marca de "ya corrida" puesta, el
+  // resto de los programas que se fueron agregando después a ALL_COMPETENCIAS
+  // nunca llegaron a copiarse, aunque el código siempre asumió que sí.
+  // Reconciliación general, de una sola vez: por cada (programa canónico, num)
+  // de ALL_COMPETENCIAS que todavía no está en db.bancoCompetencias, se agrega
+  // — sin tocar ni duplicar lo que ya exista. (Riesgo aceptado, igual que las
+  // siembras anteriores: si Edgardo había borrado a mano una competencia
+  // puntual de un programa que SÍ tiene otras, esta reconciliación la
+  // resucita; no hay forma de distinguir eso de "nunca se sembró" sin ver la
+  // cuenta real — si ocurre, se vuelve a borrar desde Alineación.)
+  if (!_semillaAplicada('banco_competencias_reconciliacion_2026_10_28')) {
+    const existentesRecon = new Set(db.bancoCompetencias.map(c => c.programa + "::" + c.num));
+    ALL_COMPETENCIAS.forEach(c => {
+      const programa = _nombreProgramaVigente(c.programa);
+      const key = programa + "::" + c.num;
+      if (!existentesRecon.has(key)) {
+        db.bancoCompetencias.push({
+          id: "banco_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          num: c.num, texto: c.texto, programa,
+          fechaCreacion: new Date().toISOString(),
+        });
+        existentesRecon.add(key);
+      }
+    });
+    _marcarSemilla('banco_competencias_reconciliacion_2026_10_28');
+    changed = true;
+  }
+
   if (_ensureAlineamientoSemillaMHSA()) changed = true;
   if (changed) saveDB();
 }
