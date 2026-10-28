@@ -5557,6 +5557,40 @@ function _ensureBancoCompetenciasSeeded() {
     changed = true;
   }
 
+  // (Programas nuevos, 2026-10-27, versión "b" tras agregar IH7 — ver Tabla
+  // D17 — el flag se renombró para que esta siembra incremental vuelva a
+  // correr una vez más y recoja la competencia nueva.)
+  // `banco_competencias_v1` corre una sola vez
+  // por cuenta, y en la cuenta real de Edgardo ya corrió hace tiempo (para
+  // los ~8-9 programas anteriores) — así que las 36 competencias agregadas a
+  // ALL_COMPETENCIAS esta sesión (MSE/DEM/IH/MSN/DDIT) nunca se copiarían a
+  // db.bancoCompetencias, y sin ellas ahí, Matriz de Pareo y Alineación
+  // (vista banco) no muestran esos programas ni sus cursos. Semilla aparte,
+  // de una sola vez, solo para esos 5 programas (no re-sincroniza los demás,
+  // para no resucitar una competencia que Edgardo haya borrado a mano).
+  if (!_semillaAplicada('banco_competencias_programas_nuevos_2026_10_27b')) {
+    const PROGRAMAS_NUEVOS_2026_10 = [
+      'MS-Epidemiología', 'MS-Demografía', 'MS-Higiene Industrial', 'MS-Nutrición',
+      'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana',
+    ];
+    const existentesNuevos = new Set(db.bancoCompetencias.map(c => c.programa + "::" + c.num));
+    ALL_COMPETENCIAS.forEach(c => {
+      const programa = _nombreProgramaVigente(c.programa);
+      if (!PROGRAMAS_NUEVOS_2026_10.includes(programa)) return;
+      const key = programa + "::" + c.num;
+      if (!existentesNuevos.has(key)) {
+        db.bancoCompetencias.push({
+          id: "banco_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          num: c.num, texto: c.texto, programa,
+          fechaCreacion: new Date().toISOString(),
+        });
+        existentesNuevos.add(key);
+      }
+    });
+    _marcarSemilla('banco_competencias_programas_nuevos_2026_10_27b');
+    changed = true;
+  }
+
   if (_ensureAlineamientoSemillaMHSA()) changed = true;
   if (changed) saveDB();
 }
@@ -16153,6 +16187,7 @@ const ALL_COMPETENCIAS = [
   { num:'IH4', texto:'To design control measures to reduce chemical, physical, biological and ergonomic occupational health and safety hazards to safe levels.', programa:'MS-Higiene Industrial' },
   { num:'IH5', texto:'To develop and disseminate, specifically for the workplace, occupational health and safety policies, standards, and guidelines to protect workers and the community.', programa:'MS-Higiene Industrial' },
   { num:'IH6', texto:'Effectively Communicate potential hazards associated with workplace operation and products.', programa:'MS-Higiene Industrial' },
+  { num:'IH7', texto:'Effectively collaborate as part of a team in the recognition, evaluation and control of typical problems faced by the industrial hygienist at work.', programa:'MS-Higiene Industrial' },
   // ── MS-Nutrición ──
   { num:'MSN1', texto:'Perform nutritional assessments and evaluate the nutritional needs of the Puerto Rican population using field-based methods, including anthropometric, diet and biochemical parameters.', programa:'MS-Nutrición' },
   { num:'MSN2', texto:'Design and conduct nutritional research using knowledge and skills in the selection of appropriate methodology, data collection, data analysis, interpretation and dissemination of findings.', programa:'MS-Nutrición' },
@@ -16619,25 +16654,24 @@ const COURSE_DATA = {
   // Los 3 cursos literales compartidos con el MPH-Core (EPID 6523, BIOE 6525,
   // SAAM 6528) quedan FUERA de este mapa en cada programa nuevo — no se
   // alinean a la competencia del programa nuevo, por instrucción de Edgardo.
-  'c_SALP6006E': { comps:['MSE1','MSE5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_DEMO6546E': { comps:['MSE2'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_BIOE6535E': { comps:['MSE3','MSE4','MSE6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_BIOE6545E': { comps:['MSE3','MSE4','MSE6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_BIOE6555E': { comps:['MSE3','MSE4','MSE6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_BIOE6605E': { comps:['MSE3','MSE6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6527E': { comps:['MSE1','MSE4','MSE5','MSE7','MSE8'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6528E': { comps:['MSE2','MSE3','MSE4','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6529E': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6535E': { comps:['MSE1','MSE2','MSE3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6539': { comps:['MSE2','MSE3','MSE4','MSE5','MSE7','MSE8'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6552': { comps:['MSE1','MSE2','MSE3','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6553': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6554': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6555': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6556': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6561': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6562': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_EPID6563': { comps:['MSE1','MSE2','MSE3','MSE4','MSE5','MSE7'], laos:['LAO 1: (pendiente de definir)'] },
+  // ── MS-Epidemiología: alineamiento RE-HECHO desde la Tabla D17.3.a oficial
+  // (documento de evaluación de competencias para CEPH que Edgardo confirmó
+  // como fuente de verdad, 2026-10-27) — reemplaza la lectura de la matriz
+  // PDF, que tenía un desalineo sistemático en las columnas 3/4/6/7. LAOs con
+  // nombre real tomado de esa tabla (antes placeholder). SALP 6006, DEMO 6546
+  // y los Seminarios II-V / Investigación I-III de Epidemiología no aparecen
+  // en la Tabla D17 — por instrucción de Edgardo, se les quita el
+  // alineamiento hasta verificarlos mejor (quedan sin entrada aquí).
+  'c_EPID6527E': { comps:['MSE1','MSE4','MSE5','MSE8'], laos:['LAO 1: Design of Surveillance System (Oral and Written Presentation)'] },
+  'c_EPID6528E': { comps:['MSE2','MSE4','MSE7'], laos:['LAO 1: Oral Presentations (Psychiatric Epidemiology & Mental Disorder Review)'] },
+  'c_EPID6529E': { comps:['MSE1','MSE2','MSE4','MSE5'], laos:['LAO 1: Critical Analysis and Written Report (Monograph)'] },
+  'c_EPID6535E': { comps:['MSE1','MSE2'], laos:['LAO 1: Oral Presentation (Infectious Disease)'] },
+  'c_EPID6539': { comps:['MSE2','MSE4','MSE5','MSE7','MSE8'], laos:['LAO 1: Reflections (Oral and Written)'] },
+  'c_EPID6552': { comps:['MSE1','MSE2','MSE7'], laos:['LAO 1: Oral Presentations (Historical Development Seminar)'] },
+  'c_BIOE6535E': { comps:['MSE3','MSE6'], laos:['LAO 1: Individual Exams'] },
+  'c_BIOE6545E': { comps:['MSE3'], laos:['LAO 1: Case Study'] },
+  'c_BIOE6555E': { comps:['MSE3','MSE6'], laos:['LAO 1: Data Analysis (Individual Exams)'] },
+  'c_BIOE6605E': { comps:['MSE6'], laos:['LAO 1: Project'] },
   'c_SALP6006D': { comps:['DEM3','DEM10'], laos:['LAO 1: (pendiente de definir)'] },
   'c_BIOE6535D': { comps:['DEM4','DEM5','DEM8'], laos:['LAO 1: (pendiente de definir)'] },
   'c_CISO6547': { comps:['DEM3','DEM4','DEM5','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
@@ -16652,25 +16686,24 @@ const COURSE_DATA = {
   'c_DEMO6615': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM7','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6621': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM7','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6622': { comps:['DEM1','DEM2','DEM3','DEM4','DEM5','DEM6','DEM7','DEM8','DEM9','DEM10','DEM11','DEM12'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SALP6006H': { comps:['IH1'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_ADSS6518': { comps:['IH2','IH6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6512': { comps:['IH1','IH4'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6513': { comps:['IH1','IH3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6524': { comps:['IH1','IH2','IH5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6526': { comps:['IH1','IH3','IH4'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6543': { comps:['IH1','IH2'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6547': { comps:['IH1','IH3','IH5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6548': { comps:['IH1','IH3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6565': { comps:['IH1'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6566': { comps:['IH1','IH3','IH4','IH6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6567': { comps:['IH2','IH3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6568': { comps:['IH1','IH5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6570': { comps:['IH1','IH4','IH5'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6571': { comps:['IH3','IH4'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6572': { comps:['IH1','IH4','IH6'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6573': { comps:['IH3','IH4'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6636': { comps:['IH1','IH3'], laos:['LAO 1: (pendiente de definir)'] },
-  'c_SAAM6696': { comps:['IH1','IH2','IH3','IH4','IH6'], laos:['LAO 1: (pendiente de definir)'] },
+  // ── MS-Higiene Industrial: alineamiento RE-HECHO desde la Tabla D17.3.b
+  // oficial (confirmado por Edgardo, 2026-10-27) — reemplaza la lectura de la
+  // matriz PDF. Incluye IH7 (competencia de trabajo en equipo, nueva, no
+  // estaba en la matriz curricular). LAOs con nombre real. SALP 6006 y los
+  // cursos SAAM 6524/6543/6571/6573/6636/6696 no aparecen en la Tabla D17 —
+  // por instrucción de Edgardo, quedan sin alineamiento hasta verificarlos.
+  'c_ADSS6518': { comps:['IH2','IH5'], laos:['LAO 1: Planning Project'] },
+  'c_SAAM6512': { comps:['IH4'], laos:['LAO 1: Applied Noise Control Project'] },
+  'c_SAAM6513': { comps:['IH1','IH6'], laos:['LAO 1: Laboratory Oral Presentation 2 (Noise Frequency)','LAO 2: Oral Presentation & Written Lab Report 3 (Noise Mapping)','LAO 3: Oral Laboratory Presentation 4 (Vibration)','LAO 4: Oral Presentation of Laboratory 6 (Heat Stress)'] },
+  'c_SAAM6526': { comps:['IH1'], laos:['LAO 1: Monograph (Ergonomic Risk Factor Analysis)'] },
+  'c_SAAM6547': { comps:['IH3'], laos:['LAO 1: Final Monograph'] },
+  'c_SAAM6548': { comps:['IH6'], laos:['LAO 1: Written Report & Oral Presentation of Risk Assessments (Laboratory 6)'] },
+  'c_SAAM6565': { comps:['IH4'], laos:['LAO 1: Exam (Chemical Control Measures Design)'] },
+  'c_SAAM6566': { comps:['IH7'], laos:['LAO 1: Site-Visit Report'] },
+  'c_SAAM6567': { comps:['IH3'], laos:['LAO 1: Case Study Presentation'] },
+  'c_SAAM6568': { comps:['IH1'], laos:['LAO 1: Midterm Exam','LAO 2: Final Exam'] },
+  'c_SAAM6570': { comps:['IH5'], laos:['LAO 1: Risk/Emergency Management Operation Plan'] },
+  'c_SAAM6572': { comps:['IH4','IH6'], laos:['LAO 1: Ergonomic Process Proposal','LAO 2: Proposal Oral Presentation'] },
   'c_SALP6006N': { comps:['MSN3'], laos:['LAO 1: (pendiente de definir)'] },
   'c_DEMO6606N': { comps:['MSN2'], laos:['LAO 1: (pendiente de definir)'] },
   'c_NUTR6521': { comps:['MSN1','MSN2','MSN3','MSN4'], laos:['LAO 1: (pendiente de definir)'] },
@@ -17009,7 +17042,40 @@ function waitForFb(timeoutMs = 8000) {
   setDefaultDate();
 })();
 
+// (2026-10-27) Corrección del alineamiento de MS-Epidemiología y MS-Higiene
+// Industrial contra la Tabla D17 oficial que Edgardo proveyó: la primera
+// siembra (basada en la matriz PDF, entregada antes) ya pudo haber quedado
+// guardada en su cuenta real, y preloadExcelData() nunca pisa un registro
+// de db.competencias que ya "existe" (mismo cursoId+codigo) — así que, sin
+// esto, los comps/LAOs viejos se quedarían. Se borran, UNA sola vez, los
+// registros de competencia de estos cursos (y sus LAOs huérfanos), para que
+// el ciclo normal de abajo los vuelva a sembrar ya con los datos correctos
+// de COURSE_DATA. Los cursos que la Tabla D17 no cubre (sin entrada en
+// COURSE_DATA) quedan así sin alineamiento, según instrucción de Edgardo.
+function _fixAlineamientoEpiIhD17() {
+  if (_semillaAplicada('fix_alineamiento_epi_ih_d17_2026_10_27')) return false;
+  const CURSOS_EPI_IH_A_RESEMBRAR = [
+    'c_SALP6006E','c_DEMO6546E','c_BIOE6535E','c_BIOE6545E','c_BIOE6555E','c_BIOE6605E',
+    'c_EPID6527E','c_EPID6528E','c_EPID6529E','c_EPID6535E','c_EPID6539','c_EPID6552',
+    'c_EPID6553','c_EPID6554','c_EPID6555','c_EPID6556','c_EPID6561','c_EPID6562','c_EPID6563',
+    'c_SALP6006H','c_ADSS6518','c_SAAM6512','c_SAAM6513','c_SAAM6524','c_SAAM6526','c_SAAM6543',
+    'c_SAAM6547','c_SAAM6548','c_SAAM6565','c_SAAM6566','c_SAAM6567','c_SAAM6568','c_SAAM6570',
+    'c_SAAM6571','c_SAAM6572','c_SAAM6573','c_SAAM6636','c_SAAM6696',
+  ];
+  let changed = false;
+  CURSOS_EPI_IH_A_RESEMBRAR.forEach(cursoId => {
+    const stale = (db.competencias || []).filter(x => x.cursoId === cursoId);
+    if (!stale.length) return;
+    stale.forEach(dc => _sincronizarLaosDesdeTexto(dc, '')); // desvincula/borra LAOs huérfanos
+    db.competencias = db.competencias.filter(x => x.cursoId !== cursoId);
+    changed = true;
+  });
+  _marcarSemilla('fix_alineamiento_epi_ih_d17_2026_10_27');
+  return changed;
+}
+
 function preloadExcelData() {
+  _fixAlineamientoEpiIhD17();
   // Add cursos
   PRELOADED_CURSOS.forEach(c => {
     if (!db.cursos.find(x => x.id === c.id)) {
