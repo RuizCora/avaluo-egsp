@@ -9349,6 +9349,18 @@ function selectPrograma(programaId) {
         <div class="prog-detail-name">${prog.nombre}</div>
         <div class="prog-detail-sub">${deptNombre ? '🏛 ' + fichaLink('departamento', prog.departamentoId, deptNombre) : 'Sin departamento asignado'}</div>
         <div class="prog-detail-sub">📝 Modalidad de evaluación: ${_modalidadValida(prog.modalidadEvaluacion) ? modalidadInfo(prog.modalidadEvaluacion).corto : 'sin fijar — cada profesor escoge'}</div>
+        <div class="prog-detail-sub">📋 Secuencias: ${(() => {
+          const secs = prog.secuencias || {};
+          const activas = SECUENCIAS_CONFIG.filter(({ key, opcional }) => !opcional || secs[key]?.activa);
+          if (!activas.length) return 'ninguna configurada';
+          return activas.map(({ key, label }) => {
+            const d = secs[key]?.duracion;
+            const partes = [];
+            if (d?.anios) partes.push(d.anios + ' año' + (d.anios > 1 ? 's' : ''));
+            if (d?.trimestres) partes.push(d.trimestres + ' trim.');
+            return label + (partes.length ? ' (' + partes.join(', ') + ')' : '');
+          }).join(' · ');
+        })()}</div>
       </div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
         <button class="btn btn-outline btn-sm" onclick="abrirFicha('programa','${programaId}')" title="Abrir la ficha del programa">🗂 Ficha</button>
