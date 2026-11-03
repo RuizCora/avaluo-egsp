@@ -2277,7 +2277,7 @@
     <button class="rpt-tab" id="rtab-r6" onclick="showReport('r6')">R6 · En Riesgo</button>
     <button class="rpt-tab" id="rtab-r7" onclick="showReport('r7')">R7 · Facultad</button>
     <button class="rpt-tab" id="rtab-r8" onclick="showReport('r8')">R8 · Notas</button>
-    <button class="rpt-tab" id="rtab-r9" onclick="showReport('r9')">R9 · Cohortes</button>
+    <button class="rpt-tab" id="rtab-r9" onclick="showReport('r9')">R9 · Matrícula</button>
   </div>
 
   <!-- Export toolbar (shown per report) -->
@@ -2520,8 +2520,13 @@
     <div id="r8-body"></div>
   </div>
 
-  <!-- R9 — Estudiantes por Cohorte y Secuencia (Fase E) -->
+  <!-- R9 — Matrícula por Cohorte y Secuencia (Fase E, ajustado Fase 4) -->
   <div id="rpt-r9" class="rpt-pane" style="display:none">
+    <div class="rpt-disclaimer" id="r9-disclaimer">
+      <strong>ℹ️ Matrícula por Cohorte y Secuencia</strong> — Este informe es un listado de matrícula:
+      muestra cuántos estudiantes hay por programa, cohorte y tipo de secuencia. Para análisis de tendencias,
+      comparativas entre cohortes y métricas de logro, consulte <strong>R4 · Dashboard</strong>.
+    </div>
     <div class="rpt-filter-bar">
       <div class="dash-filter-group"><label class="dash-filter-label">Programa</label>
         <select id="r9-prog" class="dash-select" onchange="renderR9()"><option value="">Todos</option></select></div>
@@ -14954,6 +14959,7 @@ function renderR3() {
 // ── R4 — Dashboard de Programa ────────────────────────────────
 // Infraestructura: tab switching, filtros globales, render dispatch
 let _r4Vista = 'v1';
+let _r4V7Corte = ''; // punto de corte para V7 (Antes/Después)
 
 function r4ShowVista(v) {
   _r4Vista = v;
@@ -14968,6 +14974,7 @@ function r4ShowVista(v) {
 }
 
 function r4GlobalChange() { renderR4(); }
+function r4V7CorteChange(v) { _r4V7Corte = v; renderR4(); }
 
 function renderR4() {
   const filterProg = document.getElementById('r4-prog')?.value || '';
@@ -15000,13 +15007,11 @@ function renderR4() {
     case 'v1': _r4RenderV1(avaluos, filterProg, lente); break;
     case 'v2': _r4RenderV2(avaluos, filterProg); break;
     case 'v3': _r4RenderV3(avaluos, filterProg); break;
-    case 'v4': case 'v5':
-    case 'v6': case 'v7': case 'v8':
-      document.getElementById('r4-' + _r4Vista).innerHTML =
-        '<div class="dash-empty"><div class="dash-empty-icon">🚧</div>' +
-        '<p>Vista ' + _r4Vista.toUpperCase() + ' — próximamente (Fase 3c–3d)</p></div>';
-      _reportCSVData = []; _reportCSVName = 'R4_dashboard.csv';
-      break;
+    case 'v4': _r4RenderV4(avaluos, filterProg); break;
+    case 'v5': _r4RenderV5(avaluos, filterProg); break;
+    case 'v6': _r4RenderV6(avaluos, filterProg); break;
+    case 'v7': _r4RenderV7(avaluos, filterProg); break;
+    case 'v8': _r4RenderV8(avaluos, filterProg); break;
   }
 }
 
@@ -15592,6 +15597,746 @@ function _r4RenderV3(avaluos, filterProg) {
   ];
 }
 
+// ── V4 · Comparativa entre Programas ────────────────────────
+function _r4RenderV4(avaluos, filterProg) {
+  const el = document.getElementById('r4-v4');
+  const escalaGlobal = db.escalasNiveles?.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
+
+  // Use ALL avalúos (unfiltered by program) for cross-program comparison
+  const allAvaluos = _filterAvaluosByRole(db.avaluos || []);
+  if (!allAvaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos de avalúo disponibles</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_por_programa.csv'; return;
+  }
+
+  // Group by program
+  const byProg = {};
+  allAvaluos.forEach(av => {
+    const curso = db.cursos.find(c => c.id === av.cursoId);
+    const prog = curso?.programa || 'Sin programa';
+    if (!byProg[prog]) byProg[prog] = [];
+    byProg[prog].push(av);
+  });
+  const progs = Object.keys(byProg).sort((a, b) => a.localeCompare(b, 'es'));
+
+  if (progs.length < 2) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Se necesitan al menos 2 programas para comparar</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_por_programa.csv'; return;
+  }
+
+  // Stats per program
+  const progStats = progs.map(p => {
+    const avs = byProg[p];
+    const evals = _allEvals(avs);
+    const avg = evals.length ? _avgNivel(evals.map(e => e.val)) : null;
+    const estudiantes = new Set(evals.map(e => e.estudianteId || e.estudiante).filter(Boolean));
+    const comps = new Set(evals.map(e => e.compCode).filter(Boolean));
+    const withGrade = avs.filter(a => a.notaFinal !== '' && a.notaFinal !== undefined && a.notaFinal !== null);
+    let gradeAvg = null;
+    if (withGrade.length) gradeAvg = withGrade.reduce((s, a) => s + parseFloat(a.notaFinal), 0) / withGrade.length;
+    return { prog: p, avg, evals: evals.length, estudiantes: estudiantes.size,
+      comps: comps.size, gradeAvg, avaluos: avs.length };
+  });
+
+  // ── Bar chart ──────────────────────────────
+  const barColors = ['#f97316','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16','#f59e0b','#6366f1'];
+  const W = 540, H = 240, padL = 40, padR = 20, padT = 20, padB = 70;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const barW = Math.min(50, (plotW / progStats.length) * 0.65);
+  const gap = (plotW - barW * progStats.length) / (progStats.length + 1);
+  function yPos(v) { return padT + plotH - (v / maxNivel) * plotH; }
+
+  let gridHtml = '';
+  for (let i = 0; i <= 5; i++) {
+    const v = maxNivel * i / 5; const y = yPos(v);
+    gridHtml += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="r4-trend-grid"/>`;
+    gridHtml += `<text x="${padL - 6}" y="${y + 3}" class="r4-trend-axis" text-anchor="end">${v.toFixed(1)}</text>`;
+  }
+  let barsHtml = '', xLabelsHtml = '';
+  progStats.forEach((s, i) => {
+    const x = padL + gap + i * (barW + gap);
+    const barH = s.avg !== null ? (s.avg / maxNivel) * plotH : 0;
+    const y = padT + plotH - barH;
+    const color = barColors[i % barColors.length];
+    barsHtml += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${color}" class="r4-cohort-bar" opacity="0.85"/>`;
+    if (s.avg !== null) barsHtml += `<text x="${x + barW / 2}" y="${y - 5}" class="r4-trend-val">${s.avg.toFixed(2)}</text>`;
+    // Truncate long program names
+    const label = s.prog.length > 20 ? s.prog.substring(0, 18) + '…' : s.prog;
+    xLabelsHtml += `<text x="${x + barW / 2}" y="${H - 5}" class="r4-trend-axis" text-anchor="end" transform="rotate(-40 ${x + barW / 2} ${H - 5})">${label}</text>`;
+  });
+
+  const chartHtml = `
+    <div class="r4-trend-wrap">
+      <div class="r4-trend-title">📊 Comparativa entre Programas — Avg Logro</div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">
+        ${gridHtml}${barsHtml}${xLabelsHtml}
+      </svg>
+    </div>`;
+
+  // ── KPIs ──────────────────────────────
+  const best = progStats.filter(s => s.avg !== null).sort((a, b) => b.avg - a.avg)[0];
+  const worst = progStats.filter(s => s.avg !== null).sort((a, b) => a.avg - b.avg)[0];
+  let kpiHtml = '';
+  if (best && worst) {
+    kpiHtml = `
+      <div class="r4-kpi-grid" style="grid-template-columns:repeat(auto-fit, minmax(150px,1fr))">
+        <div class="dash-kpi"><div class="dash-kpi-val">${progs.length}</div><div class="dash-kpi-label">Programas</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val" style="color:#059669">${best.avg.toFixed(2)}</div><div class="dash-kpi-label">Mayor Logro (${best.prog.length > 25 ? best.prog.substring(0,23)+'…' : best.prog})</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val" style="color:#dc2626">${worst.avg.toFixed(2)}</div><div class="dash-kpi-label">Menor Logro (${worst.prog.length > 25 ? worst.prog.substring(0,23)+'…' : worst.prog})</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val">${(best.avg - worst.avg).toFixed(2)}</div><div class="dash-kpi-label">Brecha entre Programas</div></div>
+      </div>`;
+  }
+
+  // ── Table ──────────────────────────────
+  const csvRows = [['Programa', 'Avalúos', 'Evaluaciones', 'Estudiantes', 'Competencias', 'Avg Logro', 'Nota Promedio']];
+  let tableHtml = `
+    <div class="rpt-section-head">Detalle por Programa</div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th data-sort="text">Programa</th>
+      <th data-sort="num">Avalúos</th>
+      <th data-sort="num">Evaluaciones</th>
+      <th data-sort="num">Estudiantes</th>
+      <th data-sort="num">Competencias</th>
+      <th data-sort="num">Avg Logro</th>
+      <th data-sort="num">Nota Promedio</th>
+    </tr></thead><tbody>`;
+  progStats.forEach(s => {
+    const { bg, col } = s.avg !== null ? _bgColParaAvg(s.avg) : { bg: '', col: '' };
+    const isCurrent = s.prog === filterProg;
+    tableHtml += `<tr${isCurrent ? ' style="background:rgba(255,120,79,0.08)"' : ''}>
+      <td><strong>${s.prog}</strong>${isCurrent ? ' <small style="color:var(--egsp-coral)">◀ actual</small>' : ''}</td>
+      <td style="text-align:center">${s.avaluos}</td>
+      <td style="text-align:center">${s.evals}</td>
+      <td style="text-align:center">${s.estudiantes}</td>
+      <td style="text-align:center">${s.comps}</td>
+      <td style="text-align:center;font-weight:800;background:${bg};color:${col};border-radius:6px">${s.avg !== null ? s.avg.toFixed(2) : '—'}</td>
+      <td style="text-align:center">${s.gradeAvg !== null ? s.gradeAvg.toFixed(1) : '—'}</td>
+    </tr>`;
+    csvRows.push([s.prog, s.avaluos, s.evals, s.estudiantes, s.comps,
+      s.avg !== null ? s.avg.toFixed(2) : '', s.gradeAvg !== null ? s.gradeAvg.toFixed(1) : '']);
+  });
+  tableHtml += '</tbody></table></div>';
+
+  el.innerHTML = kpiHtml + chartHtml + tableHtml;
+  _rptMakeSortable('r4-v4');
+  _reportCSVData = csvRows;
+  _reportCSVName = 'R4_por_programa.csv';
+  _reportExportTituloLineas = [
+    { text: 'R4 · Dashboard — Comparativa entre Programas', style: { bold: true, size: 14 } },
+    { text: 'Todos los programas', style: { italic: true, size: 11 } }
+  ];
+}
+
+// ── V5 · Competencia × Curso ────────────────────────────────
+function _r4RenderV5(avaluos, filterProg) {
+  const el = document.getElementById('r4-v5');
+  const escalaGlobal = db.escalasNiveles?.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
+
+  if (!avaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔬</div><p>Sin datos de avalúo para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_comp_curso.csv'; return;
+  }
+
+  // Build competency × course matrix
+  const evals = _allEvals(avaluos);
+  if (!evals.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔬</div><p>Sin evaluaciones para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_comp_curso.csv'; return;
+  }
+
+  // Collect unique comps and courses
+  const compMap = {}; // compCode → compDesc
+  const courseMap = {}; // cursoId → curso name
+  evals.forEach(e => {
+    if (e.compCode) compMap[e.compCode] = e.compDesc || e.compCode;
+    if (e.cursoId) {
+      const curso = db.cursos.find(c => c.id === e.cursoId);
+      if (curso) courseMap[e.cursoId] = curso.titulo || curso.codigo || e.cursoId;
+    }
+  });
+  const compCodes = Object.keys(compMap).sort((a, b) => a.localeCompare(b, 'es'));
+  const cursoIds = Object.keys(courseMap).sort((a, b) => (courseMap[a] || '').localeCompare(courseMap[b] || '', 'es'));
+
+  if (!compCodes.length || !cursoIds.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔬</div><p>Datos insuficientes para la matriz Competencia × Curso</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_comp_curso.csv'; return;
+  }
+
+  // Build matrix: compCode → cursoId → {sum, count}
+  const matrix = {};
+  compCodes.forEach(cc => { matrix[cc] = {}; cursoIds.forEach(ci => { matrix[cc][ci] = { sum: 0, count: 0 }; }); });
+  evals.forEach(e => {
+    if (e.compCode && e.cursoId && matrix[e.compCode]?.[e.cursoId]) {
+      matrix[e.compCode][e.cursoId].sum += e.val;
+      matrix[e.compCode][e.cursoId].count++;
+    }
+  });
+
+  // ── Heatmap table ──────────────────────────
+  const csvRows = [['Competencia', ...cursoIds.map(ci => courseMap[ci])]];
+  let tableHtml = `
+    <div class="rpt-section-head">Matriz: Competencia × Curso (Avg Logro)</div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.78rem"><thead><tr>
+      <th data-sort="text" style="min-width:120px">Competencia</th>`;
+  cursoIds.forEach(ci => {
+    const name = courseMap[ci];
+    const short = name.length > 18 ? name.substring(0, 16) + '…' : name;
+    tableHtml += `<th data-sort="num" style="min-width:70px;font-size:0.7rem" title="${name}">${short}</th>`;
+  });
+  tableHtml += `<th data-sort="num" style="font-weight:900">Avg Comp</th></tr></thead><tbody>`;
+
+  compCodes.forEach(cc => {
+    const csvRow = [cc + ' ' + (compMap[cc] || '')];
+    let compSum = 0, compCount = 0;
+    tableHtml += `<tr><td title="${compMap[cc] || ''}"><strong>${cc}</strong></td>`;
+    cursoIds.forEach(ci => {
+      const cell = matrix[cc][ci];
+      if (cell.count > 0) {
+        const avg = cell.sum / cell.count;
+        compSum += avg; compCount++;
+        const { bg, col } = _bgColParaAvg(avg);
+        tableHtml += `<td style="text-align:center;font-weight:700;background:${bg};color:${col};border-radius:4px" title="${cell.count} eval(s)">${avg.toFixed(1)}</td>`;
+        csvRow.push(avg.toFixed(2));
+      } else {
+        tableHtml += `<td style="text-align:center;color:var(--muted)">—</td>`;
+        csvRow.push('');
+      }
+    });
+    const compAvg = compCount > 0 ? compSum / compCount : null;
+    const { bg: cBg, col: cCol } = compAvg !== null ? _bgColParaAvg(compAvg) : { bg: '', col: '' };
+    tableHtml += `<td style="text-align:center;font-weight:900;background:${cBg};color:${cCol};border-radius:4px">${compAvg !== null ? compAvg.toFixed(2) : '—'}</td></tr>`;
+    csvRow.push(compAvg !== null ? compAvg.toFixed(2) : '');
+    csvRows.push(csvRow);
+  });
+
+  // Course averages footer row
+  tableHtml += '<tr style="border-top:2px solid var(--border);font-weight:900"><td>Avg Curso</td>';
+  const csvFooter = ['Avg Curso'];
+  let grandSum = 0, grandCount = 0;
+  cursoIds.forEach(ci => {
+    let cSum = 0, cCnt = 0;
+    compCodes.forEach(cc => { const cell = matrix[cc][ci]; if (cell.count > 0) { cSum += cell.sum / cell.count; cCnt++; } });
+    if (cCnt > 0) {
+      const avg = cSum / cCnt; grandSum += avg; grandCount++;
+      const { bg, col } = _bgColParaAvg(avg);
+      tableHtml += `<td style="text-align:center;background:${bg};color:${col};border-radius:4px">${avg.toFixed(2)}</td>`;
+      csvFooter.push(avg.toFixed(2));
+    } else {
+      tableHtml += `<td style="text-align:center;color:var(--muted)">—</td>`;
+      csvFooter.push('');
+    }
+  });
+  const grandAvg = grandCount > 0 ? grandSum / grandCount : null;
+  tableHtml += `<td style="text-align:center">${grandAvg !== null ? grandAvg.toFixed(2) : '—'}</td></tr>`;
+  csvFooter.push(grandAvg !== null ? grandAvg.toFixed(2) : '');
+  csvRows.push(csvFooter);
+  tableHtml += '</tbody></table></div>';
+
+  // ── KPIs ──────────────────────────────
+  const filledCells = compCodes.reduce((s, cc) => s + cursoIds.filter(ci => matrix[cc][ci].count > 0).length, 0);
+  const totalCells = compCodes.length * cursoIds.length;
+  const coverage = totalCells > 0 ? ((filledCells / totalCells) * 100).toFixed(0) : 0;
+  const kpiHtml = `
+    <div class="r4-kpi-grid" style="grid-template-columns:repeat(auto-fit, minmax(130px,1fr))">
+      <div class="dash-kpi"><div class="dash-kpi-val">${compCodes.length}</div><div class="dash-kpi-label">Competencias</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${cursoIds.length}</div><div class="dash-kpi-label">Cursos</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${coverage}%</div><div class="dash-kpi-label">Cobertura Matriz</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${evals.length}</div><div class="dash-kpi-label">Evaluaciones</div></div>
+    </div>`;
+
+  el.innerHTML = kpiHtml + tableHtml;
+  _rptMakeSortable('r4-v5');
+  _reportCSVData = csvRows;
+  _reportCSVName = 'R4_comp_curso.csv';
+  _reportExportTituloLineas = [
+    { text: 'R4 · Dashboard — Competencia × Curso', style: { bold: true, size: 14 } },
+    { text: filterProg || 'Todos los programas', style: { italic: true, size: 11 } }
+  ];
+}
+
+// ── V6 · Por Tipo de Secuencia ──────────────────────────────
+function _r4RenderV6(avaluos, filterProg) {
+  const el = document.getElementById('r4-v6');
+  const escalaGlobal = db.escalasNiveles?.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
+
+  if (!avaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔄</div><p>Sin datos de avalúo para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_por_secuencia.csv'; return;
+  }
+
+  // Map avalúos to student's secuencia from db.estudiantes
+  const bySeq = {};
+  let sinSeq = [];
+  avaluos.forEach(av => {
+    const estId = av.estudianteId || av.estudiante;
+    const roster = estId ? _rosterDeEstudiante(estId) : null;
+    const seq = roster?.secuencia || null;
+    const label = R9_SECUENCIA_COLS.includes(seq) ? seq : null;
+    if (label) {
+      if (!bySeq[label]) bySeq[label] = [];
+      bySeq[label].push(av);
+    } else {
+      sinSeq.push(av);
+    }
+  });
+
+  const seqs = R9_SECUENCIA_COLS.filter(s => bySeq[s]);
+  if (!seqs.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔄</div><p>No hay datos de secuencia en el roster de estudiantes</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_por_secuencia.csv'; return;
+  }
+
+  // Stats per secuencia
+  const seqStats = seqs.map(s => {
+    const avs = bySeq[s];
+    const evals = _allEvals(avs);
+    const avg = evals.length ? _avgNivel(evals.map(e => e.val)) : null;
+    const estudiantes = new Set(evals.map(e => e.estudianteId || e.estudiante).filter(Boolean));
+    const comps = new Set(evals.map(e => e.compCode).filter(Boolean));
+    const withGrade = avs.filter(a => a.notaFinal !== '' && a.notaFinal !== undefined && a.notaFinal !== null);
+    let gradeAvg = null;
+    if (withGrade.length) gradeAvg = withGrade.reduce((sm, a) => sm + parseFloat(a.notaFinal), 0) / withGrade.length;
+    return { seq: s, avg, evals: evals.length, estudiantes: estudiantes.size,
+      comps: comps.size, gradeAvg, avaluos: avs.length };
+  });
+
+  // ── Bar chart ──────────────────────────────
+  const barColors = ['#3b82f6','#10b981','#f97316','#8b5cf6','#ef4444'];
+  const W = 520, H = 220, padL = 40, padR = 20, padT = 20, padB = 50;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const barW = Math.min(60, (plotW / seqStats.length) * 0.6);
+  const gap = (plotW - barW * seqStats.length) / (seqStats.length + 1);
+  function yPos(v) { return padT + plotH - (v / maxNivel) * plotH; }
+
+  let gridHtml = '';
+  for (let i = 0; i <= 5; i++) {
+    const v = maxNivel * i / 5; const y = yPos(v);
+    gridHtml += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="r4-trend-grid"/>`;
+    gridHtml += `<text x="${padL - 6}" y="${y + 3}" class="r4-trend-axis" text-anchor="end">${v.toFixed(1)}</text>`;
+  }
+  let barsHtml = '', xLabelsHtml = '';
+  seqStats.forEach((s, i) => {
+    const x = padL + gap + i * (barW + gap);
+    const barH = s.avg !== null ? (s.avg / maxNivel) * plotH : 0;
+    const y = padT + plotH - barH;
+    barsHtml += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${barColors[i % barColors.length]}" class="r4-cohort-bar" opacity="0.85"/>`;
+    if (s.avg !== null) barsHtml += `<text x="${x + barW / 2}" y="${y - 5}" class="r4-trend-val">${s.avg.toFixed(2)}</text>`;
+    xLabelsHtml += `<text x="${x + barW / 2}" y="${H - 8}" class="r4-trend-axis" text-anchor="middle">${s.seq}</text>`;
+  });
+
+  const chartHtml = `
+    <div class="r4-trend-wrap">
+      <div class="r4-trend-title">🔄 Comparativa por Tipo de Secuencia — Avg Logro</div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">
+        ${gridHtml}${barsHtml}${xLabelsHtml}
+      </svg>
+    </div>`;
+
+  // ── KPIs ──────────────────────────────
+  const best = seqStats.filter(s => s.avg !== null).sort((a, b) => b.avg - a.avg)[0];
+  const worst = seqStats.filter(s => s.avg !== null).sort((a, b) => a.avg - b.avg)[0];
+  let kpiHtml = '';
+  if (best && worst && seqStats.length > 1) {
+    kpiHtml = `
+      <div class="r4-kpi-grid" style="grid-template-columns:repeat(auto-fit, minmax(150px,1fr))">
+        <div class="dash-kpi"><div class="dash-kpi-val">${seqStats.length}</div><div class="dash-kpi-label">Tipos de Secuencia</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val" style="color:#059669">${best.avg.toFixed(2)}</div><div class="dash-kpi-label">Mayor Logro (${best.seq})</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val" style="color:#dc2626">${worst.avg.toFixed(2)}</div><div class="dash-kpi-label">Menor Logro (${worst.seq})</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-val">${(best.avg - worst.avg).toFixed(2)}</div><div class="dash-kpi-label">Brecha entre Secuencias</div></div>
+      </div>`;
+  }
+
+  // ── Table ──────────────────────────────
+  const csvRows = [['Secuencia', 'Estudiantes', 'Avalúos', 'Evaluaciones', 'Competencias', 'Avg Logro', 'Nota Promedio']];
+  let tableHtml = `
+    <div class="rpt-section-head">Detalle por Tipo de Secuencia</div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th data-sort="text">Secuencia</th>
+      <th data-sort="num">Estudiantes</th>
+      <th data-sort="num">Avalúos</th>
+      <th data-sort="num">Evaluaciones</th>
+      <th data-sort="num">Competencias</th>
+      <th data-sort="num">Avg Logro</th>
+      <th data-sort="num">Nota Promedio</th>
+    </tr></thead><tbody>`;
+  seqStats.forEach(s => {
+    const { bg, col } = s.avg !== null ? _bgColParaAvg(s.avg) : { bg: '', col: '' };
+    tableHtml += `<tr>
+      <td><strong>${s.seq}</strong></td>
+      <td style="text-align:center">${s.estudiantes}</td>
+      <td style="text-align:center">${s.avaluos}</td>
+      <td style="text-align:center">${s.evals}</td>
+      <td style="text-align:center">${s.comps}</td>
+      <td style="text-align:center;font-weight:800;background:${bg};color:${col};border-radius:6px">${s.avg !== null ? s.avg.toFixed(2) : '—'}</td>
+      <td style="text-align:center">${s.gradeAvg !== null ? s.gradeAvg.toFixed(1) : '—'}</td>
+    </tr>`;
+    csvRows.push([s.seq, s.estudiantes, s.avaluos, s.evals, s.comps,
+      s.avg !== null ? s.avg.toFixed(2) : '', s.gradeAvg !== null ? s.gradeAvg.toFixed(1) : '']);
+  });
+  if (sinSeq.length) {
+    const scEvals = _allEvals(sinSeq);
+    const scAvg = scEvals.length ? _avgNivel(scEvals.map(e => e.val)) : null;
+    const scEst = new Set(scEvals.map(e => e.estudianteId || e.estudiante).filter(Boolean));
+    tableHtml += `<tr style="color:var(--muted)">
+      <td><em>Sin secuencia asignada</em></td>
+      <td style="text-align:center">${scEst.size}</td>
+      <td style="text-align:center">${sinSeq.length}</td>
+      <td style="text-align:center">${scEvals.length}</td>
+      <td style="text-align:center">—</td>
+      <td style="text-align:center">${scAvg !== null ? scAvg.toFixed(2) : '—'}</td>
+      <td style="text-align:center">—</td>
+    </tr>`;
+    csvRows.push(['Sin secuencia', scEst.size, sinSeq.length, scEvals.length, '',
+      scAvg !== null ? scAvg.toFixed(2) : '', '']);
+  }
+  tableHtml += '</tbody></table></div>';
+
+  el.innerHTML = kpiHtml + chartHtml + tableHtml;
+  _rptMakeSortable('r4-v6');
+  _reportCSVData = csvRows;
+  _reportCSVName = 'R4_por_secuencia.csv';
+  _reportExportTituloLineas = [
+    { text: 'R4 · Dashboard — Por Tipo de Secuencia', style: { bold: true, size: 14 } },
+    { text: filterProg || 'Todos los programas', style: { italic: true, size: 11 } }
+  ];
+}
+
+// ── V7 · Antes/Después de Intervención ─────────────────────
+function _r4RenderV7(avaluos, filterProg) {
+  const el = document.getElementById('r4-v7');
+  const escalaGlobal = db.escalasNiveles?.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
+
+  if (!avaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔄</div><p>Sin datos de avalúo para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_intervencion.csv'; return;
+  }
+
+  // ── Collect unique semesters sorted chronologically ──
+  const semSet = new Set();
+  avaluos.forEach(av => { const sem = _getSemestre(av); if (sem) semSet.add(sem); });
+  const semesters = [...semSet].sort();
+
+  if (semesters.length < 2) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔄</div><p>Se necesitan al menos 2 semestres para comparar antes/después de intervención</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_intervencion.csv'; return;
+  }
+
+  // ── Determine cutoff point ──
+  // Selectable semesters for cutoff = all except the first (need ≥1 pre period)
+  if (!_r4V7Corte || !semesters.includes(_r4V7Corte)) {
+    _r4V7Corte = semesters[Math.floor(semesters.length / 2)];
+  }
+
+  // ── Build cutoff selector ──
+  const corteOpts = semesters.slice(1).map(s =>
+    `<option value="${s}"${s === _r4V7Corte ? ' selected' : ''}>${s}</option>`
+  ).join('');
+  const corteHtml = `<div style="margin:0 0 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <label style="font-weight:600;font-size:0.85rem">Punto de Corte (inicio del post):</label>
+    <select onchange="r4V7CorteChange(this.value)" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);font-size:0.85rem">${corteOpts}</select>
+    <span style="font-size:0.78rem;color:var(--muted)">Pre: antes de ${_r4V7Corte} · Post: ${_r4V7Corte} en adelante</span>
+  </div>`;
+
+  // ── Group by course, split pre/post ──
+  const courseData = {};
+  avaluos.forEach(av => {
+    const curso = (db.cursos || []).find(c => c.id === av.cursoId);
+    if (!curso) return;
+    const sem = _getSemestre(av);
+    if (!sem) return;
+    const key = av.cursoId;
+    if (!courseData[key]) courseData[key] = { nombre: curso.codigo || curso.nombre || key, pre: [], post: [], preAv: 0, postAv: 0 };
+    const evals = _allEvals([av]);
+    if (sem < _r4V7Corte) { courseData[key].pre.push(...evals); courseData[key].preAv++; }
+    else { courseData[key].post.push(...evals); courseData[key].postAv++; }
+  });
+
+  // Build rows: only courses with data in BOTH periods
+  const rows = Object.entries(courseData)
+    .filter(([, d]) => d.pre.length > 0 && d.post.length > 0)
+    .map(([id, d]) => {
+      const preAvg = d.pre.reduce((s, e) => s + e.val, 0) / d.pre.length;
+      const postAvg = d.post.reduce((s, e) => s + e.val, 0) / d.post.length;
+      return {
+        id, nombre: d.nombre,
+        preAvg, postAvg,
+        cambio: postAvg - preAvg,
+        cambioPct: preAvg > 0 ? ((postAvg - preAvg) / preAvg * 100) : 0,
+        preN: d.pre.length, postN: d.post.length,
+        preAv: d.preAv, postAv: d.postAv,
+      };
+    })
+    .sort((a, b) => b.cambio - a.cambio);
+
+  if (!rows.length) {
+    el.innerHTML = corteHtml + '<div class="dash-empty"><div class="dash-empty-icon">🔄</div><p>Ningún curso tiene evaluaciones en ambos períodos (pre y post)</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_intervencion.csv'; return;
+  }
+
+  // ── Grouped Bar Chart (Pre vs Post per course) ──
+  const PAD = { top: 30, right: 20, bottom: 60, left: 50 };
+  const barGroupW = 70;
+  const gap = 20;
+  const W = PAD.left + rows.length * (barGroupW + gap) - gap + PAD.right;
+  const H = 260;
+  const plotH = H - PAD.top - PAD.bottom;
+  const maxVal = Math.max(...rows.map(r => Math.max(r.preAvg, r.postAvg)), maxNivel) * 1.1;
+
+  // Grid lines
+  const nGrid = 4;
+  let gridHtml = '';
+  for (let i = 0; i <= nGrid; i++) {
+    const val = (maxVal / nGrid) * i;
+    const y = PAD.top + plotH - (val / maxVal) * plotH;
+    gridHtml += `<line x1="${PAD.left}" x2="${W - PAD.right}" y1="${y}" y2="${y}" class="r4-trend-grid"/>`;
+    gridHtml += `<text x="${PAD.left - 6}" y="${y + 4}" class="r4-trend-axis" text-anchor="end">${val.toFixed(1)}</text>`;
+  }
+
+  // Bars
+  let barsHtml = '';
+  let xLabelsHtml = '';
+  const barW = 26;
+  rows.forEach((r, i) => {
+    const gx = PAD.left + i * (barGroupW + gap);
+    // Pre bar (coral)
+    const preH = (r.preAvg / maxVal) * plotH;
+    const preY = PAD.top + plotH - preH;
+    barsHtml += `<rect x="${gx}" y="${preY}" width="${barW}" height="${preH}" fill="var(--egsp-coral)" rx="3" opacity="0.7"/>`;
+    barsHtml += `<text x="${gx + barW/2}" y="${preY - 4}" text-anchor="middle" class="r4-trend-val" style="font-size:9px">${r.preAvg.toFixed(1)}</text>`;
+    // Post bar (teal)
+    const postH = (r.postAvg / maxVal) * plotH;
+    const postY = PAD.top + plotH - postH;
+    barsHtml += `<rect x="${gx + barW + 4}" y="${postY}" width="${barW}" height="${postH}" fill="#0d9488" rx="3"/>`;
+    barsHtml += `<text x="${gx + barW + 4 + barW/2}" y="${postY - 4}" text-anchor="middle" class="r4-trend-val" style="font-size:9px">${r.postAvg.toFixed(1)}</text>`;
+    // X label
+    const lbl = r.nombre.length > 12 ? r.nombre.substring(0, 10) + '…' : r.nombre;
+    xLabelsHtml += `<text x="${gx + barGroupW/2}" y="${PAD.top + plotH + 14}" text-anchor="middle" class="r4-trend-axis" style="font-size:9px" transform="rotate(-30,${gx + barGroupW/2},${PAD.top + plotH + 14})">${lbl}</text>`;
+  });
+
+  const chartHtml = `
+    <div class="r4-trend-wrap">
+      <div class="r4-trend-title">Antes vs Después de Intervención por Curso</div>
+      <div class="r4-legend-row">
+        <span class="r4-legend-item"><span class="r4-legend-swatch" style="background:var(--egsp-coral);opacity:0.7"></span>Pre-intervención</span>
+        <span class="r4-legend-item"><span class="r4-legend-swatch" style="background:#0d9488"></span>Post-intervención</span>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">
+        ${gridHtml}${barsHtml}${xLabelsHtml}
+      </svg>
+    </div>`;
+
+  // ── KPIs ──
+  const avgCambio = rows.reduce((s, r) => s + r.cambio, 0) / rows.length;
+  const bestRow = rows[0]; // already sorted desc by cambio
+  const worstRow = rows[rows.length - 1];
+  const totalPreEvals = rows.reduce((s, r) => s + r.preN, 0);
+  const totalPostEvals = rows.reduce((s, r) => s + r.postN, 0);
+  const kpiHtml = `
+    <div class="r4-kpi-grid" style="grid-template-columns:repeat(auto-fit, minmax(140px,1fr))">
+      <div class="dash-kpi"><div class="dash-kpi-val">${rows.length}</div><div class="dash-kpi-label">Cursos Comparados</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val" style="color:${avgCambio >= 0 ? '#059669' : '#dc2626'}">${avgCambio >= 0 ? '+' : ''}${avgCambio.toFixed(2)}</div><div class="dash-kpi-label">Cambio Promedio</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val" style="color:#059669">+${bestRow.cambio.toFixed(2)}</div><div class="dash-kpi-label">Mayor Mejora (${bestRow.nombre.length > 18 ? bestRow.nombre.substring(0,16)+'…' : bestRow.nombre})</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val" style="color:${worstRow.cambio >= 0 ? '#059669' : '#dc2626'}">${worstRow.cambio >= 0 ? '+' : ''}${worstRow.cambio.toFixed(2)}</div><div class="dash-kpi-label">Menor Mejora (${worstRow.nombre.length > 18 ? worstRow.nombre.substring(0,16)+'…' : worstRow.nombre})</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${totalPreEvals}</div><div class="dash-kpi-label">Eval. Pre</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${totalPostEvals}</div><div class="dash-kpi-label">Eval. Post</div></div>
+    </div>`;
+
+  // ── Detail Table ──
+  const csvRows = [['Curso', 'Avg Pre', 'Avg Post', 'Cambio', 'Cambio %', 'Eval Pre', 'Eval Post', 'Avalúos Pre', 'Avalúos Post']];
+  let tableHtml = `
+    <div class="rpt-section-head">Detalle por Curso: Antes vs Después</div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th data-sort="text">Curso</th>
+      <th data-sort="num">Avg Pre</th>
+      <th data-sort="num">Avg Post</th>
+      <th data-sort="num">Cambio</th>
+      <th data-sort="num">Cambio %</th>
+      <th data-sort="num">Eval Pre</th>
+      <th data-sort="num">Eval Post</th>
+    </tr></thead><tbody>`;
+  rows.forEach(r => {
+    const { bg: preBg, col: preCol } = _bgColParaAvg(r.preAvg);
+    const { bg: postBg, col: postCol } = _bgColParaAvg(r.postAvg);
+    const cambioColor = r.cambio >= 0 ? '#059669' : '#dc2626';
+    const arrow = r.cambio > 0.05 ? '▲' : r.cambio < -0.05 ? '▼' : '▸';
+    tableHtml += `<tr>
+      <td><strong>${r.nombre}</strong></td>
+      <td style="text-align:center;font-weight:700;background:${preBg};color:${preCol};border-radius:6px">${r.preAvg.toFixed(2)}</td>
+      <td style="text-align:center;font-weight:700;background:${postBg};color:${postCol};border-radius:6px">${r.postAvg.toFixed(2)}</td>
+      <td style="text-align:center;font-weight:800;color:${cambioColor}">${arrow} ${r.cambio >= 0 ? '+' : ''}${r.cambio.toFixed(2)}</td>
+      <td style="text-align:center;color:${cambioColor}">${r.cambioPct >= 0 ? '+' : ''}${r.cambioPct.toFixed(1)}%</td>
+      <td style="text-align:center">${r.preN}</td>
+      <td style="text-align:center">${r.postN}</td>
+    </tr>`;
+    csvRows.push([r.nombre, r.preAvg.toFixed(2), r.postAvg.toFixed(2),
+      (r.cambio >= 0 ? '+' : '') + r.cambio.toFixed(2), r.cambioPct.toFixed(1) + '%',
+      r.preN, r.postN, r.preAv, r.postAv]);
+  });
+  tableHtml += '</tbody></table></div>';
+
+  el.innerHTML = corteHtml + kpiHtml + chartHtml + tableHtml;
+  _rptMakeSortable('r4-v7');
+  _reportCSVData = csvRows;
+  _reportCSVName = 'R4_intervencion.csv';
+  _reportExportTituloLineas = [
+    { text: 'R4 · Dashboard — Antes/Después de Intervención', style: { bold: true, size: 14 } },
+    { text: filterProg || 'Todos los programas', style: { italic: true, size: 11 } },
+    { text: `Punto de corte: ${_r4V7Corte}`, style: { size: 10 } }
+  ];
+}
+
+// ── V8 · Alineación Notas ↔ Competencias ────────────────────
+function _r4RenderV8(avaluos, filterProg) {
+  const el = document.getElementById('r4-v8');
+  const escalaGlobal = db.escalasNiveles?.find(e => e.activa && e.aplicaA === 'todos') || ESCALA_NIVELES_DEFAULT;
+  const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
+
+  if (!avaluos.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📐</div><p>Sin datos de avalúo para los filtros seleccionados</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_notas_comp.csv'; return;
+  }
+
+  // Build scatter data: each avalúo with nota AND competency evals
+  const points = [];
+  avaluos.forEach(av => {
+    const nota = parseFloat(av.notaFinal);
+    if (isNaN(nota)) return;
+    const evals = _allEvals([av]);
+    if (!evals.length) return;
+    const avgLogro = _avgNivel(evals.map(e => e.val));
+    const curso = db.cursos.find(c => c.id === av.cursoId);
+    points.push({ nota, logro: avgLogro, curso: curso?.titulo || curso?.codigo || '?',
+      estudiante: av.estudiante || av.estudianteId || '?', evals: evals.length });
+  });
+
+  if (!points.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📐</div><p>Sin datos de notas finales y evaluaciones de competencias simultáneamente</p></div>';
+    _reportCSVData = []; _reportCSVName = 'R4_notas_comp.csv'; return;
+  }
+
+  // ── Correlation coefficient ──────────────────────────
+  const n = points.length;
+  const sumX = points.reduce((s, p) => s + p.nota, 0);
+  const sumY = points.reduce((s, p) => s + p.logro, 0);
+  const sumXY = points.reduce((s, p) => s + p.nota * p.logro, 0);
+  const sumX2 = points.reduce((s, p) => s + p.nota * p.nota, 0);
+  const sumY2 = points.reduce((s, p) => s + p.logro * p.logro, 0);
+  const denom = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+  const r = denom > 0 ? (n * sumXY - sumX * sumY) / denom : 0;
+  const r2 = r * r;
+
+  // Regression line
+  const meanX = sumX / n, meanY = sumY / n;
+  const slope = denom > 0 ? (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX) : 0;
+  const intercept = meanY - slope * meanX;
+
+  // ── SVG scatter ──────────────────────────
+  const W = 520, H = 360, padL = 45, padR = 20, padT = 20, padB = 45;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xMin = 0, xMax = 100;
+  function xPos(v) { return padL + ((v - xMin) / (xMax - xMin)) * plotW; }
+  function yPos(v) { return padT + plotH - (v / maxNivel) * plotH; }
+
+  // Grid
+  let gridHtml = '';
+  for (let i = 0; i <= 5; i++) {
+    const yv = maxNivel * i / 5; const y = yPos(yv);
+    gridHtml += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="r4-trend-grid"/>`;
+    gridHtml += `<text x="${padL - 6}" y="${y + 3}" class="r4-trend-axis" text-anchor="end">${yv.toFixed(1)}</text>`;
+  }
+  for (let i = 0; i <= 5; i++) {
+    const xv = i * 20; const x = xPos(xv);
+    gridHtml += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + plotH}" class="r4-trend-grid"/>`;
+    gridHtml += `<text x="${x}" y="${H - 8}" class="r4-trend-axis" text-anchor="middle">${xv}</text>`;
+  }
+
+  // Regression line
+  const regY0 = intercept;
+  const regY100 = slope * 100 + intercept;
+  const regLineHtml = `<line x1="${xPos(0)}" y1="${yPos(Math.max(0, Math.min(maxNivel, regY0)))}" x2="${xPos(100)}" y2="${yPos(Math.max(0, Math.min(maxNivel, regY100)))}" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,3" opacity="0.7"/>`;
+
+  // Dots
+  let dotsHtml = '';
+  points.forEach(p => {
+    const x = xPos(Math.max(0, Math.min(100, p.nota)));
+    const y = yPos(Math.max(0, Math.min(maxNivel, p.logro)));
+    dotsHtml += `<circle cx="${x}" cy="${y}" r="4.5" fill="var(--egsp-coral)" stroke="var(--white)" stroke-width="1.5" opacity="0.75"><title>${p.estudiante}\nNota: ${p.nota.toFixed(0)} | Logro: ${p.logro.toFixed(2)}\n${p.curso}</title></circle>`;
+  });
+
+  // Axis labels
+  const axisLabels = `
+    <text x="${padL + plotW / 2}" y="${H - 1}" class="r4-trend-axis" text-anchor="middle" style="font-size:10px;font-weight:600">Nota Final (0–100)</text>
+    <text x="12" y="${padT + plotH / 2}" class="r4-trend-axis" text-anchor="middle" style="font-size:10px;font-weight:600" transform="rotate(-90 12 ${padT + plotH / 2})">Avg Logro</text>`;
+
+  const chartHtml = `
+    <div class="r4-trend-wrap">
+      <div class="r4-trend-title">📐 Correlación: Nota Final vs Avg Logro de Competencias</div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto">
+        ${gridHtml}${regLineHtml}${dotsHtml}${axisLabels}
+      </svg>
+      <div class="r4-legend-row">
+        <div class="r4-legend-item"><div class="r4-legend-swatch" style="background:var(--egsp-coral)"></div>Avalúo (nota, logro)</div>
+        <div class="r4-legend-item"><div class="r4-legend-swatch" style="background:#3b82f6"></div>Línea de regresión</div>
+      </div>
+    </div>`;
+
+  // ── KPIs ──────────────────────────────
+  const rColor = Math.abs(r) > 0.5 ? '#059669' : Math.abs(r) > 0.3 ? '#f59e0b' : '#dc2626';
+  const rLabel = Math.abs(r) > 0.7 ? 'Fuerte' : Math.abs(r) > 0.5 ? 'Moderada' : Math.abs(r) > 0.3 ? 'Débil' : 'Muy débil';
+  const rDir = r > 0 ? 'positiva' : r < 0 ? 'negativa' : 'nula';
+  const kpiHtml = `
+    <div class="r4-kpi-grid" style="grid-template-columns:repeat(auto-fit, minmax(140px,1fr))">
+      <div class="dash-kpi"><div class="dash-kpi-val" style="color:${rColor}">${r.toFixed(3)}</div><div class="dash-kpi-label">Correlación (r)</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${r2.toFixed(3)}</div><div class="dash-kpi-label">R² (determinación)</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${rLabel} ${rDir}</div><div class="dash-kpi-label">Interpretación</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${n}</div><div class="dash-kpi-label">Observaciones (n)</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${meanX.toFixed(1)}</div><div class="dash-kpi-label">Nota Promedio</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-val">${meanY.toFixed(2)}</div><div class="dash-kpi-label">Avg Logro Promedio</div></div>
+    </div>`;
+
+  // ── Detail table ──────────────────────────────
+  const csvRows = [['Estudiante', 'Curso', 'Nota Final', 'Letra', 'Avg Logro', 'Evaluaciones']];
+  const sorted = [...points].sort((a, b) => b.nota - a.nota);
+  let tableHtml = `
+    <div class="rpt-section-head">Detalle: Nota Final vs Logro de Competencias</div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th data-sort="text">Estudiante</th>
+      <th data-sort="text">Curso</th>
+      <th data-sort="num">Nota Final</th>
+      <th data-sort="text">Letra</th>
+      <th data-sort="num">Avg Logro</th>
+      <th data-sort="num">Evaluaciones</th>
+    </tr></thead><tbody>`;
+  sorted.forEach(p => {
+    const letra = gradeToLetter(p.nota);
+    const { bg, col } = _bgColParaAvg(p.logro);
+    tableHtml += `<tr>
+      <td>${p.estudiante}</td>
+      <td>${p.curso}</td>
+      <td style="text-align:center;font-weight:700">${p.nota.toFixed(0)}</td>
+      <td style="text-align:center">${letra}</td>
+      <td style="text-align:center;font-weight:800;background:${bg};color:${col};border-radius:6px">${p.logro.toFixed(2)}</td>
+      <td style="text-align:center">${p.evals}</td>
+    </tr>`;
+    csvRows.push([p.estudiante, p.curso, p.nota.toFixed(0), letra, p.logro.toFixed(2), p.evals]);
+  });
+  tableHtml += '</tbody></table></div>';
+
+  el.innerHTML = kpiHtml + chartHtml + tableHtml;
+  _rptMakeSortable('r4-v8');
+  _reportCSVData = csvRows;
+  _reportCSVName = 'R4_notas_comp.csv';
+  _reportExportTituloLineas = [
+    { text: 'R4 · Dashboard — Notas ↔ Competencias', style: { bold: true, size: 14 } },
+    { text: filterProg || 'Todos los programas', style: { italic: true, size: 11 } },
+    { text: `r = ${r.toFixed(3)} | R² = ${r2.toFixed(3)} | n = ${n}`, style: { size: 10 } }
+  ];
+}
+
 // ── R5 — LAO Effectiveness ────────────────────────────────────
 function renderR5() {
   const filterCurso = document.getElementById('r5-curso')?.value||'';
@@ -15984,20 +16729,19 @@ function renderR8() {
   _reportCSVData = csvRows; _reportCSVName = 'R8_notas_finales.csv';
 }
 
-// ── R9 — Estudiantes por Cohorte y Secuencia (Fase E) ──────────
-// Sienta las bases para el futuro cálculo de tasas de graduación (que usará
-// la duración de secuencia configurada por programa en Fase A) sin calcular
-// nada de eso todavía — por ahora es solo un reporte: cuántos estudiantes
-// hay por Programa × Año Comienzo (cohorte) × Secuencia, con el detalle de
-// cada estudiante debajo. Reutiliza canSeeEstudiante() (Fase B) para que la
-// visibilidad por rol sea idéntica a la de la pestaña Estudiantes.
+// ── R9 — Matrícula por Cohorte y Secuencia (Fase E, ajustado Fase 4) ────
+// Listado de matrícula: cuántos estudiantes hay por Programa × Año Comienzo
+// (cohorte) × Secuencia, con el detalle de cada estudiante debajo.
+// El análisis de tendencias y comparativas de cohortes se movió a R4 Dashboard.
+// Reutiliza canSeeEstudiante() (Fase B) para que la visibilidad por rol sea
+// idéntica a la de la pestaña Estudiantes.
 const R9_SECUENCIA_COLS = ['Regular', 'Desacelerada', 'Acelerada', 'Vespertina', 'Plan de Estudio'];
 
 function renderR9() {
   const filtroProg = document.getElementById('r9-prog')?.value || '';
   const filtroAnio = document.getElementById('r9-anio')?.value || '';
   const filtroSecuencia = document.getElementById('r9-secuencia')?.value || '';
-  document.getElementById('rpt-export-title').textContent = 'R9 · Estudiantes por Cohorte y Secuencia';
+  document.getElementById('rpt-export-title').textContent = 'R9 · Matrícula por Cohorte y Secuencia';
 
   const el = document.getElementById('r9-body');
   let visibles = (db.estudiantes || []).filter(canSeeEstudiante);
@@ -16012,7 +16756,7 @@ function renderR9() {
 
   if (!visibles.length) {
     el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🎓</div><p>Sin estudiantes para los filtros seleccionados</p></div>';
-    _reportCSVData = []; _reportCSVName = 'R9_cohortes.csv';
+    _reportCSVData = []; _reportCSVName = 'R9_matricula.csv';
     return;
   }
 
@@ -16086,7 +16830,18 @@ function renderR9() {
 
   el.innerHTML = html;
   _rptMakeSortable('r9-body');
-  _reportCSVData = csvRows; _reportCSVName = 'R9_cohortes.csv';
+  _reportCSVData = csvRows; _reportCSVName = 'R9_matricula.csv';
+
+  // Export Word/PDF — título multilínea
+  const progLabel = filtroProg || 'Todos los programas';
+  const anioLabel = filtroAnio || 'Todos los años';
+  const secLabel  = filtroSecuencia === '__sin_asignar__' ? 'Sin asignar'
+                  : filtroSecuencia || 'Todas las secuencias';
+  _reportExportTituloLineas = [
+    { text: 'R9 · Matrícula por Cohorte y Secuencia', style: { bold: true, size: 14 } },
+    { text: `Programa: ${progLabel}  ·  Año: ${anioLabel}  ·  Secuencia: ${secLabel}`, style: { size: 10, color: '666666' } },
+    { text: `Estudiantes: ${visibles.length}`, style: { size: 10, color: '666666' } }
+  ];
 }
 
 // ======================== DASHBOARD ========================
