@@ -2419,10 +2419,14 @@
       </div>
       <div class="dash-filter-group">
         <label class="dash-filter-label">Lente Temporal</label>
-        <select id="r4-lente" class="dash-select" onchange="r4GlobalChange()">
+        <select id="r4-lente" class="dash-select" onchange="r4LenteChange()">
           <option value="ay">Año Académico</option>
           <option value="cohorte">Cohorte</option>
         </select>
+      </div>
+      <div class="dash-filter-group" style="min-width:170px">
+        <label class="dash-filter-label" id="r4-period-label">Años</label>
+        <div id="r4-period-wrap"></div>
       </div>
     </div>
 
@@ -14943,13 +14947,18 @@ function renderR3() {
   const compsAgrupadas = _r3CompetenciasAgrupadas(estAvaluos);
   const resumen = _r3Resumen(byCurso, compsAgrupadas);
 
-  let html = `<div class="rpt-section-head">
+  const infoItems = [
+    `ID: ${_alEsc(estId)}`,
+    prog && prog !== 'OTHER' ? `Programa: ${_alEsc(prog)}` : '',
+    anioEntrada ? `Año de entrada: ${_alEsc(anioEntrada)}` : '',
+    corriente ? `Corriente: ${_alEsc(corriente)}` : '',
+    isAdvisee ? 'Asesoría: Sí' : ''
+  ].filter(Boolean);
+  let html = `<div class="rpt-section-head" style="flex-direction:column;align-items:flex-start">
     <span>👤 ${_alEsc(nombre)}</span>
-    <span class="badge badge-blue">${_alEsc(estId)}</span>
-    ${prog&&prog!=='OTHER'?`<span class="badge badge-gold">${_alEsc(prog)}</span>`:''}
-    ${anioEntrada?`<span class="badge badge-purple">Entrada: ${_alEsc(anioEntrada)}</span>`:''}
-    ${corriente?`<span class="badge badge-rust">${_alEsc(corriente)}</span>`:''}
-    ${isAdvisee?'<span class="badge badge-green">Asesoría</span>':''}
+    <ul style="margin:.25rem 0 0 1.2rem;padding:0;list-style:disc;font-size:.85rem;color:var(--muted);line-height:1.6">
+      ${infoItems.map(it => `<li>${it}</li>`).join('')}
+    </ul>
   </div>`;
   html += _r3ResumenHtml(resumen);
 
@@ -14987,6 +14996,7 @@ function r4ShowVista(v) {
 }
 
 function r4GlobalChange() { renderR4(); }
+function r4LenteChange() { delete _msState['r4-period']; renderR4(); }
 function r4V7CorteChange(v) { _r4V7Corte = v; renderR4(); }
 
 function renderR4() {
@@ -15008,12 +15018,50 @@ function renderR4() {
     if (filterProg) progSel.value = filterProg;
   }
 
-  // Filter avalúos
+  // Filter avalúos by program
   let avaluos = _filterAvaluosByRole(db.avaluos || []);
   if (filterProg) avaluos = avaluos.filter(av => {
     const curso = db.cursos.find(c => c.id === av.cursoId);
     return curso?.programa === filterProg;
   });
+
+  // ── Populate and apply year/cohort period multi-select ──
+  const periodLabel = document.getElementById('r4-period-label');
+  if (periodLabel) periodLabel.textContent = lente === 'cohorte' ? 'Cohortes' : 'Años';
+  // Collect available periods from the current avalúos
+  const periodSet = new Set();
+  avaluos.forEach(av => {
+    if (lente === 'cohorte') {
+      const estId = av.estudianteId || av.estudiante;
+      const roster = estId ? _rosterDeEstudiante(estId) : null;
+      if (roster?.anioComienzo) periodSet.add(String(roster.anioComienzo));
+    } else {
+      const sem = _getSemestre(av);
+      const ay = getAcademicYear(sem);
+      if (ay) periodSet.add(String(ay));
+    }
+  });
+  const periodOptions = [...periodSet].sort().map(p => ({
+    value: p,
+    label: lente === 'ay' ? p + '–' + String(Number(p) + 1).slice(-2) : p
+  }));
+  multiSelectBuild('r4-period', periodOptions, { allLabel: 'Todos', onChange: () => renderR4() });
+  const selectedPeriods = multiSelectValues('r4-period');
+
+  // Filter avalúos by selected periods
+  if (selectedPeriods.length && selectedPeriods.length < periodOptions.length) {
+    avaluos = avaluos.filter(av => {
+      if (lente === 'cohorte') {
+        const estId = av.estudianteId || av.estudiante;
+        const roster = estId ? _rosterDeEstudiante(estId) : null;
+        return roster?.anioComienzo && selectedPeriods.includes(String(roster.anioComienzo));
+      } else {
+        const sem = _getSemestre(av);
+        const ay = getAcademicYear(sem);
+        return ay && selectedPeriods.includes(String(ay));
+      }
+    });
+  }
 
   // Dispatch to vista renderer
   switch (_r4Vista) {
@@ -15654,7 +15702,7 @@ function _r4RenderV4(avaluos, filterProg) {
 
   // ── Bar chart ──────────────────────────────
   const barColors = ['#f97316','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#ec4899','#84cc16','#f59e0b','#6366f1'];
-  const W = 540, H = 240, padL = 40, padR = 20, padT = 20, padB = 70;
+  const W = 540, H = 310, padL = 40, padR = 20, padT = 20, padB = 140;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const barW = Math.min(50, (plotW / progStats.length) * 0.65);
   const gap = (plotW - barW * progStats.length) / (progStats.length + 1);
@@ -16223,7 +16271,7 @@ function _r4RenderV8(avaluos, filterProg) {
     const avgLogro = _avgNivel(evals.map(e => e.val));
     const curso = db.cursos.find(c => c.id === av.cursoId);
     points.push({ nota, logro: avgLogro, curso: curso?.titulo || curso?.codigo || '?',
-      estudiante: av.estudiante || av.estudianteId || '?', evals: evals.length });
+      evals: evals.length });
   });
 
   if (!points.length) {
@@ -16277,7 +16325,7 @@ function _r4RenderV8(avaluos, filterProg) {
   points.forEach(p => {
     const x = xPos(Math.max(0, Math.min(100, p.nota)));
     const y = yPos(Math.max(0, Math.min(maxNivel, p.logro)));
-    dotsHtml += `<circle cx="${x}" cy="${y}" r="4.5" fill="var(--egsp-coral)" stroke="var(--white)" stroke-width="1.5" opacity="0.75"><title>${p.estudiante}\nNota: ${p.nota.toFixed(0)} | Logro: ${p.logro.toFixed(2)}\n${p.curso}</title></circle>`;
+    dotsHtml += `<circle cx="${x}" cy="${y}" r="4.5" fill="var(--egsp-coral)" stroke="var(--white)" stroke-width="1.5" opacity="0.75"><title>Nota: ${p.nota.toFixed(0)} | Logro: ${p.logro.toFixed(2)}\n${p.curso}</title></circle>`;
   });
 
   // Axis labels
@@ -16311,13 +16359,12 @@ function _r4RenderV8(avaluos, filterProg) {
       <div class="dash-kpi"><div class="dash-kpi-val">${meanY.toFixed(2)}</div><div class="dash-kpi-label">Avg Logro Promedio</div></div>
     </div>`;
 
-  // ── Detail table ──────────────────────────────
-  const csvRows = [['Estudiante', 'Curso', 'Nota Final', 'Letra', 'Avg Logro', 'Evaluaciones']];
+  // ── Detail table (sin info individual de estudiante) ──────
+  const csvRows = [['Curso', 'Nota Final', 'Letra', 'Avg Logro', 'Evaluaciones']];
   const sorted = [...points].sort((a, b) => b.nota - a.nota);
   let tableHtml = `
     <div class="rpt-section-head">Detalle: Nota Final vs Logro de Competencias</div>
     <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-      <th data-sort="text">Estudiante</th>
       <th data-sort="text">Curso</th>
       <th data-sort="num">Nota Final</th>
       <th data-sort="text">Letra</th>
@@ -16328,14 +16375,13 @@ function _r4RenderV8(avaluos, filterProg) {
     const letra = gradeToLetter(p.nota);
     const { bg, col } = _bgColParaAvg(p.logro);
     tableHtml += `<tr>
-      <td>${p.estudiante}</td>
       <td>${p.curso}</td>
       <td style="text-align:center;font-weight:700">${p.nota.toFixed(0)}</td>
       <td style="text-align:center">${letra}</td>
       <td style="text-align:center;font-weight:800;background:${bg};color:${col};border-radius:6px">${p.logro.toFixed(2)}</td>
       <td style="text-align:center">${p.evals}</td>
     </tr>`;
-    csvRows.push([p.estudiante, p.curso, p.nota.toFixed(0), letra, p.logro.toFixed(2), p.evals]);
+    csvRows.push([p.curso, p.nota.toFixed(0), letra, p.logro.toFixed(2), p.evals]);
   });
   tableHtml += '</tbody></table></div>';
 
@@ -16492,35 +16538,37 @@ function renderR6() {
     _reportCSVData=[]; return;
   }
 
-  const myAdvisees = new Set(currentUser?.efectivo?.advisees||[]);
-  const csvRows=[['Estudiante','ID','¿Asesoría?','Avg Logro','Nota más baja','Motivo','Competencias en Riesgo']];
+  const csvRows=[['Estudiante','ID','Motivo','Logro Promedio','Nota más baja','Competencias en Riesgo']];
 
   let html=`<div style="margin-bottom:12px;padding:10px 14px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;font-size:0.82rem">
     ⚠️ <strong>${atRisk.length} estudiante(s)</strong> en riesgo por <strong>${criterioLabel}</strong>
     ${criterio!=='nota' ? ` (competencias &lt; <strong>${threshold.toFixed(1)}</strong>)` : ''}
     ${criterio!=='comp' && hasNotaFilter ? ` (nota &lt; <strong>${notaThreshold}</strong>)` : ''}
+    <span style="margin-left:8px;color:var(--muted)">(de ${all.length} total)</span>
   </div>`;
-  html+=`<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-    <th data-sort="text">Estudiante</th><th data-sort="text">ID</th><th data-sort="num">Avg Logro</th><th data-sort="num">Nota más baja</th><th data-sort="text">Motivo</th><th>Competencias en Riesgo</th><th data-sort="text">Asesoría</th>
-  </tr></thead><tbody>`;
 
+  html+=`<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+    <th data-sort="text">Estudiante</th><th data-sort="text">ID</th><th data-sort="text">Motivo</th>
+    <th data-sort="num">Logro Prom.</th><th data-sort="num">Nota más baja</th><th>Competencias en Riesgo</th>
+  </tr></thead><tbody>`;
   atRisk.forEach(e=>{
-    const riskCls = e.avg!==null && e.avg<1?'risk-high':(e.avg!==null && e.avg<threshold)?'risk-med':'risk-ok';
-    const isAdvisee = myAdvisees.has(e.id);
-    const uniqueRisk = [...new Map(e.compsRiesgo.map(c=>[c.code,c])).values()].slice(0,5);
     const motivo = e.riskComp && e.riskNota ? 'Ambos' : e.riskComp ? 'Competencias' : 'Nota del curso';
+    const col = _colorForAvg(e.avg);
+    const compsHtml = e.compsRiesgo.length
+      ? e.compsRiesgo.map(c=>`<span class="nivel-pill nivel-N" style="margin:1px" title="${_alEsc(c.desc||'')}">${c.code}: ${c.val.toFixed(1)}</span>`).join(' ')
+      : '—';
     html+=`<tr>
       <td><strong>${fichaLinkEstudiante(e.id, e.nombre)}</strong></td>
-      <td style="font-size:0.75rem;color:var(--muted)">${e.id}</td>
-      <td>${e.avg!==null?`<span class="${riskCls}">${e.avg.toFixed(2)}</span>`:'—'}</td>
-      <td>${e.notaMin!==null?e.notaMin:'—'}</td>
+      <td style="font-size:0.72rem;color:var(--muted)">${e.id}</td>
       <td><span class="badge ${motivo==='Ambos'?'badge-rust':motivo==='Competencias'?'badge-blue':'badge-green'}">${motivo}</span></td>
-      <td style="font-size:0.75rem">${uniqueRisk.map(c=>`<span class="nivel-pill nivel-N" style="margin:1px" ${_tipAttr(c.desc)}>${c.code}</span>`).join(' ')}${e.compsRiesgo.length>5?` +${e.compsRiesgo.length-5} más`:''}</td>
-      <td>${isAdvisee?'<span class="badge badge-green">Asesor/a</span>':'—'}</td>
+      <td style="text-align:center"><span style="font-weight:800;color:${col}">${e.avg!==null?e.avg.toFixed(2):'—'}</span></td>
+      <td style="text-align:center">${e.notaMin!==null?e.notaMin.toFixed(1):'—'}</td>
+      <td style="font-size:0.75rem">${compsHtml}</td>
     </tr>`;
-    csvRows.push([e.nombre,e.id,isAdvisee?'Sí':'No',e.avg!==null?e.avg.toFixed(2):'',e.notaMin!==null?e.notaMin:'',motivo,uniqueRisk.map(c=>c.code).join('; ')]);
+    csvRows.push([e.nombre, e.id, motivo, e.avg!==null?e.avg.toFixed(2):'', e.notaMin!==null?e.notaMin.toFixed(1):'', e.compsRiesgo.map(c=>c.code+':'+c.val.toFixed(1)).join('; ')]);
   });
   html+='</tbody></table></div>';
+
   el.innerHTML=html;
   _rptMakeSortable('r6-body');
   _reportCSVData=csvRows; _reportCSVName='R6_en_riesgo.csv';
@@ -16667,12 +16715,7 @@ function renderR8() {
     }
   });
 
-  const csvRows = [['Estudiante','ID','Curso','Programa','Semestre','Nota Final','Letra']];
-  withGrade.forEach(av => {
-    const cur = db.cursos.find(c=>c.id===av.cursoId);
-    csvRows.push([av.estudiante, av.estudianteId||'', cur?.codigo||av.cursoCodigo||'—',
-      cur?.programa||'—', _getSemestre(av), av.notaFinal, av.notaFinalLetra||gradeToLetter(parseFloat(av.notaFinal))]);
-  });
+  const csvRows = [['Curso','Programa','Estudiantes','Promedio','A','B','C','D','F','Aprobación %']];
 
   let html = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">
@@ -16717,25 +16760,14 @@ function renderR8() {
       }).join('')}
     </tbody></table></div>
 
-    <div class="rpt-section-head" style="margin-top:20px">Listado Completo</div>
-    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-      <th data-sort="text">Estudiante</th><th data-sort="text">ID</th><th data-sort="text">Curso</th><th data-sort="text">Semestre</th><th data-sort="num">Nota</th><th data-sort="text">Letra</th>
-    </tr></thead><tbody>
-      ${withGrade.sort((a,b)=>(a.estudiante||'').localeCompare(b.estudiante||'')).map(av => {
-        const cur = db.cursos.find(c=>c.id===av.cursoId);
-        const n = parseFloat(av.notaFinal);
-        const l = isNaN(n)?'—':gradeToLetter(n);
-        const col = gradeColors[l] || '#9ca3af';
-        return `<tr>
-          <td><strong>${av.estudianteId ? fichaLinkEstudiante(av.estudianteId, av.estudiante || av.estudianteId) : (av.estudiante||'—')}</strong></td>
-          <td style="font-size:0.72rem;color:var(--muted)">${av.estudianteId||'—'}</td>
-          <td><span class="badge badge-gold">${cur?.codigo||av.cursoCodigo||'—'}</span></td>
-          <td style="font-size:0.75rem">${_getSemestre(av)||'—'}</td>
-          <td style="text-align:center;font-weight:700">${av.notaFinal}</td>
-          <td style="text-align:center"><span style="font-weight:900;font-size:1.1rem;color:${col}">${l}</span></td>
-        </tr>`;
-      }).join('')}
-    </tbody></table></div>`;
+    `;
+
+  Object.values(byCurso).sort((a,b)=>a.codigo.localeCompare(b.codigo)).forEach(c => {
+    const avg = c.grades.length ? (c.grades.reduce((s,v)=>s+v,0)/c.grades.length).toFixed(1) : '—';
+    const pass = (c.dist.A+c.dist.B+c.dist.C);
+    const rate = c.grades.length ? Math.round(pass/c.grades.length*100) : 0;
+    csvRows.push([c.codigo, c.prog, c.grades.length, avg, c.dist.A||0, c.dist.B||0, c.dist.C||0, c.dist.D||0, c.dist.F||0, rate+'%']);
+  });
 
   el.innerHTML = html;
   _rptMakeSortable('r8-body');
@@ -16789,7 +16821,7 @@ function renderR9() {
     : '<span style="color:var(--muted)">Sin asignar</span>';
 
   let html = '';
-  const csvRows = [['Programa', 'Año Comienzo', 'Secuencia', 'Número', 'Nombre', 'Registración']];
+  const csvRows = [['Programa', 'Año Comienzo', ...R9_SECUENCIA_COLS, 'Sin asignar', 'Total']];
 
   Object.entries(porPrograma).sort(([a], [b]) => a.localeCompare(b)).forEach(([nombrePrograma, estudiantesPrograma]) => {
     // Años presentes en este programa, ordenados de más reciente a más
@@ -16816,29 +16848,12 @@ function renderR9() {
         <td>${sinAsignar || '—'}</td>
         <td><strong>${estAnio.length}</strong></td>
       </tr>`;
+      csvRows.push([nombrePrograma, anio || 'Sin asignar', ...conteos, sinAsignar, estAnio.length]);
     });
     html += `<tr style="font-weight:700;border-top:2px solid var(--border)">
       <td>Total</td>${totalesPorColumna.map(n => `<td>${n || '—'}</td>`).join('')}<td>${estudiantesPrograma.length}</td>
     </tr>`;
     html += '</tbody></table></div>';
-
-    // ---- Detalle: listado de estudiantes agrupado por Año Comienzo · Secuencia ----
-    aniosOrdenados.forEach(anio => {
-      [...R9_SECUENCIA_COLS, null].forEach(secuencia => {
-        const grupo = estudiantesPrograma
-          .filter(est => etiquetaAnio(est) === anio && etiquetaSecuencia(est) === secuencia)
-          .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
-        if (!grupo.length) return;
-        const etiquetaSec = secuencia || 'Sin asignar';
-        html += `<div style="font-size:0.82rem;font-weight:700;margin:10px 0 4px;color:var(--ink)">${anio || 'Sin asignar'} · ${etiquetaSec} (${grupo.length})</div>`;
-        html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-          <th data-sort="text">Número</th><th data-sort="text">Nombre</th><th data-sort="text">Registración</th>
-        </tr></thead><tbody>${grupo.map(est => `<tr>
-          <td>${est.numero}</td><td>${fichaLinkEstudiante(est.numero, est.nombre)}</td><td>${est.registracion || '—'}</td>
-        </tr>`).join('')}</tbody></table></div>`;
-        grupo.forEach(est => csvRows.push([nombrePrograma, anio || 'Sin asignar', etiquetaSec, est.numero, est.nombre, est.registracion || '']));
-      });
-    });
   });
 
   el.innerHTML = html;
