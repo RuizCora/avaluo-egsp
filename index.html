@@ -5809,7 +5809,7 @@ function _nombreProgramaVigente(nombre) {
 // abren la app a la vez con la base sin sembrar, ambos escriben exactamente
 // los mismos datos y no quedan referencias cruzadas rotas.
 function _ensureAlineamientoSemillaMHSA() {
-  const SEMILLA_ID = 'alineamiento_mhsa_v5';
+  const SEMILLA_ID = 'alineamiento_mhsa_v6';
   if (_semillaAplicada(SEMILLA_ID)) return false;
   const programa = _nombreProgramaVigente('MHSA');
   const comps = (db.bancoCompetencias || []).filter(c => c.programa === programa);
@@ -5831,7 +5831,8 @@ function _ensureAlineamientoSemillaMHSA() {
 
   Object.entries(sem.criterios).forEach(([num, lista]) => {
     const comp = comps.find(c => c.num === num);
-    if (!comp || (comp.criteriosEvaluacion && comp.criteriosEvaluacion.length)) return;
+    if (!comp) return;
+    // v6: fuerza reemplazo de criterios existentes (antes se saltaban)
     comp.criteriosEvaluacion = lista.map(cr => ({
       id: 'crit_seed_mhsa_' + num.replace('.', '_') + '_' + cr.codigo,
       codigo: cr.codigo, nombre: cr.nombre, peso: 1,
@@ -18043,8 +18044,8 @@ const ALL_COMPETENCIAS = [
   { num:'DDIT6', texto:'Analyze new trends in the fields of developmental disabilities and early intervention and incorporate them into existing service delivery models.', programa:'Certificado Graduado en Deficiencias en el Desarrollo e Intervención Temprana' },
 ];
 
-// Fase R1 — Semilla del alineamiento de criterios MHSA (documento V.5,
-// "Integrated Evaluation Rubric (Aligned Curriculum Model)", 24-sept-2026).
+// Fase R1 — Semilla del alineamiento de criterios MHSA (documento V. 29-oct-2026,
+// "Integrated Evaluation Rubric – 3 Elements & 4-0 Response Scale (Program-Aligned Revision)").
 // Solo se usa UNA vez (ver _ensureAlineamientoSemillaMHSA); después los datos
 // viven en db.dominiosCompetencias / db.bancoCompetencias y son editables.
 const ALINEAMIENTO_SEMILLA_MHSA = {
@@ -18113,260 +18114,700 @@ const ALINEAMIENTO_SEMILLA_MHSA = {
   "1.2": [
    {
     "codigo": "C1",
-    "nombre": "Operational Collaboration",
+    "nombre": "Teamwork Principles",
     "descriptores": {
-     "4": "Masterfully synthesizes advanced high-performance team frameworks within the submitted work, flawlessly demonstrating how strategic collaboration, task allocation, and team dynamics optimize organizational outcomes with exceptional analytical rigor.",
-     "3": "Correctly identifies and applies foundational teamwork principles and high-performance models (e.g., Tuckman, Lencioni) to justify the structural or collaborative design proposed in the submitted work.",
-     "2": "Mentions teamwork concepts or group principles superficially within the assignment, but fails to link them logically or structurally to the practical operations discussed in the text.",
-     "1": "Fails to incorporate teamwork theories or collaborative principles, basing administrative structures or group workflows entirely on personal, non-theoretical assumptions within the deliverable.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation in the submitted work."
+     "4": "Masterfully integrates foundational and advanced team principles (e.g., psychological safety, psychological cohesion, and open active communication) into the project lifecycle. Clear and unequivocal evidence demonstrates how these principles actively optimized team performance, mitigated internal conflict, and elevated the overall analytical quality of the project.",
+     "3": "Correctly identifies and applies foundational teamwork principles (such as psychological safety, alignment, and active communication) to structure and execute the project. The contribution shows clear alignment between group principles and project execution.",
+     "2": "Mentions or lists general teamwork concepts or principles within the project documentation, but applies them superficially. Fails to establish a clear, functional connection between these principles and the actual operational execution of the project work.",
+     "1": "Fails to incorporate established teamwork principles into the project structure. Group coordination, workflow dynamics, and project execution are based entirely on personal, non-theoretical assumptions without structural framework.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence regarding teamwork principles for evaluation in the submitted project work."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Teamwork Models",
+    "descriptores": {
+     "4": "Flawlessly synthesizes and operationalizes advanced organizational team models (e.g., Tuckman's Stages, Lencioni's Five Dysfunctions, or Katzenbach-Smith) within the project report. Provides a sophisticated, rigorous theoretical justification for the team's structural design, development phases, and strategic decision-making processes.",
+     "3": "Appropriately applies a recognized teamwork model to justify the structural design, collaborative milestones, and operational workflows proposed in the project.",
+     "2": "References teamwork or organizational models superficially within the text, but fails to use them as a structured framework. The chosen model lacks structural or logical links to the team's actual project development and operations.",
+     "1": "Omits formal teamwork or organizational development models entirely. Relies on ad-hoc, uncoordinated group workflows with no structural, model-driven foundation for the management or execution of the project report.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence regarding teamwork models for evaluation in the submitted project work."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Teamwork Collaborative Frameworks",
+    "descriptores": {
+     "4": "Constructs a highly sophisticated, flawless collaborative framework incorporating complex task architecture, advanced role dependencies (e.g., RACI matrix), and robust governance metrics. Proactively establishes ironclad check-and-balance systems and automated progress dashboards that eliminate overlap and optimize project delivery perfectly.",
+     "3": "Coordinates and maps distinct operational responsibilities and project workflows clearly among group members using a structured collaborative framework. Establishes realistic individual timelines, baseline tracking checkpoints, and clear internal accountability.",
+     "2": "Details project assignments and collaborative tasks broadly, but fails to establish clear individual milestones or transparent internal accountability. Leaves project dependencies, workload balance, or performance tracking mechanisms vague.",
+     "1": "Presents an uncoordinated, chaotic breakdown of project tasks with completely fragmented tracking or collaborative workflows, leading to severe project friction, duplication of effort, or missed project milestones.",
+     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence regarding collaborative frameworks for evaluation in the submitted project work."
     }
    }
   ],
   "2.1": [
    {
     "codigo": "C1",
-    "nombre": "Vision & Change Management",
+    "nombre": "Vision Creation & Alignment",
     "descriptores": {
-     "4": "Masters the integration of advanced leadership frameworks and change theories, fully justifying all strategic and visionary choices exceptionally.",
-     "3": "Correctly identifies and applies foundational leadership principles and change models (e.g., Kotter) to health services case studies.",
-     "2": "Mentions leadership frameworks or change phases superficially without linking them logically to the administrative challenges presented.",
-     "1": "Fails to incorporate leadership or change theories, basing organizational change proposals entirely on personal assumptions.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Formulates an inspiring, highly sophisticated organizational vision backed by comprehensive, data-driven long-term strategic benchmarks.",
+     "3": "Clearly outlines a realistic organizational vision and maps specific team objectives to achieve broader institutional health goals.",
+     "2": "Drafts a vague or overly generic vision that lacks alignment with the core operational or strategic realities of health service delivery.",
+     "1": "Fails to establish a coherent vision, leaving organizational decisions fragmented, unguided, or disconnected from institutional milestones.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Rational Decision-Making & Guidance",
+    "descriptores": {
+     "4": "Formulates bulletproof, highly analytical, and innovative decisions that maximize operational efficiency under immense pressure or ambiguity.",
+     "3": "Makes logical, data-backed administrative decisions that realistically solve operational challenges in healthcare simulations.",
+     "2": "Proposes administrative decisions that lack full analytical depth or fail to address the underlying operational problem entirely.",
+     "1": "Makes erratic, subjective, or dangerous decisions that compromise institutional sustainability or patient safety parameters.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Change Management Frameworks",
+    "descriptores": {
+     "4": "Masters the integration of advanced change theories (e.g., Kotter) to map phases, manage staff resistance, and ensure seamless alignment.",
+     "3": "Correctly identifies and applies foundational leadership principles and change models to administrative challenges or case studies.",
+     "2": "Mentions change frameworks superficially without linking them logically to the administrative shifts or staff workflows required.",
+     "1": "Ignores change management planning entirely, expecting new processes to execute themselves without structure or staff onboarding.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "2.2": [
    {
     "codigo": "C1",
-    "nombre": "Negotiation & Mediation",
+    "nombre": "Stakeholder Interest Diagnosis",
     "descriptores": {
-     "4": "Executes sophisticated, highly structured negotiation models (e.g., Harvard Model) to achieve optimal mutual gains and resolve deep organizational conflicts.",
-     "3": "Uses appropriate negotiation and mediation techniques to guide conflicting healthcare parties toward a professional, realistic compromise.",
-     "2": "Attempts to mediate or collaborate but relies on weak or coercive tactics, resulting in unstable, short-term agreements.",
-     "1": "Fails to apply negotiation or mediation principles, escalating organizational tension or forcing authoritarian, non-consensual outcomes.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Conducts a profound, masterful analysis of hidden stakeholder motivations, separating superficial stances from deep clinical or business constraints.",
+     "3": "Accurately identifies conflicting interests and challenges between different healthcare actors (e.g., physicians vs. financial managers).",
+     "2": "Recognizes the existence of an organizational challenge but misinterprets the primary motivations or constraints of the involved parties.",
+     "1": "Completely misdiagnoses the challenge, overlooking obvious conflicting interests and structural friction within the facility.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Negotiation Model Execution",
+    "descriptores": {
+     "4": "Executes sophisticated, highly structured negotiation models (e.g., Harvard Model) to achieve optimal mutual gains and institutional value.",
+     "3": "Uses appropriate negotiation and mediation techniques to guide conflicting parties toward a professional, realistic compromise.",
+     "2": "Attempts to mediate but relies on coercive or weak negotiation tactics, resulting in unstable, short-term agreements.",
+     "1": "Fails to apply collaborative principles, escalating organizational tension or forcing authoritarian, non-consensual outcomes.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Collaborative Problem Solving",
+    "descriptores": {
+     "4": "Establishes robust, long-term consensus that actively strengthens corporate culture, institutional relationships, and operational continuity.",
+     "3": "Proposes realistic, win-win solutions that preserve service delivery and can be sustained over time by the organization.",
+     "2": "Achieves a temporary truce that leaves structural issues unresolved, risking future operational or clinical disruption.",
+     "1": "Imposes unsustainable solutions that fracture working relationships or cause immediate operational breakdowns in the facility.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "3.1": [
    {
     "codigo": "C1",
-    "nombre": "Ethical & Deontological Integration",
+    "nombre": "Ethical Sensitivity & Risk Detection",
     "descriptores": {
-     "4": "Detects nuanced, complex ethical conflicts and hidden governance vulnerabilities long before they escalate, modeling the highest professional codes.",
-     "3": "Correctly identifies ethical dilemmas, conflicts of interest, and governance risks, aligning choices with codes of medical-legal ethics.",
-     "2": "Identifies obvious ethical issues but misses subtler compliance or governance risks embedded in the administrative structure.",
-     "1": "Fails to recognize blatant ethical violations, conflicts of interest, or compliance red flags within healthcare delivery scenarios.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Detects nuanced, complex ethical conflicts and hidden governance vulnerabilities long before they escalate, providing ironclad defenses.",
+     "3": "Correctly identifies ethical dilemmas, conflicts of interest, and governance risks in healthcare delivery scenarios.",
+     "2": "Identifies obvious ethical issues but misses subtler compliance or regulatory risks embedded in the administrative structure.",
+     "1": "Fails to recognize blatant ethical violations, conflicts of interest, or compliance red flags within the healthcare assignment.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Deontological & Legal Compliance",
+    "descriptores": {
+     "4": "Formulates management actions that model the highest standards of healthcare administrative codes, corporate responsibility, and patient advocacy.",
+     "3": "Aligns administrative recommendations with established codes of medical-legal ethics and institutional governance values.",
+     "2": "Applies ethical codes inconsistently, offering administrative solutions that borderline on regulatory compliance risks.",
+     "1": "Proposes administrative solutions that directly violate professional ethics, healthcare regulations, or basic patient rights.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Governance Transparency & Accountability",
+    "descriptores": {
+     "4": "Integrates flawless, transparent auditing mechanisms and corporate social responsibility deep into the core strategic project architecture.",
+     "3": "Incorporates explicit mechanisms for transparency, strict accountability, and public reporting in management proposals.",
+     "2": "Mentions accountability superficially but fails to build practical reporting or check-and-balance systems into governance.",
+     "1": "Promotes opaque management practices that shield decision-makers from accountability and disregard transparency.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "3.2": [
    {
     "codigo": "C1",
-    "nombre": "Professional Service & Growth",
+    "nombre": "Professional Development & Certifications",
     "descriptores": {
-     "4": "Conducts a profound critical self-appraisal, mapping out an advanced path (e.g., FACHE) and demonstrating profound executive network contribution.",
-     "3": "Designs a realistic professional development plan and articulates the value of active participation in professional healthcare management organizations (e.g., ACHE, IHF).",
-     "2": "Acknowledges professional groups or learning plans but cannot identify specific networks or how they contribute to executive competence clearly.",
-     "1": "Dismisses professional associations completely, viewing continuous career networking and learning as irrelevant to administration.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Conducts a profound critical self-appraisal, mapping out an advanced, high-level continuous professional path (e.g., FACHE, CPHQ).",
+     "3": "Designs a realistic five-year professional development plan identifying key skill gaps and required healthcare certifications.",
+     "2": "Drafts a vague professional growth plan that lacks specific milestones or direct relevance to healthcare administration.",
+     "1": "Displays no interest in self-assessment, lacking any coherent strategy for long-term career development or professional learning.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Institutional Networking & Engagement",
+    "descriptores": {
+     "4": "Demonstrates deep knowledge of top executive associations, outlining active pathways for professional service, contribution, and governance.",
+     "3": "Articulates the value of actively participating in professional healthcare management organizations (e.g., ACHE, IHF, MGMA).",
+     "2": "Acknowledges professional groups but cannot identify specific networks or how they contribute to executive competence.",
+     "1": "Dismisses professional associations completely, viewing continuous career networking as irrelevant to administration.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Industry Trend Tracking & Research",
+    "descriptores": {
+     "4": "Systematically synthesizes cutting-edge peer-reviewed research, industry webinars, and global health data into all strategic arguments.",
+     "3": "Incorporates contemporary healthcare trends, professional webinars, and recent industry data into academic and professional work.",
+     "2": "References outdated sources or struggles to connect current healthcare industry developments to assignments logically.",
+     "1": "Relies strictly on anecdotal assumptions, ignoring current scientific, economic, or professional trends in health systems.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "4.1": [
    {
     "codigo": "C1",
-    "nombre": "Health Policy & Regulation Analysis",
+    "nombre": "Policy & Regulatory Analysis",
     "descriptores": {
-     "4": "Displays flawless, exhaustive mastery of healthcare statutes, reforms, and national public policy frameworks, accurately predicting population health impacts.",
-     "3": "Accurately interprets and applies current public policies, healthcare regulations, and policy decision-making processes to institutional scenarios.",
-     "2": "Demonstrates a superficial grasp of health laws, misapplying minor regulatory details or failing to link them clearly to population health delivery.",
+     "4": "Displays flawless, exhaustive mastery of healthcare statutes, health care reforms, and national public policy frameworks comprehensively.",
+     "3": "Accurately interprets and applies current public policies and healthcare regulations to institutional delivery scenarios.",
+     "2": "Demonstrates a superficial grasp of health laws, misapplying minor regulatory details in the environment analysis.",
      "1": "Ignores or severely misinterprets public policies and basic healthcare regulations governing health service delivery.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Population Health Outcomes Linkage",
+    "descriptores": {
+     "4": "Predicts with absolute precision how macro-level policy shifts translate into localized clinical outcomes and health equity metrics.",
+     "3": "Effectively incorporates population health indicators and regulatory directives to improve delivery system performance in case analyses.",
+     "2": "References population health goals vaguely without establishing a clear analytical link to healthcare regulations.",
+     "1": "Disregards population health frameworks entirely, treating policy analysis as an isolated academic compliance task.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Macro-Systemic Impact Assessment",
+    "descriptores": {
+     "4": "Formulates deep predictive models assessing how historical and emerging health reforms redistribute risk and equity across delivery structures.",
+     "3": "Thoroughly evaluates the secondary operational impacts of federal, regional, or state-level policy decisions on healthcare access.",
+     "2": "Connects health policy changes to delivery operations loosely, lacking detailed understanding of systemic administrative impacts.",
+     "1": "Fails to connect broad policy shifts to organizational performance, analyzing delivery functions in a policy vacuum.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "4.2": [
    {
     "codigo": "C1",
-    "nombre": "Medico-Legal Risk Management",
+    "nombre": "Medico-Legal Risk Identification",
     "descriptores": {
-     "4": "Proactively uncovers hidden systemic flaws and engineered bulletproof risk-mitigation systems, checklists, and legal compliance safeguards flawlessly.",
-     "3": "Correctly identifies potential medical-legal risks, liability hazards, and non-compliance points, designing realistic risk management protocols.",
-     "2": "Spots obvious legal hazards but misses deeper institutional compliance, credentialing, or practical step-by-step risk mitigation workflows.",
-     "1": "Fails to detect severe medical-legal liabilities or offer preventive strategies, leaving the organization vulnerable to lawsuits or safety hazards.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Proactively uncovers hidden systemic flaws and latent liabilities that threaten institutional stability or spark severe litigation.",
+     "3": "Correctly identifies potential medical-legal risks, liability hazards, and non-compliance points in case analyses.",
+     "2": "Spots obvious legal hazards but misses deeper institutional compliance, credentialing, or hidden liabilities.",
+     "1": "Fails to detect severe medical-legal or operational liabilities that expose the facility to immediate lawsuits.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Risk Management Protocol Design",
+    "descriptores": {
+     "4": "Engineers comprehensive, bulletproof risk-mitigation systems, checklists, and institutional clinical safety barriers flawlessly.",
+     "3": "Designs realistic risk management protocols, mitigation plans, and safety measures to ensure organizational compliance.",
+     "2": "Proposes weak or generic risk mitigation ideas that lack practical step-by-step implementation workflows.",
+     "1": "Fails to offer any preventive strategies, leaving the healthcare organization completely vulnerable to hazards.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Regulatory Compliance & Standards Auditing",
+    "descriptores": {
+     "4": "Integrates flawless corporate compliance architectures that easily exceed state, federal, and institutional accreditation guidelines.",
+     "3": "Demonstrates a sound capacity to perform internal compliance audits using specific healthcare regulatory frameworks.",
+     "2": "Conducts standard compliance evaluations mechanically, overlooking key operational deviations or documentation gaps.",
+     "1": "Ignores formal compliance standards, proposing operational changes that expose the facility to immediate regulatory penalties.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "4.3": [
    {
     "codigo": "C1",
-    "nombre": "Healthcare Delivery System Trends",
+    "nombre": "Macro Trend Diagnostics",
     "descriptores": {
-     "4": "Systematically synthesizes cutting-edge industry trends, macroeconomic shifts, and structural reforms to pioneer delivery system changes.",
-     "3": "Evaluates contemporary healthcare issues, industry developments, and professional trends to plan necessary changes in delivery systems.",
-     "2": "References healthcare system changes or trends but struggles to connect them logically to the direct operational needs of the facility.",
-     "1": "Relies strictly on anecdotal or outdated assumptions, ignoring current systemic trends, technological changes, or professional data.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Executes a highly sophisticated analysis of emerging macro trends, disruptive technologies, and evolving market behavior forces.",
+     "3": "Correctly analyzes current healthcare issues, delivery trends, and patient demand dynamics within the sector.",
+     "2": "Identifies current issues but struggles to translate them into necessary operational or structural delivery shifts.",
+     "1": "Ignores industry developments entirely, treating the delivery center as an isolated entity detached from trends.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "System Adaptation Engineering",
+    "descriptores": {
+     "4": "Designs comprehensive, proactive system-wide transition models that leverage macro trends to optimize organizational readiness.",
+     "3": "Outlines realistic adjustments to the service delivery model to effectively address changing industry and clinical demands.",
+     "2": "Proposes transition steps that are too vague, unrealistic, or fail to account for baseline clinical operational capacity.",
+     "1": "Fails to suggest any delivery system changes, leaving the facility static against industry shifts.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Disruptive Innovation Forecasting",
+    "descriptores": {
+     "4": "Accurately models the structural, financial, and clinical impacts of cutting-edge industry disruptions (e.g., AI integration, hospital-at-home models).",
+     "3": "Identifies key technological or operational innovations and describes their logical impact on current care delivery methods.",
+     "2": "Acknowledges innovative healthcare technologies but fails to analyze their operational challenges or implementation barriers.",
+     "1": "Rejects or ignores emerging delivery solutions, adhering to outdated, legacy institutional workflows exclusively.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "4.4": [
    {
     "codigo": "C1",
-    "nombre": "System Thinking & Core Management",
+    "nombre": "Systems Thinking Integration",
     "descriptores": {
-     "4": "Masterfully integrates systems thinking perspectives and core organizational theories to optimize macro-level and micro-level facility structures.",
-     "3": "Applies foundational management concepts, theories, principles, and systems thinking to analyze and resolve healthcare organizational challenges.",
-     "2": "Mentions core management concepts or systems perspectives superficially without linking them logically to the practical operation of the healthcare setup.",
-     "1": "Fails to incorporate basic management theories or systems thinking, treating interconnected workflows as isolated events.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Masterfully maps complex feedback loops and downstream interdependencies across clinical, business, and community sectors flawlessly.",
+     "3": "Correctly applies systems thinking frameworks and core management theories to resolve operational bottlenecks.",
+     "2": "Mentions management concepts superficially without analyzing the interconnected nature of healthcare operations.",
+     "1": "Analyzes operational problems in isolation, completely missing the systemic impacts of management choices.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Organizational Theory Application",
+    "descriptores": {
+     "4": "Seamlessly diagnoses structural pathologies within administrative models, applying classic and modern organizational design theories perfectly.",
+     "3": "Demonstrates proper use of foundational management concepts (e.g., span of control, centralization) to optimize administrative design.",
+     "2": "Applies organizational frameworks inconsistently, leaving structural overlaps or gaps in authority clear across simulations.",
+     "1": "Fails to employ core management theories, resulting in chaotic administrative designs with no clear lines of authority.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Process Optimization Frameworks",
+    "descriptores": {
+     "4": "Deploys advanced Lean Six Sigma, Total Quality Management (TQM), or Agile architectures to permanently erase operational workflow bottlenecks.",
+     "3": "Deploys standard process improvement methodologies to increase operational performance or decrease waste in clinical workflows.",
+     "2": "Proposes operational fixes without applying formal optimization tools or considering baseline staff workflows.",
+     "1": "Fails to analyze workflow inefficiencies, leaving broken operational steps unaddressed within the management plan.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.1": [
    {
     "codigo": "C1",
-    "nombre": "Cost & Financial Viability",
+    "nombre": "Financial Modeling Precision",
     "descriptores": {
-     "4": "Constructs flawless, advanced operating budgets, cost-allocation models, and financial indicators (ROI, NPV, IRR) with deep fiscal engineering insight.",
-     "3": "Accurately calculates fixed/variable costs, operating budgets, and break-even points, applying financial tools to ensure fiscal viability.",
-     "2": "Completes financial or cost accounting tasks with minor arithmetic or conceptual errors that distort budgetary balances or justifications.",
-     "1": "Submits budgets or financial plans filled with critical errors, ignoring investment appraisal tools or threatening economic survival.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Constructs flawless, advanced budgets and cost-allocation models with pristine mathematical logic and deep financial insight.",
+     "3": "Accurately calculates fixed/variable costs, operating budgets, and break-even points for specific health services.",
+     "2": "Completes financial tasks with minor arithmetic or conceptual errors that distort final budgetary balances.",
+     "1": "Submits budgets or financial calculations filled with critical errors that threaten the economic survival of the service.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Capital & Investment Justification",
+    "descriptores": {
+     "4": "Formulates exhaustive cost-benefit analyses, brilliantly using financial metrics (ROI, NPV, IRR) to back major asset investments.",
+     "3": "Correctly interprets financial indicators to justify capital investments, such as purchasing clinical technology.",
+     "2": "Mentions ROI or capital metrics but struggles to apply or explain them logically to justify expenditures.",
+     "1": "Bases large capital expenditures on pure intuition, completely ignoring basic investment appraisal tools.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Variance Analysis & Fiscal Controls",
+    "descriptores": {
+     "4": "Establishes sophisticated, proactive monthly variance control thresholds and automated corrective fiscal workflows flawlessly.",
+     "3": "Correctly performs and explains standard variance analyses to identify operational overspending or revenue gaps.",
+     "2": "Identifies financial variances but fails to trace them back to their operational causes or suggest realistic remedies.",
+     "1": "Ignores variance differences entirely, failing to evaluate whether actual institutional performance matches the budget.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.2": [
    {
     "codigo": "C1",
-    "nombre": "Organizational Culture Analysis",
+    "nombre": "Cultural & Behavior Diagnostics",
     "descriptores": {
-     "4": "Dissects intricate subcultures, power networks, and deep human behavioral links to strategic hospital performance metrics with superior precision.",
-     "3": "Accurately diagnoses the existing organizational culture, corporate climate, and behavioral alignments that drive clinical and strategic goals.",
-     "2": "Identifies surface-level cultural aspects (e.g., morale) but misses structural behavioral bottlenecks or clinical resistance dynamics.",
-     "1": "Completely overlooks corporate culture, analyzing institutional failure purely through mechanical or non-human metrics.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Dissects intricate subcultures, informal power networks, and deep burnout dynamics among clinical groups with exceptional precision.",
+     "3": "Accurately diagnoses the existing organizational culture, corporate climate, and behavioral alignments within a health facility.",
+     "2": "Identifies surface-level cultural aspects (e.g., morale) but misses structural behavioral bottlenecks or clinical resistance.",
+     "1": "Completely overlooks corporate culture, analyzing institutional failure purely through mechanical or hardware metrics.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Alignment & Strategy Interventions",
+    "descriptores": {
+     "4": "Crafts highly sophisticated, realistic behavioral incentive models and cultural transformations that maximize operational excellence.",
+     "3": "Designs practical behavioral interventions, incentive plans, or leadership strategies to align staff with strategic goals.",
+     "2": "Suggests generic motivation schemes that do not address the distinct workplace realities or burnout of clinical teams.",
+     "1": "Fails to provide solutions for poor morale or toxic culture, leaving behavioral issues unaddressed within the case.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Change Adaptation Metrics",
+    "descriptores": {
+     "4": "Implements robust, multi-layered cultural tracking dashboards that monitor change fatigue, core alignment, and values integration continuously.",
+     "3": "Develops specific qualitative or quantitative indicators to measure staff adoption of cultural values or institutional shifts.",
+     "2": "Mentions employee buy-in without creating a clear way to measure or monitor cultural alignment over time.",
+     "1": "Disregards cultural measurement entirely, offering no tools to evaluate if staff behaviors match stated strategic visions.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.3": [
    {
     "codigo": "C1",
-    "nombre": "Environmental Scanning & Strategic Planning",
+    "nombre": "Environmental Scanning & Market Forces",
     "descriptores": {
-     "4": "Executes a highly sophisticated analysis of competitive behaviors, shifting consumer demands, and technological forces to design bulletproof strategic plans.",
-     "3": "Develops a realistic organizational strategic plan based on scanning market forces, competitive dynamics, and demand trends within the health sector.",
-     "2": "Identifies market forces or environmental aspects but fails to link them logically to the strategic position or plan of the facility.",
-     "1": "Ignores market competition and patient demographic shifts, analyzing the facility as an isolated entity without strategic foresight.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Executes a highly sophisticated analysis of competitive behaviors, shifting consumer demands, and technological environmental trends.",
+     "3": "Correctly analyzes current market forces, competitive dynamics, and patient demand trends within the local health sector.",
+     "2": "Identifies market trends but fails to link them to the strategic position or volume projections of the facility.",
+     "1": "Ignores market competition and patient demographic shifts, analyzing the facility as a closed, untouchable bubble.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Strategic Choice Matrix",
+    "descriptores": {
+     "4": "Uses advanced strategic frameworks (e.g., SWOT, Porter's Five Forces, Ansoff Matrix) to formulate bulletproof defensive market options.",
+     "3": "Integrates environmental findings logically into a standard SWOT matrix to generate clear, targeted strategic alternatives.",
+     "2": "Lists strategic strengths and opportunities loosely without linking them to specific, practical long-term growth plans.",
+     "1": "Generates random strategic choices that lack logical connections to the market realities or external constraints identified.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Execution Roadmapping & KPI Metrics",
+    "descriptores": {
+     "4": "Designs immaculate, highly detailed strategic execution roadmaps complete with strict milestones, accountability blocks, and comprehensive dashboards.",
+     "3": "Outlines a clear, step-by-step implementation plan with distinct KPIs to track the progress of the chosen strategy.",
+     "2": "Creates an implementation schedule that lacks clear operational metrics or specific department accountability targets.",
+     "1": "Fails to supply an execution roadmap, leaving the strategic goals without practical milestones or tracking metrics.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.4": [
    {
     "codigo": "C1",
-    "nombre": "Marketing Principles in Decision Making",
+    "nombre": "Marketing Strategy Application",
     "descriptores": {
-     "4": "Integrates sophisticated marketing strategy frameworks and patient-consumer demand metrics seamlessly to drive high-level administrative choices.",
-     "3": "Discusses and applies standard healthcare marketing principles, service line position, and institutional communication to support decision-making.",
-     "2": "Mentions marketing concepts or patient outreach superficially but fails to integrate them practically into the management decision flow.",
-     "1": "Completely disregards healthcare marketing principles, designing services or making decisions without considering consumer or community connection.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Integrates consumer behavior data, ethical positioning, and multi-channel communication strategies into major business decisions seamlessly.",
+     "3": "Correctly applies core healthcare marketing principles (e.g., service lines, branding, patient acquisition) to decisions.",
+     "2": "Proposes generic marketing tactics without connecting them logically to strategic healthcare management outcomes.",
+     "1": "Ignores marketing principles entirely, basing service line growth on pure intuition without market context.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Consumer Demographics Segmentation",
+    "descriptores": {
+     "4": "Deploys highly precise psychographic and demographic segmentation models to design patient-centric service entry points perfectly.",
+     "3": "Identifies and targets specific consumer segments or patient populations accurately based on community health needs data.",
+     "2": "Defines target populations too broadly, diluting the focus and effectiveness of the proposed marketing campaign.",
+     "1": "Fails to segment the market, applying identical, generic messaging across completely diverse patient demographics.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Return on Marketing Investment (ROMI)",
+    "descriptores": {
+     "4": "Builds sophisticated, data-backed predictive tools that accurately measure patient acquisition costs against lifetime clinical value margins.",
+     "3": "Estimates baseline customer acquisition costs and maps out simple indicators to evaluate marketing campaign efficiency.",
+     "2": "Mentions marketing value without detailing how the organization will track campaign success or patient volume increases.",
+     "1": "Fails to measure marketing efficiency, spending institutional resources on outreach without any tracking parameters.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.5": [
    {
     "codigo": "C1",
-    "nombre": "Statistical & Quantitative Methods",
+    "nombre": "Quantitative Metrics Analytics",
     "descriptores": {
-     "4": "Constructs advanced, flawless quantitative models and statistical cross-analyses to optimize operational performance with absolute mathematical rigor.",
-     "3": "Applies statistical and quantitative methods accurately to measure, analyze, and propose actions for improving performance and efficiency indicators.",
-     "2": "Completes quantitative calculations with minor mathematical or interpretation errors that alter the clarity of the efficiency report.",
-     "1": "Submits quantitative data or performance measures filled with critical flaws, managing operations intuitively without statistical validity.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Constructs highly advanced, data-driven dashboards using complex regression or optimization formulas with perfect mathematical logic.",
+     "3": "Correctly calculates and interprets standard performance metrics, process control charts, and efficiency indicators.",
+     "2": "Completes quantitative tasks with minor calculation or data interpretation flaws that skew the efficiency analysis slightly.",
+     "1": "Submits quantitative performance reports filled with critical mathematical flaws that render metrics useless for decision making.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Data-Driven Quality Dashboards",
+    "descriptores": {
+     "4": "Engineers comprehensive, real-time quality control dashboards using advanced statistical software models flawlessly.",
+     "3": "Populates and reads standard corporate performance dashboards (e.g., balanced scorecards) to identify service delays or waste.",
+     "2": "Assembles basic operational metrics but struggles to summarize them into a functional dashboard framework for leadership.",
+     "1": "Fails to arrange performance metrics logically, presenting unorganized data that cannot guide institutional quality improvements.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Hypothesis Testing & Optimization",
+    "descriptores": {
+     "4": "Conducts flawless, advanced statistical hypothesis testing (e.g., ANOVA, Chi-Square) to determine the exact root causes of operational friction.",
+     "3": "Utilizes basic descriptive statistics and trend tracking to locate operational problems or processing backlogs.",
+     "2": "Mentions statistical trends vaguely without applying structured analytical steps to confirm the operational issues.",
+     "1": "Relies purely on subjective assumptions, completely ignoring basic quantitative validation tools for process improvement.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.6": [
    {
     "codigo": "C1",
-    "nombre": "Economic Analysis of Healthcare Systems",
+    "nombre": "Economic Theory Application",
     "descriptores": {
-     "4": "Masterfully synthesizes healthcare micro/macroeconomic principles to drive system improvements across equity, access, and productivity metrics perfectly.",
-     "3": "Applies foundational economic concepts to analyze sector trends and outline realistic improvements in system productivity, access, efficiency, and equity.",
-     "2": "Acknowledges health economic metrics but struggles to apply or translate them logically into concrete workflows for system improvement.",
-     "1": "Ignores economic realities or structural trends, proposing unsustainable adjustments that undermine efficiency or institutional equity.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Masterfully models utility curves, supply-demand shifts, and reimbursement incentives to maximize systemic productivity and equity.",
+     "3": "Correctly applies basic healthcare economic principles to analyze access, productivity, and market supply trends.",
+     "2": "Mentions economic terms superficially but fails to link them logically to micro-level facility productivity or access fixes.",
+     "1": "Ignores healthcare economic realities, proposing models that create structural deficits or worsen access inequities.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Reimbursement Incentives Analysis",
+    "descriptores": {
+     "4": "Masters the systemic operational dynamics of Value-Based Care, bundled payments, and capitation frameworks flawlessly.",
+     "3": "Evaluates how different insurance models (e.g., Fee-for-Service vs. Capitation) influence provider actions and institutional margins.",
+     "2": "Recognizes various payer sources but struggles to explain how payment models alter clinical resource management.",
+     "1": "Misinterprets reimbursement structures entirely, designing programs that conflict directly with local health insurance rules.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Efficiency vs. Equity Optimization",
+    "descriptores": {
+     "4": "Formulates highly innovative corporate resource models that maximize asset efficiency while advancing health equity targets perfectly.",
+     "3": "Proposes balanced resource changes that improve institutional output without lowering healthcare access for vulnerable groups.",
+     "2": "Focuses heavily on resource efficiency, neglecting the negative impacts these cuts may have on community health access.",
+     "1": "Promotes high-margin actions that actively shut out vulnerable populations and deepen healthcare delivery inequities.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.7": [
    {
     "codigo": "C1",
-    "nombre": "Human Resources Management",
+    "nombre": "HR Legal & Performance Architecture",
     "descriptores": {
-     "4": "Engineers highly sophisticated incentive architectures, staffing models, and legal frameworks that permanently resolve complex clinical burnout and performance bottlenecks.",
-     "3": "Articulates and applies core principles and legal aspects of human resources management to align staff behavior with performance goals.",
-     "2": "Suggests generic human resources or motivational ideas that fail to address labor regulations, legal constraints, or clinical team realities.",
-     "1": "Ignores human resource management principles or legal labor standards, resulting in designs that fracture culture or compromise compliance.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Engineers highly advanced labor law compliance, sophisticated clinician credentialing, and high-performance talent architectures perfectly.",
+     "3": "Accurately applies human resource management concepts, labor regulations, and performance reviews to case scenarios.",
+     "2": "Applies labor principles or credentialing steps inconsistently, exposing the facility to moderate legal or turnover risks.",
+     "1": "Violates basic labor standards or ignores legal human resource frameworks entirely, threatening organizational performance.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Workforce Capacity Planning",
+    "descriptores": {
+     "4": "Creates sophisticated predictive staffing frameworks that optimize full-time equivalent distributions against changing clinical volumes seamlessly.",
+     "3": "Calculates and designs realistic nursing or administrative staffing matrices based on standard patient care volumes.",
+     "2": "Outlines staffing schedules that fail to account for clinical peak hours, employee turn-over patterns, or fatigue limits.",
+     "1": "Leaves clinical units dangerously understaffed or creates massive resource waste due to a total lack of workforce planning.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Talent Retention & Engagement",
+    "descriptores": {
+     "4": "Designs exceptionally innovative professional pathways and wellness programs that reduce clinical burnout and turnover rates permanently.",
+     "3": "Proposes logical employee retention ideas, onboarding steps, and professional rewards to stabilize clinical teams.",
+     "2": "Mentions employee turnover briefly without building structured rewards or positive cultural changes to counter staff burnout.",
+     "1": "Ignores staff complaints and turnover risks, leaving toxic working arrangements or high burnout rates unmanaged.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.8": [
    {
     "codigo": "C1",
-    "nombre": "Compliance, Safety & Industry Standards",
+    "nombre": "Patient Safety & Quality Frameworks",
     "descriptores": {
-     "4": "Integrates advanced global safety milestones, International Patient Safety Goals (IPSGs), and rigorous quality frameworks into corporate design impeccably.",
-     "3": "Evaluates institutional compliance with industry best practices, clinical safety standards, and standardized healthcare quality indicators successfully.",
-     "2": "Tracks isolated quality or safety metrics but fails to integrate them into a comprehensive compliance structure or safety safeguard plan.",
-     "1": "Disregards industry benchmarks, standards, and safety guidelines entirely, proposing hazardous or non-compliant clinical operational plans.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Integrates advanced global safety milestones, Joint Commission standards, and ironclad clinical quality indicators perfectly.",
+     "3": "Prioritizes International Patient Safety Goals (IPSGs) and standard quality benchmarks across all management proposals.",
+     "2": "References patient safety concepts but fails to build practical clinical safeguards or compliance tracking into workflows.",
+     "1": "Violates basic safety guidelines or completely ignores industry quality benchmarks within the operational analysis.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Clinical Adverse Event Reporting",
+    "descriptores": {
+     "4": "Builds highly advanced, non-punitive event reporting platforms that maximize institutional learning and minimize clinical errors perfectly.",
+     "3": "Details the correct steps for tracking, documenting, and reviewing clinical errors or near-miss events within the care facility.",
+     "2": "Describes clinical incident reporting vaguely, lacking clear guidelines on tracking accountability or ensuring patient protection.",
+     "1": "Conceals or completely disregards clinical errors, running an operational unit without any incident logging mechanisms.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Quality Optimization Workflows",
+    "descriptores": {
+     "4": "Deploys advanced Root Cause Analysis (RCA) or Failure Mode and Effects Analysis (FMEA) systems to eliminate patient care risks flawlessly.",
+     "3": "Employs basic process tracking tools (e.g., fishbone diagrams) to trace and resolve the root causes of quality breakdowns.",
+     "2": "Proposes superficial adjustments to clinical workflows that do not address the true operational causes of quality errors.",
+     "1": "Leaves broken clinical protocols active, doing nothing to fix identified system failures that threaten patient health.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "5.9": [
    {
     "codigo": "C1",
-    "nombre": "Health Information Technology Evaluation",
+    "nombre": "Health IT & Data Architecture",
     "descriptores": {
-     "4": "Designs robust health data architectures, electronic medical records workflows, and ironclad data privacy standards (e.g., HIPAA-level) seamlessly.",
-     "3": "Evaluates and incorporates the strategic use of administrative and clinical health information technology (HIT) to facilitate data-driven decision-making.",
-     "2": "References health information technology or systems but fails to build practical workflows or secure administrative safeguards into the proposal.",
-     "1": "Violates basic data system principles or completely ignores the role of information technology in supporting modern clinical and executive processes.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Designs ironclad, HIPAA-compliant EHR architectures, data storage solutions, and advanced clinical decision support systems flawlessly.",
+     "3": "Correctly evaluates and proposes administrative and clinical health IT tools (e.g., Telehealth, EHR) to streamline workflows.",
+     "2": "Mentions digital health tools but struggles to connect their deployment logically to data privacy safeguards or team needs.",
+     "1": "Proposes information technology solutions that compromise data privacy or completely ignore operational clinical flows.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Interoperability & Data Integrity",
+    "descriptores": {
+     "4": "Creates robust, comprehensive data integration blueprints that perfectly link diverse administrative and clinical systems.",
+     "3": "Outlines clear requirements to ensure secure data exchange between electronic health records and billing systems.",
+     "2": "Mentions system connections generally, without addressing common technical blocks or data formatting mismatches.",
+     "1": "Promotes isolated, siloed software tools that block critical information exchange across different departments.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Business & Clinical Intelligence Systems",
+    "descriptores": {
+     "4": "Integrates cutting-edge predictive analytics and machine learning modules into executive decision structures perfectly.",
+     "3": "Uses standard health IT data summaries and digital dashboards to make balanced, evidence-based management choices.",
+     "2": "Reviews automated computer data superficially, failing to extract meaningful metrics to improve operational workflows.",
+     "1": "Rejects data-driven computer tools, making major administrative changes based purely on subjective guesses.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "6.1": [
    {
     "codigo": "C1",
-    "nombre": "Epidemiological & Quality Indicator Analytics",
+    "nombre": "Epidemiological Interpretation",
     "descriptores": {
-     "4": "Cross-analyzes complex population health profiles, morbidity formulas, and hospital benchmarks to forecast delivery demands with masterful precision.",
-     "3": "Correctly interprets epidemiological profiles, disease incidence/prevalence, and quality benchmarks to guide resource allocation and bed management decisions.",
-     "2": "Reviews population data or quality metrics superficially, failing to connect changing health trends to direct hospital capacity adjustments.",
-     "1": "Allocates critical healthcare resources intuitively, completely ignoring public health evidence, clinical data, and community epidemiological trends.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Cross-analyzes complex population health profiles and morbidity rates to accurately forecast future healthcare delivery demands.",
+     "3": "Correctly interprets epidemiological profiles, incidence rates, and disease prevalence to understand population health needs.",
+     "2": "Reviews epidemiological data superficially, failing to connect changing disease trends to future hospital service capacity.",
+     "1": "Completely ignores community epidemiological data, assuming health demands remain static or uniform.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Data-Driven Resource Allocation",
+    "descriptores": {
+     "4": "Justifies major resource, bed, and staff allocations exclusively through rigorous, multi-layered data integration.",
+     "3": "Bases administrative choices like resource allocation, bed management, and staffing on epidemiological and quality data.",
+     "2": "Mentions quality metrics but falls back on personal judgment or rigid patterns when making critical operational choices.",
+     "1": "Allocates critical healthcare resources intuitively, completely ignoring public health evidence and clinical quality data.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Health Trend Forecasting",
+    "descriptores": {
+     "4": "Constructs advanced predictive health risk profiles that accurately map changing chronic disease clusters within local target communities.",
+     "3": "Integrates historical disease statistics properly to predict seasonal shifts in patient volume or clinical service needs.",
+     "2": "Project future clinic volumes linearly, overlooking changing local health trends or demographic changes.",
+     "1": "Ignores disease patterns completely, making long-term clinical development choices without reviewing local health trends.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ],
   "6.2": [
    {
     "codigo": "C1",
-    "nombre": "Social Determinants of Health (SDOH) Integration",
+    "nombre": "Structural Barrier Mapping",
     "descriptores": {
-     "4": "Executes deep, localized mapping of hidden socio-economic and structural barriers, re-engineering clinical pathways to permanently maximize equity and access.",
-     "3": "Accurately identifies and explains how social determinants of health (SDOH) affect the local target population, compliance, readmissions, and service use.",
-     "2": "Acknowledges social vulnerabilities but cannot explain how they translate into internal hospital bottlenecks, financial risk, or localized barriers.",
-     "1": "Assumes clinical outcomes are independent of social realities, treating all marginalized populations as if they share identical baseline resources.",
-     "0": "Does not demonstrate acquisition of the competency or did not provide sufficient evidence for evaluation."
+     "4": "Executes a deep, highly localized mapping of hidden socio-economic, geographic, and structural barriers to healthcare.",
+     "3": "Accurately identifies specific social determinants of health (SDOH) affecting the facility's local target population.",
+     "2": "Lists broad, generic social determinants but fails to pin down which barriers directly impact their immediate community.",
+     "1": "Fails to recognize any social, economic, or cultural barriers affecting the patient population under analysis.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C2",
+    "nombre": "Service Redesign for Equity",
+    "descriptores": {
+     "4": "Re-engineers clinical pathways, partnerships, and intake processes to permanently bypass social barriers and maximize access.",
+     "3": "Proposes realistic operational changes (e.g., scheduling shifts, community partnerships) to improve healthcare access.",
+     "2": "Suggests equity measures that are well-meaning but logistically unfeasible or culturally mismatched for the center.",
+     "1": "Outlines clinical services in isolation, offering zero access adjustments for highly vulnerable or marginalized populations.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
+    }
+   },
+   {
+    "codigo": "C3",
+    "nombre": "Culturally Competent Care Metrics",
+    "descriptores": {
+     "4": "Builds robust institutional accountability systems that guarantee culturally competent delivery standards across all services.",
+     "3": "Incorporates explicit training programs or communication standards to support culturally diverse patient populations effectively.",
+     "2": "Acknowledges cultural diversity needs generally but fails to implement practical standards for patient-facing clinical workflows.",
+     "1": "Dismisses cultural competencies completely, using rigid delivery steps that alienate local diverse patient groups.",
+     "0": "Does not demonstrate achievement of this competency component or failed to submit sufficient academic evidence to evaluate."
     }
    }
   ]
