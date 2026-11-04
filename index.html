@@ -2227,7 +2227,7 @@
   </div>
   <!-- Bloqueo de informes (solo administrador) -->
   <div id="rpt-lock-admin" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;font-size:0.78rem"></div>
-  <div id="rpt-blocked-msg" style="display:none" class="dash-empty"><p>Este informe está temporalmente no disponible (en construcción o bloqueado por el administrador).</p></div>
+  <div id="rpt-blocked-msg" style="display:none" class="dash-empty"><p>🔒 Este informe está temporalmente no disponible (en construcción o bloqueado por el administrador).</p></div>
 
   <!-- Export toolbar (shown per report) -->
   <div class="rpt-export-bar" id="rpt-export-bar" style="display:none">
@@ -2578,7 +2578,20 @@
       <button class="btn btn-outline btn-sm" onclick="document.getElementById('fac-csv-input').click()"> Importar CSV</button>
       <input type="file" id="fac-csv-input" accept=".csv" style="display:none" onchange="importarFacultadCSV(this)">
       <button class="btn btn-ghost btn-sm" onclick="exportarFacultadCSV()"> Exportar CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="exportarFacultadExcel()">Descargar Excel</button>
       <a id="fac-csv-template" href="#" onclick="descargarPlantillaFacultad();return false" style="font-size:0.78rem;color:var(--egsp-coral);margin-left:6px"> Plantilla CSV</a>
+    </div>
+
+    <!-- Informe de Facultad (Excel): crea/actualiza facultativos por correo -->
+    <div id="fac-xl-dropzone"
+      style="border:2.5px dashed #6b7280;border-radius:14px;background:#f3f4f6;padding:20px;text-align:center;margin-bottom:14px;cursor:pointer;transition:all 0.2s"
+      onclick="document.getElementById('fac-xl-input').click()"
+      ondragover="event.preventDefault();this.style.background='#e5e7eb'"
+      ondragleave="this.style.background='#f3f4f6'"
+      ondrop="facXlDrop(event)">
+      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra aquí el Excel de Facultad (Informe de Facultad Activa o el Excel descargado de esta pantalla)</div>
+      <div style="font-size:0.78rem;color:var(--muted)">Crea o actualiza facultativos usando el correo electrónico como identificador único. Antes de importar se te muestran los cambios para decidir.</div>
+      <input type="file" id="fac-xl-input" accept=".xlsx,.xls" style="display:none" onchange="facXlInput(this)">
     </div>
 
     <!-- Distribución de Salones drop zone: importa profesores y los asigna a secciones -->
@@ -2743,6 +2756,20 @@
     </div>
     <div id="csc-body"></div>
     <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('modal-cursos-sin-comp')">Cerrar</button></div>
+  </div>
+</div>
+
+<div id="modal-fac-xl" class="modal-overlay">
+  <div class="modal" style="max-width:980px">
+    <div class="modal-header">
+      <div class="modal-title">Revisar importación de Facultad</div>
+      <button class="modal-close" onclick="closeModal('modal-fac-xl')">✕</button>
+    </div>
+    <div id="fac-xl-body" style="max-height:68vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-fac-xl')">Cancelar</button>
+      <button class="btn btn-primary" id="fac-xl-ok" onclick="facXlAplicar()">Importar</button>
+    </div>
   </div>
 </div>
 
@@ -5230,6 +5257,7 @@ async function processDistFile(file) {
   const wb = XLSX.read(buf, { type: 'array' });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  if (_facXlEsInforme(rows)) { facXlProcesarFilas(rows, file.name); return; }   // era el Informe de Facultad
   const parsed = parseDistribucionSalones(rows);
   if (!parsed.profesores.length) {
     notify('No se encontraron profesores con correo válido en ese archivo', '');
@@ -13227,15 +13255,15 @@ function _pintarBloqueosInformes() {
   _RPT_IDS.forEach(id => {
     const t = document.getElementById('rtab-' + id);
     if (!t) return;
-    if (!t.dataset.base) t.dataset.base = t.textContent.replace(/\s*\(bloqueado\)$/, '');
-    t.textContent = t.dataset.base + (bloqueados.includes(id) ? ' (bloqueado)' : '');
+    if (!t.dataset.base) t.dataset.base = t.textContent.replace(/^🔒\s*/, '');
+    t.textContent = (bloqueados.includes(id) ? '🔒 ' : '') + t.dataset.base;
   });
   const box = document.getElementById('rpt-lock-admin');
   if (!box) return;
   const esAdmin = (_realUser || currentUser)?.rol === 'admin' && !_realUser;
   box.style.display = esAdmin ? 'flex' : 'none';
-  if (esAdmin) box.innerHTML = '<span style="font-weight:700;color:var(--muted)"> Bloquear informes para los demás usuarios:</span>' +
-    _RPT_IDS.map(id => `<button class="btn btn-sm ${bloqueados.includes(id) ? '' : 'btn-outline'}" style="padding:2px 10px;font-size:0.72rem;${bloqueados.includes(id) ? 'background:#c0392b;color:#fff;border-color:#c0392b' : ''}" onclick="toggleBloqueoInforme('${id}')" title="${bloqueados.includes(id) ? 'Bloqueado — pulsa para desbloquear' : 'Disponible — pulsa para bloquear'}">${id.toUpperCase()}</button>`).join('');
+  if (esAdmin) box.innerHTML = '<span style="font-weight:700;color:var(--muted)">🔒 Bloquear informes para los demás usuarios:</span>' +
+    _RPT_IDS.map(id => `<button class="btn btn-sm ${bloqueados.includes(id) ? '' : 'btn-outline'}" style="padding:2px 10px;font-size:0.72rem;${bloqueados.includes(id) ? 'background:#c0392b;color:#fff;border-color:#c0392b' : ''}" onclick="toggleBloqueoInforme('${id}')" title="${bloqueados.includes(id) ? 'Bloqueado — pulsa para desbloquear' : 'Disponible — pulsa para bloquear'}">${bloqueados.includes(id) ? '🔒 ' : ''}${id.toUpperCase()}</button>`).join('');
 }
 
 function renderReportes() {
@@ -21536,6 +21564,7 @@ function renderFacultadList() {
       <div>
         <div class="fac-name">${fichaLink('profesor', f.id, f.nombre)}</div>
         <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
+        ${(f.rangoDocente||f.tipoNombramiento||f.jornadaTrabajo) ? `<div class="fac-meta">${[f.rangoDocente,f.tipoNombramiento,f.jornadaTrabajo].filter(Boolean).map(_alEsc).join(' · ')}</div>` : ''}
         <div class="fac-tags">
           ${inactivo ? '<span class="badge badge-gray" style="background:#e5e7eb;color:#374151"> Inactivo/a</span>' : ''}
           ${f.esAdmin ? '<span class="badge badge-red"> Administrador</span>' : ''}
@@ -21981,6 +22010,288 @@ function importarFacultadCSV(input) {
     input.value='';
   };
   reader.readAsText(file);
+}
+
+// ═══ Excel de Facultad: importar (crear/actualizar por correo) y descargar ═══
+// Reconoce el "Informe de Facultad Activa" (Apellidos, Nombre; Faculty Rank; Situación Actual;
+// Tipo de Nombramiento; Jornada; rentas) y también el Excel que se descarga desde esta pantalla,
+// que puede editarse y volver a cargarse para actualizar.
+const _xlNorm = t => String(t == null ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const _XL_HDR = {
+  email: ['direccion de correo electronico', 'correo electronico', 'correo', 'email'],
+  nombre: ['apellidos, nombre e inicial', 'nombre completo', 'nombre'],
+  rangoDocente: ['faculty rank (informe docente)', 'faculty rank', 'rango docente'],
+  situacionActual: ['situacion actual'],
+  tipoNombramiento: ['tipo de nombramiento'],
+  jornadaTrabajo: ['jornada de trabajo semanal', 'jornada de trabajo'],
+  rentas: ['rentas'],
+  departamento: ['departamento'],
+  telefono: ['telefono'],
+  programas: ['programas', 'programa(s)'],
+  coordina: ['coordina programas', 'coordina'],
+  dirige: ['dirige departamentos', 'dirige'],
+  decanato: ['decanato'],
+  esAdmin: ['administrador'],
+  esVisitante: ['visitante'],
+  esProfesor: ['profesor/a (sin programa)', 'profesor sin programa'],
+};
+const _xlEsActiva = v => { const n = _xlNorm(v); return !n || n === 'activo' || n === 'pago por curso' || n === 'si'; };
+const _xlSiNo = v => /^(si|sí|yes|true|1|x)$/i.test(_xlNorm(v));
+const _xlNombresDeptoNorm = t => _xlNorm(t).replace(/^(departamento|depto\.?)\s+(de(l| la)?\s+)?/, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const _xlTitulo = t => String(t || '').toLowerCase().replace(/(^|\s|\()([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(De|Del|La|Y|En)\b/g, w => w.toLowerCase()).replace(/\(([a-z0-9\- ]+)\)/gi, (m, g) => '(' + g.toUpperCase() + ')').replace(/^departamento de /i, '').replace(/^./, c => c.toUpperCase());
+
+function _facXlEsInforme(rows) {
+  const h = (rows[0] || []).map(_xlNorm);
+  return h.some(x => _XL_HDR.email.includes(x)) && h.some(x => _XL_HDR.nombre.includes(x) || _XL_HDR.situacionActual.includes(x));
+}
+function facXlDrop(ev) { ev.preventDefault(); document.getElementById('fac-xl-dropzone').style.background = '#f3f4f6'; const f = ev.dataTransfer.files[0]; if (f) facXlLeer(f); }
+function facXlInput(inp) { const f = inp.files[0]; if (f) facXlLeer(f); inp.value = ''; }
+async function facXlLeer(file) {
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
+    facXlProcesarFilas(rows, file.name);
+  } catch (e) { console.error(e); notify('No se pudo leer ese archivo Excel'); }
+}
+
+let _facXl = null;
+function facXlProcesarFilas(rows, nombreArchivo) {
+  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede importar Facultad'); return; }
+  if (!_facXlEsInforme(rows)) { notify('No se reconocen las columnas: se necesita al menos el correo electrónico y el nombre'); return; }
+  const hdr = rows[0].map(_xlNorm);
+  const col = {}; Object.entries(_XL_HDR).forEach(([k, names]) => { const i = hdr.findIndex(h => names.includes(h)); if (i >= 0) col[k] = i; });
+  const celda = (r, k) => (col[k] == null || r[col[k]] == null) ? '' : String(r[col[k]]).trim();
+  const filas = []; let sinCorreo = 0; const vistos = new Set(); let duplicados = 0;
+  rows.slice(1).forEach(r => {
+    if (!r || r.every(c => c == null || String(c).trim() === '')) return;
+    const email = celda(r, 'email').toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { sinCorreo++; return; }
+    if (vistos.has(email)) { duplicados++; return; } vistos.add(email);
+    const v = { email };
+    ['nombre', 'rangoDocente', 'situacionActual', 'tipoNombramiento', 'jornadaTrabajo', 'telefono', 'programas', 'coordina', 'dirige', 'decanato', 'esAdmin', 'esVisitante', 'esProfesor'].forEach(k => { v[k] = celda(r, k); });
+    if (/^n\/?a$/i.test(v.rangoDocente)) v.rangoDocente = '';
+    if (_xlNorm(v.jornadaTrabajo) === 'pacial') v.jornadaTrabajo = 'PARCIAL';       // errata frecuente en el informe
+    v.deptoTexto = col.departamento != null ? celda(r, 'departamento') : celda(r, 'rentas');
+    filas.push(v);
+  });
+  if (!filas.length) { notify('No se encontraron filas con correo válido'); return; }
+  // Departamentos del archivo (distintos) y su coincidencia con el catálogo
+  const decDept = {}; const aviso = { progs: new Set(), deptsRel: new Set() };
+  [...new Set(filas.map(f => f.deptoTexto).filter(Boolean))].forEach(t => {
+    const n = _xlNombresDeptoNorm(t);
+    const m = (db.departamentos || []).find(d => _xlNombresDeptoNorm(d.nombre) === n) ||
+      (db.departamentos || []).find(d => { const a = _xlNombresDeptoNorm(d.nombre); return a && n && (a.includes(n) || n.includes(a)) && Math.min(a.length, n.length) >= 6; });
+    decDept[t] = m ? { tipo: 'existente', id: m.id, reconocido: true } : { tipo: 'ninguno', reconocido: false };
+  });
+  _facXl = { nombreArchivo, filas, decDept, dec: {}, sinCorreo, duplicados, aviso };
+  facXlRender();
+  openModal('modal-fac-xl');
+}
+
+// Definición de campos comparables: display del sistema, display del archivo y cómo aplicarlo
+function _facXlCampos() {
+  const dn = id => (db.departamentos || []).find(d => d.id === id)?.nombre || '';
+  const progIds = txt => String(txt || '').split('|').map(x => x.trim()).filter(Boolean).map(n => (db.programas || []).find(p => _xlNorm(p.nombre) === _xlNorm(n))?.id);
+  const deptIds = txt => String(txt || '').split('|').map(x => x.trim()).filter(Boolean).map(n => (db.departamentos || []).find(d => _xlNorm(d.nombre) === _xlNorm(n))?.id);
+  const pn = ids => (ids || []).map(id => (db.programas || []).find(p => p.id === id)?.nombre).filter(Boolean).sort().join('|');
+  const dnn = ids => (ids || []).map(dn).filter(Boolean).sort().join('|');
+  const decLabel = k => DECANO_TIPOS[k] || '';
+  const decKey = t => Object.entries(DECANO_TIPOS).find(([, l]) => _xlNorm(l) === _xlNorm(t))?.[0] || '';
+  const sn = b => b ? 'Sí' : 'No';
+  return [
+    { k: 'nombre', label: 'Nombre', sys: f => f.nombre || '', apply: (f, v) => { f.nombre = v; } },
+    { k: 'rangoDocente', label: 'Rango docente', sys: f => f.rangoDocente || '', apply: (f, v) => { f.rangoDocente = v; } },
+    { k: 'situacionActual', label: 'Situación actual', sys: f => f.activo === false ? 'INACTIVO' : (f.situacionActual || 'ACTIVO'),
+      apply: (f, v) => { f.situacionActual = v; f.activo = _xlEsActiva(v); }, igual: (a, b) => _xlNorm(a) === _xlNorm(b) || (_xlEsActiva(a) && _xlEsActiva(b) && _xlNorm(a) === _xlNorm(b)) },
+    { k: 'tipoNombramiento', label: 'Tipo de nombramiento', sys: f => f.tipoNombramiento || '', apply: (f, v) => { f.tipoNombramiento = v; } },
+    { k: 'jornadaTrabajo', label: 'Jornada de trabajo', sys: f => f.jornadaTrabajo || '', apply: (f, v) => { f.jornadaTrabajo = v; } },
+    { k: 'telefono', label: 'Teléfono', sys: f => f.telefono || '', apply: (f, v) => { f.telefono = v; } },
+    { k: 'programas', label: 'Programas', sys: f => pn(f.programaIds), file: v => progIds(v).filter(Boolean).length ? pn(progIds(v).filter(Boolean)) : '',
+      noRec: v => String(v || '').split('|').map(x => x.trim()).filter(Boolean).filter(n => !(db.programas || []).some(p => _xlNorm(p.nombre) === _xlNorm(n))),
+      apply: (f, v) => { f.programaIds = progIds(v).filter(Boolean); f.programas = pn(f.programaIds); } },
+    { k: 'coordina', label: 'Coordina programas', sys: f => pn(f.coordinaProgramaIds), file: v => pn(progIds(v).filter(Boolean)),
+      noRec: v => String(v || '').split('|').map(x => x.trim()).filter(Boolean).filter(n => !(db.programas || []).some(p => _xlNorm(p.nombre) === _xlNorm(n))),
+      apply: (f, v) => { f.coordinaProgramaIds = progIds(v).filter(Boolean); } },
+    { k: 'dirige', label: 'Dirige departamentos', sys: f => dnn(f.dirigeDepartamentoIds), file: v => dnn(deptIds(v).filter(Boolean)),
+      noRec: v => String(v || '').split('|').map(x => x.trim()).filter(Boolean).filter(n => !(db.departamentos || []).some(d => _xlNorm(d.nombre) === _xlNorm(n))),
+      apply: (f, v) => { f.dirigeDepartamentoIds = deptIds(v).filter(Boolean); } },
+    { k: 'decanato', label: 'Decanato', sys: f => decLabel(f.decanoTipo), apply: (f, v) => { f.decanoTipo = decKey(v); } },
+    { k: 'esAdmin', label: 'Administrador', sys: f => sn(f.esAdmin), file: v => sn(_xlSiNo(v)), apply: (f, v) => { f.esAdmin = _xlSiNo(v); } },
+    { k: 'esVisitante', label: 'Visitante', sys: f => sn(f.esVisitante), file: v => sn(_xlSiNo(v)), apply: (f, v) => { f.esVisitante = _xlSiNo(v); } },
+    { k: 'esProfesor', label: 'Profesor/a (sin programa)', sys: f => sn(f.esProfesor), file: v => sn(_xlSiNo(v)), apply: (f, v) => { f.esProfesor = _xlSiNo(v); } },
+  ];
+}
+function _facXlDeptoDe(fila) {      // id de departamento resuelto para la fila (o null si se deja sin departamento / no viene)
+  if (!fila.deptoTexto) return null;
+  const d = _facXl.decDept[fila.deptoTexto];
+  if (!d) return null;
+  if (d.tipo === 'existente') return d.id;
+  if (d.tipo === 'nuevo') return '__nuevo__:' + fila.deptoTexto;
+  return null;
+}
+// Calcula, por fila, si es nueva o qué campos cambian
+function _facXlPlan() {
+  const campos = _facXlCampos();
+  const plan = [];
+  _facXl.filas.forEach(fila => {
+    const ex = (db.facultad || []).find(f => (f.email || '').toLowerCase() === fila.email);
+    const item = { fila, ex, cambios: [], auto: [] };
+    campos.forEach(c => {
+      const crudo = fila[c.k];
+      const archivo = c.file ? c.file(crudo) : String(crudo || '');
+      if (!String(crudo || '').trim()) return;                 // columna ausente o vacía: nunca borra lo del sistema
+      if (!ex) { item.auto.push(c.k); return; }
+      const sys = (c.k === 'situacionActual' && !ex.situacionActual && ex.activo !== false) ? '' : c.sys(ex);
+      const igual = c.igual ? c.igual(sys, archivo) : _xlNorm(sys) === _xlNorm(archivo);
+      if (igual) return;
+      if (!String(sys || '').trim()) item.auto.push(c.k);     // el sistema no tenía nada: se completa sin preguntar
+      else item.cambios.push({ k: c.k, label: c.label, sys, archivo });
+    });
+    // Departamento
+    const did = _facXlDeptoDe(fila);
+    if (did) {
+      const nombreArch = did.startsWith('__nuevo__') ? (_facXl.decDept[fila.deptoTexto].nombre || _xlTitulo(fila.deptoTexto)) : (db.departamentos || []).find(d => d.id === did)?.nombre;
+      if (!ex) item.auto.push('departamento');
+      else if (ex.departamentoId !== did) {
+        const sysN = (db.departamentos || []).find(d => d.id === ex.departamentoId)?.nombre || ex.departamento || '';
+        if (!sysN.trim()) item.auto.push('departamento');
+        else if (_xlNorm(sysN) !== _xlNorm(nombreArch)) item.cambios.push({ k: 'departamento', label: 'Departamento', sys: sysN, archivo: nombreArch });
+      }
+    }
+    plan.push(item);
+  });
+  return plan;
+}
+function facXlRender() {
+  const st = _facXl; if (!st) return;
+  const plan = _facXlPlan(); st.plan = plan;
+  const nuevos = plan.filter(p => !p.ex).length;
+  const conCambios = plan.filter(p => p.ex && (p.cambios.length || p.auto.length)).length;
+  const sinCambios = plan.filter(p => p.ex && !p.cambios.length && !p.auto.length).length;
+  const esc = _alEsc;
+  const ayuda = 'font-size:0.78rem;color:var(--muted)';
+  // 1) Departamentos
+  const deptsDesc = Object.entries(st.decDept);
+  const noRec = deptsDesc.filter(([, d]) => !d.reconocido);
+  const optsDept = (sel) => '<option value="">Dejar sin departamento</option>' + (db.departamentos || []).map(d => `<option value="${d.id}" ${sel === d.id ? 'selected' : ''}>${esc(d.nombre)}</option>`).join('');
+  const html1 = noRec.length ? `<div class="card" style="padding:12px 14px;margin-bottom:12px;background:#fef3c7;border:1px solid #fde68a">
+      <div style="font-weight:700;margin-bottom:4px">Departamentos que no se reconocen (${noRec.length})</div>
+      <div style="${ayuda};margin-bottom:8px">La columna de rentas trae unidades que no coinciden con un departamento del sistema. Indica qué hacer con cada una.</div>
+      ${noRec.map(([t, d], i) => { const key = encodeURIComponent(t); return `<div style="display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) auto;gap:8px;align-items:center;margin-bottom:6px">
+        <div style="font-size:0.82rem"><strong>${esc(t)}</strong> <span style="color:var(--muted)">(${st.filas.filter(f => f.deptoTexto === t).length} persona/s)</span></div>
+        <select onchange="facXlDept('${key}', this.value)">
+          <option value="" ${d.tipo === 'ninguno' ? 'selected' : ''}>Dejar sin departamento</option>
+          <option value="__nuevo__" ${d.tipo === 'nuevo' ? 'selected' : ''}>Crear departamento nuevo</option>
+          ${(db.departamentos || []).map(x => `<option value="${x.id}" ${d.tipo === 'existente' && d.id === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}
+        </select>
+        ${d.tipo === 'nuevo' ? `<input type="text" value="${esc(d.nombre || _xlTitulo(t))}" oninput="facXlDeptNombre('${key}', this.value)" style="min-width:220px" title="Nombre del nuevo departamento">` : '<span></span>'}
+      </div>`; }).join('')}
+    </div>` : '';
+  // 2) Cambios a decidir
+  const filasCamb = [];
+  plan.filter(p => p.ex && p.cambios.length).forEach(p => p.cambios.forEach(c => {
+    const key = p.fila.email + '|' + c.k; const dec = st.dec[key] || 'cambiar';
+    filasCamb.push(`<tr><td style="font-size:0.8rem"><strong>${esc(p.ex.nombre || p.fila.email)}</strong><br><span style="color:var(--muted)">${esc(p.fila.email)}</span></td>
+      <td style="font-size:0.8rem">${esc(c.label)}</td><td style="font-size:0.8rem">${esc(c.sys) || '—'}</td><td style="font-size:0.8rem">${esc(c.archivo) || '—'}</td>
+      <td style="white-space:nowrap;font-size:0.8rem"><label style="margin-right:10px"><input type="radio" name="d_${esc(key)}" ${dec === 'cambiar' ? 'checked' : ''} onchange="facXlDec('${encodeURIComponent(key)}','cambiar')"> Cambiar</label>
+        <label><input type="radio" name="d_${esc(key)}" ${dec === 'mantener' ? 'checked' : ''} onchange="facXlDec('${encodeURIComponent(key)}','mantener')"> Mantener</label></td></tr>`);
+  }));
+  const html2 = filasCamb.length ? `<div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700">Cambios respecto a lo que ya está en el sistema (${filasCamb.length})</div>
+        <button class="btn btn-outline btn-sm" onclick="facXlTodos('cambiar')">Cambiar todo</button><button class="btn btn-outline btn-sm" onclick="facXlTodos('mantener')">Mantener todo</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Persona</th><th>Campo</th><th>En el sistema</th><th>En el archivo</th><th>Decisión</th></tr></thead><tbody>${filasCamb.join('')}</tbody></table></div></div>`
+    : '<div style="' + ayuda + ';margin-bottom:12px">No hay cambios que contradigan lo que ya está en el sistema.</div>';
+  // avisos
+  const noRecProg = new Set();
+  const campos = _facXlCampos().filter(c => c.noRec);
+  st.filas.forEach(f => campos.forEach(c => c.noRec(f[c.k]).forEach(n => noRecProg.add(n))));
+  const avisos = [];
+  if (st.sinCorreo) avisos.push(`${st.sinCorreo} fila(s) sin correo válido se omiten.`);
+  if (st.duplicados) avisos.push(`${st.duplicados} fila(s) con correo repetido se omiten.`);
+  if (noRecProg.size) avisos.push(`Estos programas/departamentos de las columnas no existen en el sistema y se ignoran: ${[...noRecProg].map(esc).join(', ')}.`);
+  document.getElementById('fac-xl-body').innerHTML = `
+    <div style="${ayuda};margin-bottom:8px">Archivo: <strong>${esc(st.nombreArchivo || '')}</strong>. El correo electrónico identifica a cada persona; las celdas vacías nunca borran datos del sistema, y lo que el sistema tenga vacío se completa sin preguntar.</div>
+    <div class="summary-bar" style="margin-bottom:12px"><div class="summary-chip"><strong>${nuevos}</strong> nuevos</div><div class="summary-chip"><strong>${conCambios}</strong> con datos a actualizar</div><div class="summary-chip"><strong>${sinCambios}</strong> sin cambios</div></div>
+    ${avisos.length ? `<div style="${ayuda};margin-bottom:10px">${avisos.map(a => '• ' + a).join('<br>')}</div>` : ''}
+    ${html1}${html2}`;
+}
+function facXlDept(key, val) {
+  const t = decodeURIComponent(key);
+  _facXl.decDept[t] = val === '__nuevo__' ? { tipo: 'nuevo', nombre: _xlTitulo(t), reconocido: false } : val ? { tipo: 'existente', id: val, reconocido: false } : { tipo: 'ninguno', reconocido: false };
+  facXlRender();
+}
+function facXlDeptNombre(key, val) { const d = _facXl.decDept[decodeURIComponent(key)]; if (d) d.nombre = val; }
+function facXlDec(key, val) { _facXl.dec[decodeURIComponent(key)] = val; }
+function facXlTodos(val) { _facXl.plan.forEach(p => p.cambios.forEach(c => { _facXl.dec[p.fila.email + '|' + c.k] = val; })); facXlRender(); }
+
+async function facXlAplicar() {
+  const st = _facXl; if (!st) return;
+  const campos = _facXlCampos(); const porK = Object.fromEntries(campos.map(c => [c.k, c]));
+  // departamentos nuevos (una sola vez por texto)
+  const nuevosId = {};
+  Object.entries(st.decDept).forEach(([t, d]) => {
+    if (d.tipo === 'nuevo') {
+      const nombre = (d.nombre || _xlTitulo(t)).trim();
+      const ya = (db.departamentos || []).find(x => _xlNorm(x.nombre) === _xlNorm(nombre));
+      if (ya) nuevosId[t] = ya.id;
+      else { const id = 'depto_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); db.departamentos.push({ id, nombre }); nuevosId[t] = id; }
+    }
+  });
+  const resolverDept = fila => { const d = st.decDept[fila.deptoTexto]; if (!fila.deptoTexto || !d) return null; return d.tipo === 'existente' ? d.id : d.tipo === 'nuevo' ? nuevosId[fila.deptoTexto] : null; };
+  const yo = (_realUser || currentUser)?.username;
+  let creados = 0, actualizados = 0, omitidos = 0; const cuentas = [];
+  for (const p of st.plan) {
+    const { fila } = p;
+    let f = p.ex; const nueva = !f;
+    if (nueva) f = { id: 'fac_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), email: fila.email, nombre: fila.nombre || fila.email, programaIds: [], programas: '', coordinaProgramaIds: [], dirigeDepartamentoIds: [], decanoTipo: '', esAdmin: false, esVisitante: false, esProfesor: false, activo: true, departamentoId: null, departamento: '', rolBase: '', fechaCreacion: new Date().toISOString() };
+    const tenia = !!(f.rolBase || f.esAdmin);
+    let toco = nueva;
+    const aplicar = k => {
+      const c = porK[k]; if (!c) return;
+      // Protecciones: no quitarte tu propia cuenta ni dejar al sistema sin administrador activo
+      if (!nueva && f.email === yo && ((k === 'esAdmin' && !_xlSiNo(fila[k]) && f.esAdmin) || (k === 'situacionActual' && !_xlEsActiva(fila[k])))) { omitidos++; return; }
+      c.apply(f, fila[k]); toco = true;
+    };
+    const idsDecididos = new Set(p.auto);
+    p.cambios.forEach(c => { if ((st.dec[fila.email + '|' + c.k] || 'cambiar') === 'cambiar') idsDecididos.add(c.k); });
+    idsDecididos.forEach(k => { if (k !== 'departamento') aplicar(k); });
+    if (idsDecididos.has('departamento')) {
+      const did = resolverDept(fila);
+      if (did) { f.departamentoId = did; f.departamento = (db.departamentos || []).find(d => d.id === did)?.nombre || ''; toco = true; }
+    }
+    if (nueva) {                 // los campos de un registro nuevo que no tienen conflicto, también se aplican
+      campos.forEach(c => { if (!idsDecididos.has(c.k) && String(fila[c.k] || '').trim()) aplicar(c.k); });
+      db.facultad.push(f); creados++;
+    } else if (toco) actualizados++;
+    _sincronizarRolBase(f);
+    if (!tenia && (f.rolBase || f.esAdmin) && !f.pwdHash) {
+      const tmp = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
+      f.pwdHash = await sha256(tmp); f.mustChangePwd = true; cuentas.push({ nombre: f.nombre, email: f.email, tmp });
+    }
+  }
+  // Siempre debe quedar al menos un administrador activo
+  if (!db.facultad.some(f => f.esAdmin && f.activo !== false)) notify('Atención: no quedó ningún administrador activo; revisa la lista');
+  saveDB(); closeModal('modal-fac-xl'); _facXl = null;
+  renderFacultadList(); if (typeof renderDepartamentosProgramas === 'function') try { renderDepartamentosProgramas(); } catch (e) {}
+  enrichCurrentUserPermissions();
+  notify(`Facultad importada: ${creados} nuevos, ${actualizados} actualizados` + (omitidos ? `, ${omitidos} cambio(s) omitido(s) por protección de tu cuenta` : ''));
+  if (cuentas.length) alert('Cuentas con acceso creadas (contraseña temporal; se pedirá cambiarla al entrar):\n\n' + cuentas.map(c => `${c.nombre} — ${c.email} — ${c.tmp}`).join('\n'));
+}
+
+// Descarga: mismas columnas del informe + datos de gestión; el archivo puede editarse y volver a cargarse
+function exportarFacultadExcel() {
+  const prog = ids => (ids || []).map(id => (db.programas || []).find(p => p.id === id)?.nombre).filter(Boolean).join('|');
+  const dep = ids => (ids || []).map(id => (db.departamentos || []).find(d => d.id === id)?.nombre).filter(Boolean).join('|');
+  const sn = b => b ? 'Sí' : 'No';
+  const header = ['Apellidos, Nombre e Inicial', 'Dirección de Correo Electrónico', 'Faculty Rank (Informe Docente)', 'Situación Actual', 'Tipo de Nombramiento', 'Jornada de Trabajo Semanal', 'Departamento', 'Teléfono', 'Programas', 'Coordina programas', 'Dirige departamentos', 'Decanato', 'Administrador', 'Visitante', 'Profesor/a (sin programa)'];
+  const filas = [...(db.facultad || [])].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es')).map(f => [
+    f.nombre || '', f.email || '', f.rangoDocente || '', f.activo === false ? 'INACTIVO' : (f.situacionActual || 'ACTIVO'), f.tipoNombramiento || '', f.jornadaTrabajo || '',
+    (db.departamentos || []).find(d => d.id === f.departamentoId)?.nombre || f.departamento || '', f.telefono || '', prog(f.programaIds), prog(f.coordinaProgramaIds), dep(f.dirigeDepartamentoIds),
+    DECANO_TIPOS[f.decanoTipo] || '', sn(f.esAdmin), sn(f.esVisitante), sn(f.esProfesor)]);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...filas]);
+  ws['!cols'] = header.map((h, i) => ({ wch: [34, 34, 26, 16, 20, 22, 40, 14, 36, 30, 30, 36, 14, 10, 22][i] }));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Facultad');
+  XLSX.writeFile(wb, 'Facultad_EGSP_' + new Date().toISOString().slice(0, 10) + '.xlsx');
 }
 
 function exportarFacultadCSV() {
