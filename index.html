@@ -2582,18 +2582,6 @@
       <a id="fac-csv-template" href="#" onclick="descargarPlantillaFacultad();return false" style="font-size:0.78rem;color:var(--egsp-coral);margin-left:6px"> Plantilla CSV</a>
     </div>
 
-    <!-- Informe de Facultad (Excel): crea/actualiza facultativos por correo -->
-    <div id="fac-xl-dropzone"
-      style="border:2.5px dashed #6b7280;border-radius:14px;background:#f3f4f6;padding:20px;text-align:center;margin-bottom:14px;cursor:pointer;transition:all 0.2s"
-      onclick="document.getElementById('fac-xl-input').click()"
-      ondragover="event.preventDefault();this.style.background='#e5e7eb'"
-      ondragleave="this.style.background='#f3f4f6'"
-      ondrop="facXlDrop(event)">
-      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra aquí el Excel de Facultad (Informe de Facultad Activa o el Excel descargado de esta pantalla)</div>
-      <div style="font-size:0.78rem;color:var(--muted)">Crea o actualiza facultativos usando el correo electrónico como identificador único. Antes de importar se te muestran los cambios para decidir.</div>
-      <input type="file" id="fac-xl-input" accept=".xlsx,.xls" style="display:none" onchange="facXlInput(this)">
-    </div>
-
     <!-- Distribución de Salones drop zone: importa profesores y los asigna a secciones -->
     <div id="dist-dropzone"
       style="border:2.5px dashed #6b7280;border-radius:14px;background:#f3f4f6;padding:24px;text-align:center;margin-bottom:20px;cursor:pointer;transition:all 0.2s"
@@ -2602,8 +2590,8 @@
       ondragleave="this.style.background='#f3f4f6'"
       ondrop="handleDistDrop(event)">
       <div style="font-size:1.8rem;margin-bottom:6px">‍</div>
-      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra el Excel de "Distribución de Salones" aquí</div>
-      <div style="font-size:0.78rem;color:var(--muted)">Crea profesores nuevos (si hace falta) y los asigna a sus secciones del trimestre indicado en el archivo</div>
+      <div style="font-family:'Montserrat',sans-serif;font-size:0.95rem;font-weight:600;margin-bottom:4px">Arrastra aquí el Excel de Facultad o de Distribución de Salones</div>
+      <div style="font-size:0.78rem;color:var(--muted)">El sistema reconoce el tipo de archivo. <strong>Distribución de Salones:</strong> crea profesores nuevos (si hace falta) y los asigna a sus secciones del trimestre. <strong>Informe de Facultad (o el Excel descargado de esta pantalla):</strong> crea o actualiza facultativos por correo, con revisión de cambios antes de importar.</div>
       <div style="font-size:0.76rem;color:var(--muted);margin-top:4px">O haz clic para seleccionar archivo (.xlsx)</div>
       <input type="file" id="dist-file-input" accept=".xlsx" style="display:none" onchange="handleDistFileInput(this)">
     </div>
@@ -22054,10 +22042,8 @@ function _facXlCandidatoPorNombre(nombre) {
 }
 function _facXlEsInforme(rows) {
   const h = (rows[0] || []).map(_xlNorm);
-  return h.some(x => _XL_HDR.email.includes(x)) && h.some(x => _XL_HDR.nombre.includes(x) || _XL_HDR.situacionActual.includes(x));
+  return !h.some(x => x.includes('curso')) && h.some(x => _XL_HDR.email.includes(x)) && h.some(x => _XL_HDR.nombre.includes(x) || _XL_HDR.situacionActual.includes(x));
 }
-function facXlDrop(ev) { ev.preventDefault(); document.getElementById('fac-xl-dropzone').style.background = '#f3f4f6'; const f = ev.dataTransfer.files[0]; if (f) facXlLeer(f); }
-function facXlInput(inp) { const f = inp.files[0]; if (f) facXlLeer(f); inp.value = ''; }
 async function facXlLeer(file) {
   try {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
