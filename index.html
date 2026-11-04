@@ -2224,6 +2224,9 @@
     <button class="rpt-tab" id="rtab-r8" onclick="showReport('r8')">R8 · Notas</button>
     <button class="rpt-tab" id="rtab-r9" onclick="showReport('r9')">R9 · Matrícula</button>
   </div>
+  <!-- Bloqueo de informes (solo administrador) -->
+  <div id="rpt-lock-admin" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;font-size:0.78rem"></div>
+  <div id="rpt-blocked-msg" style="display:none" class="dash-empty"><div class="dash-empty-icon">🔒</div><p>Este informe está temporalmente no disponible (en construcción o bloqueado por el administrador).</p></div>
 
   <!-- Export toolbar (shown per report) -->
   <div class="rpt-export-bar" id="rpt-export-bar" style="display:none">
@@ -2441,9 +2444,16 @@
     <div id="r6-body"></div>
   </div>
 
-  <!-- R7 — Professor Summary (admin + director only) -->
+  <!-- R7 — Facultad: informe por profesor (cada quien ve lo suyo; director/coordinador/decano según alcance) -->
   <div id="rpt-r7" class="rpt-pane" style="display:none">
     <div class="rpt-filter-bar">
+      <div class="dash-filter-group"><label class="dash-filter-label">Profesor/a</label>
+        <select id="r7-prof" class="dash-select" onchange="r7Select(this.value)"><option value="">— Resumen de la facultad —</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Año académico</label>
+        <select id="r7-ay" class="dash-select" onchange="renderR7()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Competencias por</label>
+        <select id="r7-nivel" class="dash-select" onchange="renderR7()">
+          <option value="curso">Curso</option><option value="seccion">Sección</option><option value="agregado">Agregado</option></select></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Trimestre</label>
         <select id="r7-term" class="dash-select" onchange="renderR7()">
           <option value="">Todos</option><option value="T1">T1</option>
@@ -2460,11 +2470,18 @@
         <select id="r8-prog" class="dash-select" onchange="renderR8()"><option value="">Todos</option></select></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Curso</label>
         <select id="r8-curso" class="dash-select" onchange="renderR8()"><option value="">Todos</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Año académico</label>
+        <select id="r8-ay" class="dash-select" onchange="renderR8()"><option value="">Todos</option></select></div>
       <div class="dash-filter-group"><label class="dash-filter-label">Trimestre</label>
         <select id="r8-term" class="dash-select" onchange="renderR8()">
           <option value="">Todos</option><option value="T1">T1</option>
           <option value="T2">T2</option><option value="T3">T3</option><option value="V">V</option>
         </select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Sección</label>
+        <select id="r8-sec" class="dash-select" onchange="renderR8()"><option value="">Todas (agregado)</option></select></div>
+      <div class="dash-filter-group"><label class="dash-filter-label">Vista</label>
+        <select id="r8-vista" class="dash-select" onchange="renderR8()">
+          <option value="agregado">Agregado por curso</option><option value="comparar">Comparar secciones</option></select></div>
     </div>
     <div id="r8-body"></div>
   </div>
@@ -2670,6 +2687,12 @@
       </div>
     </div>
   </div>
+
+  <div style="background:var(--cream);border-radius:12px;padding:16px 18px;margin-top:20px">
+    <strong style="font-size:0.9rem">🔐 Matriz de accesos por rol</strong>
+    <div style="font-size:0.78rem;color:var(--muted);margin:4px 0 10px">Resumen de qué puede ver o hacer cada rol. Los roles se suman: un/a facultativo/a puede ser profesor/a, coordinador/a de varios programas, director/a y decano/a a la vez. La tabla de menú se genera de los permisos vigentes.</div>
+    <div id="cfg-matriz-accesos"></div>
+  </div>
 </div>
 
 <!-- ==================== DEPARTAMENTOS Y PROGRAMAS ==================== -->
@@ -2735,6 +2758,11 @@
     <div class="form-group">
       <label>Departamento</label>
       <select id="prog-cat-departamento"><option value="">— Sin asignar —</option></select>
+    </div>
+    <div class="form-group">
+      <label>Coordinador/a(es) del programa</label>
+      <select id="prog-cat-coordinadores" multiple size="5"></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Ctrl/Cmd + clic para varios. Una misma persona puede coordinar más de un programa; también se fija desde Facultad.</div>
     </div>
     <div class="form-group">
       <label>Secuencias disponibles y duración</label>
@@ -3307,7 +3335,7 @@ const NIVELES = {
 // saveDB() compara cada colección contra el último estado sincronizado y solo
 // empuja a Firebase las que realmente cambiaron. No fue necesario tocar los
 // ~50 sitios donde se llama saveDB() en el resto del archivo.
-const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes','dominiosCompetencias','semillasAplicadas','cursosConsolidadosEliminados'];
+const FB_COLLECTIONS = ['cursos','competencias','secciones','avaluos','facultad','programas','codigosProg','asesorias','solicitudes','departamentos','bancoCompetencias','laos','rubricas','escalasNiveles','estudiantes','dominiosCompetencias','semillasAplicadas','cursosConsolidadosEliminados','informesBloqueados'];
 let _lastSyncedDB = {}; // última copia conocida por colección (local o remota)
 
 function saveDB() {
@@ -3349,6 +3377,7 @@ function loadDB() {
   if (!db.competencias) db.competencias = [];
   if (!db.avaluos)      db.avaluos = [];
   if (!db.cursosConsolidadosEliminados) db.cursosConsolidadosEliminados = [];
+  if (!db.informesBloqueados) db.informesBloqueados = [];   // ids de informes (r1…r9) que el admin bloqueó
 
   if (!window._fb) {
     // Sin Firebase disponible (ej. red caída): usa localStorage como fallback
@@ -9448,6 +9477,7 @@ function abrirNuevoPrograma() {
   document.getElementById('prog-cat-nombre').value = '';
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = '';
+  _populateCoordinadoresSelect(null);
   document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(_secuenciasVacias());
   _renderSelectModalidadPrograma('');
   openModal('modal-programa-catalogo');
@@ -9460,6 +9490,7 @@ function abrirEditarPrograma(id) {
   document.getElementById('prog-cat-nombre').value = p.nombre;
   _populateDeptoSelect();
   document.getElementById('prog-cat-departamento').value = p.departamentoId || '';
+  _populateCoordinadoresSelect(id);
   document.getElementById('prog-cat-secuencias').innerHTML = _secuenciasEditorHTML(p.secuencias || _secuenciasVacias());
   _renderSelectModalidadPrograma(p.modalidadEvaluacion || '');
   openModal('modal-programa-catalogo');
@@ -9513,6 +9544,12 @@ function _renderSelectModalidadPrograma(valor) {
   sel.innerHTML = '<option value="">Sin fijar — cada profesor escoge</option>' + _opcionesModalidadHtml(valor);
   sel.value = _modalidadValida(valor) ? valor : '';
 }
+function _populateCoordinadoresSelect(progId) {
+  const sel = document.getElementById('prog-cat-coordinadores');
+  if (!sel) return;
+  sel.innerHTML = [...(db.facultad || [])].sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''))
+    .map(f => `<option value="${f.id}"${progId && (f.coordinaProgramaIds||[]).includes(progId) ? ' selected' : ''}>${f.nombre}${f.email ? ' — ' + f.email : ''}</option>`).join('');
+}
 function _populateDeptoSelect() {
   const sel = document.getElementById('prog-cat-departamento');
   sel.innerHTML = '<option value="">— Sin asignar —</option>' +
@@ -9557,8 +9594,11 @@ function guardarProgramaCatalogo() {
     };
     if (_modalidadValida(modalidad)) nuevo.modalidadEvaluacion = modalidad;
     db.programas.push(nuevo);
+    _setCoordinadoresPrograma(nuevo.id, [...document.getElementById('prog-cat-coordinadores').selectedOptions].map(o => o.value));
   }
+  if (editId) _setCoordinadoresPrograma(editId, [...document.getElementById('prog-cat-coordinadores').selectedOptions].map(o => o.value));
   saveDB();
+  enrichCurrentUserPermissions();
   closeModal('modal-programa-catalogo');
   renderDepartamentosProgramas();
   notify('Programa guardado ✓');
@@ -9571,6 +9611,9 @@ function eliminarPrograma(id) {
   else if (!cursosEnUso && !confirm('¿Eliminar este programa del catálogo?')) return;
   db.cursos.forEach(c => { if (c.programaId === id) { c.programaId = null; } });
   db.programas = db.programas.filter(p => p.id !== id);
+  (db.facultad || []).forEach(f => {
+    if ((f.coordinaProgramaIds || []).includes(id)) { f.coordinaProgramaIds = f.coordinaProgramaIds.filter(x => x !== id); f.coordinator = f.coordinaProgramaIds.length > 0; }
+  });
   _progTreeSelected = null;
   saveDB();
   renderDepartamentosProgramas();
@@ -13031,13 +13074,52 @@ function showReport(id) {
   if (pane) pane.style.display='';
   const bar = document.getElementById('rpt-export-bar');
   if (bar) bar.style.display='flex';
+  const msgBloq = document.getElementById('rpt-blocked-msg');
+  if (_informeBloqueado(id)) {            // informe bloqueado por el admin: no se muestra ni se calcula
+    if (pane) pane.style.display='none';
+    if (bar) bar.style.display='none';
+    if (msgBloq) msgBloq.style.display='';
+    return;
+  }
+  if (msgBloq) msgBloq.style.display='none';
   _reportExportTituloLineas = null; // cada render* decide si pone un título propio
   // render
   const renders = {r1:renderR1,r2:renderR2,r3:renderR3,r4:renderR4,r5:renderR5,r6:renderR6,r7:renderR7,r8:renderR8,r9:renderR9};
   if (renders[id]) renders[id]();
 }
 
+// ── Bloqueo de informes R1–R9 (administrador) ──────────────────
+const _RPT_IDS = ['r1','r2','r3','r4','r5','r6','r7','r8','r9'];
+function _informeBloqueado(id) {
+  return Array.isArray(db.informesBloqueados) && db.informesBloqueados.includes(id) && getEffectiveRole() !== 'admin';
+}
+function toggleBloqueoInforme(id) {
+  if (currentUser?.rol !== 'admin') return;
+  const lista = Array.isArray(db.informesBloqueados) ? db.informesBloqueados : [];
+  db.informesBloqueados = lista.includes(id) ? lista.filter(x => x !== id) : [...lista, id];
+  saveDB();
+  _pintarBloqueosInformes();
+  showReport(_activeReport);
+  notify(db.informesBloqueados.includes(id) ? `${id.toUpperCase()} bloqueado para los demás usuarios 🔒` : `${id.toUpperCase()} disponible de nuevo ✓`);
+}
+function _pintarBloqueosInformes() {
+  const bloqueados = Array.isArray(db.informesBloqueados) ? db.informesBloqueados : [];
+  _RPT_IDS.forEach(id => {
+    const t = document.getElementById('rtab-' + id);
+    if (!t) return;
+    if (!t.dataset.base) t.dataset.base = t.textContent.replace(/^🔒\s*/, '');
+    t.textContent = (bloqueados.includes(id) ? '🔒 ' : '') + t.dataset.base;
+  });
+  const box = document.getElementById('rpt-lock-admin');
+  if (!box) return;
+  const esAdmin = currentUser?.rol === 'admin' && !_viewAsRole;
+  box.style.display = esAdmin ? 'flex' : 'none';
+  if (esAdmin) box.innerHTML = '<span style="font-weight:700;color:var(--muted)">🔒 Bloquear informes para los demás usuarios:</span>' +
+    _RPT_IDS.map(id => `<button class="btn btn-sm ${bloqueados.includes(id) ? '' : 'btn-outline'}" style="padding:2px 10px;font-size:0.72rem;${bloqueados.includes(id) ? 'background:#c0392b;color:#fff;border-color:#c0392b' : ''}" onclick="toggleBloqueoInforme('${id}')" title="${bloqueados.includes(id) ? 'Bloqueado — pulsa para desbloquear' : 'Disponible — pulsa para bloquear'}">${id.toUpperCase()}</button>`).join('');
+}
+
 function renderReportes() {
+  _pintarBloqueosInformes();
   // Called on tab open — init selects then show active report
   multiSelectBuild('r1-ay', _ayOptions().map(v => ({ value: v, label: 'AY' + v })), {
     allLabel: 'Todos los años', defaultAll: true, onChange: () => renderR1(),
@@ -13102,9 +13184,13 @@ function renderReportes() {
   // R7 visibility
   const effRole = getEffectiveRole();
   const e = currentUser?.efectivo;
-  const canR7 = currentUser?.rol==='admin' || e?.isDirector;
+  // R7: todo profesor ve el suyo; el alcance mayor lo decide _facultadVisibleEnR7()
   const r7tab = document.getElementById('rtab-r7');
-  if (r7tab) r7tab.classList.toggle('hidden', !canR7);
+  if (r7tab) r7tab.classList.remove('hidden');
+  // R8: solo directores y decanos (y admin)
+  const r8tab = document.getElementById('rtab-r8');
+  if (r8tab) r8tab.classList.toggle('hidden', !_puedeVerR8());
+  if (_activeReport === 'r8' && !_puedeVerR8()) _activeReport = 'r1';
   // R9 — Programa/Año Comienzo, derivados de db.estudiantes visibles para
   // este usuario (no de avaluos/cursos, que es un universo distinto).
   const estVisibles = (db.estudiantes||[]).filter(canSeeEstudiante);
@@ -13636,7 +13722,7 @@ function renderR1General() {
     const columnas = (escalaUnica && escala?.id === escalaUnica.id) ? construirColumnasNivelAdHoc('general', escala) : construirColumnasNivel(escala);
     if (!csvHeaderEscrito) { csvRows.push(['Programa','Competencia','Descripción', ...columnas.map(c=>c.label+' (N)'), ...columnas.map(c=>c.label+' (%)'), 'Total','Avg Logro']); csvHeaderEscrito = true; }
     const progAvg = _avgNivel(Object.values(comps).flatMap(c=>c.vals));
-    html += `<div class="rpt-section-head"><span>${prog}</span><span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(progAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${progAvg?.toFixed(2)||'—'}</span></div>`;
+    html += `<div class="rpt-section-head"><span>${progLink(prog)}</span><span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(progAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${progAvg?.toFixed(2)||'—'}</span></div>`;
     html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
       <th data-sort="text">Competencia</th><th data-sort="text">Descripción</th>${columnas.map(c=>`<th data-sort="num">${c.label}</th>`).join('')}<th data-sort="num">Total</th><th data-sort="num">Avg</th><th>Distribución</th>
     </tr></thead><tbody>`;
@@ -13645,7 +13731,7 @@ function renderR1General() {
       const counts = contarEnColumnas(c.vals, columnas);
       const pcts = counts.map(n=>total?Math.round(n/total*100):0);
       html += `<tr>
-        <td><strong>${c.code}</strong></td>
+        <td>${compCodeLink(c.code, null, c.desc, prog)}</td>
         <td style="font-size:0.75rem;max-width:260px">${c.desc}</td>
         ${counts.map((n,i)=>`<td>${n} <span style="color:var(--muted);font-size:0.72rem">(${pcts[i]}%)</span></td>`).join('')}
         <td>${total}</td>
@@ -14206,7 +14292,7 @@ function renderR2General() {
     const nEst = new Set(avaluos.filter(a=>a.cursoId===curso.id).map(a=>a.estudianteId||a.estudiante)).size;
     const cursoAvg = _avgNivel(Object.values(curso.comps).flatMap(c=>c.vals));
     html += `<div class="rpt-section-head">
-      <span>${curso.codigo} · ${curso.nombre}</span>
+      <span>${fichaLink('curso', curso.id, curso.codigo)} · ${curso.nombre}</span>
       <span class="badge badge-blue">${nEst} estudiantes</span>
       <span style="font-size:0.8rem;font-weight:400;color:${_colorForAvg(cursoAvg, Math.max(...escala.niveles.map(n=>n.valor)))}">Avg: ${cursoAvg?.toFixed(2)||'—'}</span>
     </div>`;
@@ -14217,7 +14303,7 @@ function renderR2General() {
       const total=c.vals.length, avg=_avgNivel(c.vals);
       const counts = contarEnColumnas(c.vals, columnas);
       html += `<tr>
-        <td><strong>${c.code}</strong></td>
+        <td>${compCodeLink(c.code, curso.id, c.desc)}</td>
         <td style="font-size:0.75rem;max-width:260px">${c.desc}</td>
         ${counts.map(n=>`<td>${n}</td>`).join('')}
         <td>${total}</td>
@@ -14808,12 +14894,12 @@ function _r3CursoBlock(nombre, estId, byCurso) {
     const nfText = grupo.notaFinal !== null ? `${grupo.notaFinal} <strong>${grupo.notaFinalLetra || ''}</strong>` : '—';
     visibleEvals.sort((a, b) => a.compCode.localeCompare(b.compCode)).forEach((ev, i) => {
       html += `<tr>
-        ${i===0?`<td rowspan="${visibleEvals.length}" style="font-weight:700;vertical-align:top">${_alEsc(grupo.codigo)}<br><span style="font-size:0.7rem;font-weight:400">${_alEsc(grupo.nombre)}</span></td>
+        ${i===0?`<td rowspan="${visibleEvals.length}" style="font-weight:700;vertical-align:top">${fichaLink('curso', grupo.cursoId, grupo.codigo)}<br><span style="font-size:0.7rem;font-weight:400">${_alEsc(grupo.nombre)}</span></td>
         <td rowspan="${visibleEvals.length}" style="vertical-align:top;font-size:0.75rem">${_alEsc(grupo.semestre)}</td>
         <td rowspan="${visibleEvals.length}" style="vertical-align:top">${nfText}</td>`:''}
-        <td style="font-size:0.75rem">${_alEsc(ev.lao || '—')}</td>
+        <td style="font-size:0.75rem">${laoLink(ev.lao, [grupo.cursoId])}</td>
         <td>${ev.laoGrade !== undefined && ev.laoGrade !== null && ev.laoGrade !== '' ? ev.laoGrade : '—'}</td>
-        <td><strong>${_alEsc(ev.compCode)}</strong></td>
+        <td>${compCodeLink(ev.compCode, grupo.cursoId || ev.cursoId, ev.compDesc)}</td>
         <td style="font-size:0.75rem;max-width:220px">${_alEsc(ev.compDesc)}</td>
         <td>${_nivelPill(ev.nivel, escalaGrupo)}</td>
         <td>${ev.val}</td>
@@ -14832,7 +14918,7 @@ function _r3CompetenciasBlock(nombre, estId, compsAgrupadas) {
   const csvRows = [];
   compsAgrupadas.forEach(c => {
     html += `<tr>
-      <td><strong>${_alEsc(c.code)}</strong></td>
+      <td>${compCodeLink(c.code, null, c.desc)}</td>
       <td style="font-size:0.75rem;max-width:300px">${_alEsc(c.desc)}</td>
       <td>${c.nCursos}</td>
       <td>${_avgBadge(c.avg)}</td>
@@ -15215,7 +15301,7 @@ function _r4RenderV1(avaluos, filterProg, lente) {
     const counts = contarEnColumnas(vals, columnas);
     const miniBar = _miniBarDinamico(counts, vals.length);
     tableHtml += `<tr>
-      <td><strong>${c.code}</strong></td>
+      <td>${compCodeLink(c.code, null, c.desc)}</td>
       <td style="font-size:0.75rem">${c.desc || '—'}</td>
       <td style="text-align:center">${c.n}</td>
       <td style="text-align:center;font-weight:800;background:${bg};color:${col};border-radius:6px">${c.avg.toFixed(2)}</td>
@@ -15711,7 +15797,7 @@ function _r4RenderV4(avaluos, filterProg) {
     const { bg, col } = s.avg !== null ? _bgColParaAvg(s.avg) : { bg: '', col: '' };
     const isCurrent = s.prog === filterProg;
     tableHtml += `<tr${isCurrent ? ' style="background:rgba(255,120,79,0.08)"' : ''}>
-      <td><strong>${s.prog}</strong>${isCurrent ? ' <small style="color:var(--egsp-coral)">◀ actual</small>' : ''}</td>
+      <td><strong>${progLink(s.prog)}</strong>${isCurrent ? ' <small style="color:var(--egsp-coral)">◀ actual</small>' : ''}</td>
       <td style="text-align:center">${s.avaluos}</td>
       <td style="text-align:center">${s.evals}</td>
       <td style="text-align:center">${s.estudiantes}</td>
@@ -16397,12 +16483,12 @@ function renderR5() {
     const col=_colorForAvg(l.avg, Math.max(...escala.niveles.map(n=>n.valor)));
     html+=`<tr>
       <td style="color:${col};font-weight:800">#${i+1}</td>
-      <td style="max-width:300px;font-size:0.8rem">${l.lao}</td>
+      <td style="max-width:300px;font-size:0.8rem">${laoLink(l.lao, [...l.cursos])}</td>
       <td>${_avgBadge(l.avg)}</td>
       ${counts.map(n=>`<td>${n}</td>`).join('')}
       <td>${l.total}</td>
       <td>${_miniBarDinamico(counts,l.total)}</td>
-      <td style="font-size:0.75rem">${[...l.cursos].map(id=>db.cursos.find(c=>c.id===id)?.codigo||id).join(', ')}</td>
+      <td style="font-size:0.75rem">${[...l.cursos].map(id=>fichaLink('curso', id, db.cursos.find(c=>c.id===id)?.codigo||id)).join(', ')}</td>
     </tr>`;
     csvRows.push([l.lao,l.avg?.toFixed(2),...counts,l.total,l.comps.size,l.cursos.size]);
   });
@@ -16500,7 +16586,7 @@ function renderR6() {
     const motivo = e.riskComp && e.riskNota ? 'Ambos' : e.riskComp ? 'Competencias' : 'Nota del curso';
     const col = _colorForAvg(e.avg);
     const compsHtml = e.compsRiesgo.length
-      ? e.compsRiesgo.map(c=>`<span class="nivel-pill nivel-N" style="margin:1px" title="${_alEsc(c.desc||'')}">${c.code}: ${c.val.toFixed(1)}</span>`).join(' ')
+      ? e.compsRiesgo.map(c=>`<span class="nivel-pill nivel-N" style="margin:1px" title="${_alEsc(c.desc||'')}">${compCodeLink(c.code, null, c.desc)}: ${c.val.toFixed(1)}</span>`).join(' ')
       : '—';
     html+=`<tr>
       <td><strong>${fichaLinkEstudiante(e.id, e.nombre)}</strong></td>
@@ -16519,201 +16605,325 @@ function renderR6() {
   _reportCSVData=csvRows; _reportCSVName='R6_en_riesgo.csv';
 }
 
-// ── R7 — Professor Summary ────────────────────────────────────
-function renderR7() {
-  const filterTerm = document.getElementById('r7-term')?.value||'';
-  document.getElementById('rpt-export-title').textContent = 'R7 · Resumen de Facultad';
+// ── R7 — Facultad: ficha de desempeño por profesor/a ──────────
+// Acceso: todo profesor ve lo suyo; director → facultativos de su departamento;
+// coordinador → facultativos de los programas que coordina; decano/admin → toda la Escuela.
+let _r7Sel = null;
 
-  const el = document.getElementById('r7-body');
-  const effRole = getEffectiveRole();
-  const e = currentUser?.efectivo;
-  if (currentUser?.rol!=='admin' && !e?.isDirector) {
-    el.innerHTML='<div class="dash-empty"><div class="dash-empty-icon">🔒</div><p>Acceso restringido — solo Admin y Directores</p></div>';
-    return;
+function _programasDeFacultad(f) {
+  const s = new Set((f.programaIds || []).map(id => (db.programas || []).find(p => p.id === id)?.nombre).filter(Boolean));
+  String(f.programas || '').split('|').map(x => x.trim()).filter(Boolean).forEach(n => s.add(n));
+  (db.secciones || []).filter(sec => _facultadDeSeccion(sec)?.id === f.id).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(p => s.add(p)));
+  return [...s];
+}
+function _facultadVisibleEnR7(f) {
+  if (!f || !currentUser) return false;
+  const ctx = _dashCtx();
+  if (ctx.schoolWide) return true;
+  if (!_viewAsRole && (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase()) return true;
+  if (_viewAsRole === 'profesor') return (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase();
+  if (ctx.isDirector) {
+    if (ctx.deptIds.length) { if (f.departamentoId && ctx.deptIds.includes(f.departamentoId)) return true; }
+    else if (_programasDeFacultad(f).some(p => ctx.progs.includes(p))) return true;
   }
-
-  let avaluos = db.avaluos||[];
-  if (filterTerm) avaluos = avaluos.filter(av=>{
-    const t=parseTermString(_getSemestre(av)); return t?.term===filterTerm;
-  });
-
-  // Build professor list: from db.facultad + from section.profesor fields
-  const profMap = {};
-  (db.facultad||[]).forEach(f=>{
-    profMap[f.email||f.nombre]={nombre:f.nombre,email:f.email||'',departamento:f.departamento||'',
-      programas:f.programas||'',isCoord:f.coordinator==='true'||f.coordinator===true,
-      isDir:f.director==='true'||f.director===true, matched:true, secciones:[], avaluos:0, estudiantes:new Set()};
-  });
-
-  // Map sections to professors
-  (db.secciones||[]).forEach(sec=>{
-    const key = sec.profesorEmail||sec.profesor||'';
-    if (!key) return;
-    if (!profMap[key]) profMap[key]={nombre:sec.profesor||key,email:sec.profesorEmail||'',matched:false,
-      departamento:'',programas:'',isCoord:false,isDir:false,secciones:[],avaluos:0,estudiantes:new Set()};
-    profMap[key].secciones.push(sec);
-  });
-
-  // Map avaluos to professors via section
-  avaluos.forEach(av=>{
-    const sec = (db.secciones||[]).find(s=>s.id===av.seccionId);
-    const key = sec?.profesorEmail||sec?.profesor||'';
-    if (!key||!profMap[key]) return;
-    profMap[key].avaluos++;
-    profMap[key].estudiantes.add(av.estudianteId||av.estudiante);
-  });
-
-  const profs = Object.values(profMap).sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  const unmatched = profs.filter(p=>!p.matched);
-
-  const csvRows=[['Nombre','Email','Departamento','Programas','Coordinador','Director','Secciones','Avalúos','Estudiantes','Vinculado']];
-
-  let html='';
-  if (unmatched.length) {
-    html+=`<div style="margin-bottom:14px;padding:10px 14px;background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;font-size:0.82rem">
-      ⚠️ <strong>${unmatched.length} profesor(es)</strong> con secciones pero sin registro en la Facultad Masterlist
-    </div>`;
-  }
-
-  html+=`<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
-    <th data-sort="text">Nombre</th><th data-sort="text">Email</th><th data-sort="text">Departamento</th><th data-sort="text">Programas</th><th data-sort="text">Roles</th>
-    <th data-sort="num">Secciones</th><th data-sort="num">Avalúos</th><th data-sort="num">Estudiantes</th><th data-sort="text">Estado</th>
-  </tr></thead><tbody>`;
-
-  profs.forEach(p=>{
-    const roles=[];
-    if(p.isDir) roles.push('<span class="badge badge-rust">Director/a</span>');
-    if(p.isCoord) roles.push('<span class="badge badge-blue">Coord.</span>');
-    html+=`<tr>
-      <td><strong>${p.nombre}</strong></td>
-      <td style="font-size:0.75rem">${p.email||'—'}</td>
-      <td style="font-size:0.75rem">${p.departamento||'—'}</td>
-      <td style="font-size:0.72rem;max-width:160px">${(p.programas||'').replace(/\|/g,', ')||'—'}</td>
-      <td>${roles.join(' ')||'<span style="color:var(--muted)">—</span>'}</td>
-      <td>${p.secciones.length}</td>
-      <td>${p.avaluos}</td>
-      <td>${p.estudiantes.size}</td>
-      <td>${p.matched
-        ?'<span class="badge badge-green">✓ Vinculado</span>'
-        :'<span class="badge badge-rust">⚠️ Sin ficha</span>'}</td>
-    </tr>`;
-    csvRows.push([p.nombre,p.email,p.departamento,(p.programas||'').replace(/\|/g,'; '),p.isCoord?'Sí':'No',p.isDir?'Sí':'No',p.secciones.length,p.avaluos,p.estudiantes.size,p.matched?'Sí':'No']);
-  });
-  html+='</tbody></table></div>';
-  el.innerHTML=html;
-  _rptMakeSortable('r7-body');
-  _reportCSVData=csvRows; _reportCSVName='R7_facultad.csv';
+  if (ctx.isCoord && _programasDeFacultad(f).some(p => ctx.coordProgs.includes(p))) return true;
+  return false;
 }
 
-// ── R8 — Grade Summary ────────────────────────────────────────
-function renderR8() {
-  const filterProg  = document.getElementById('r8-prog')?.value  || '';
-  const filterCurso = document.getElementById('r8-curso')?.value || '';
-  const filterTerm  = document.getElementById('r8-term')?.value  || '';
-  document.getElementById('rpt-export-title').textContent = 'R8 · Resumen de Notas Finales';
+function r7Select(id) { _r7Sel = id || null; const s = document.getElementById('r7-prof'); if (s) s.value = _r7Sel || ''; renderR7(); }
 
-  let avaluos = _filterAvaluosByRole(db.avaluos || []);
-  if (filterProg)  avaluos = avaluos.filter(av => db.cursos.find(c=>c.id===av.cursoId)?.programa === filterProg);
-  if (filterCurso) avaluos = avaluos.filter(av => av.cursoId === filterCurso);
-  if (filterTerm)  avaluos = avaluos.filter(av => {
-    const t = parseTermString(_getSemestre(av)); return t?.term === filterTerm;
+function _r7Metricas(secs) {
+  // Por sección: avalúos, estudiantes, nota prom., logro prom. y evaluaciones planas
+  const porSec = {};
+  const secIds = new Set(secs.map(s => s.id));
+  (db.avaluos || []).filter(av => secIds.has(av.seccionId)).forEach(av => { (porSec[av.seccionId] ||= []).push(av); });
+  return secs.map(s => {
+    const avs = porSec[s.id] || [];
+    const evs = _allEvals(avs).map(e => ({ ...e, seccionId: s.id }));
+    const notas = avs.map(a => parseFloat(a.notaFinal)).filter(n => !isNaN(n));
+    return { s, avs, evs, completada: avs.length > 0,
+      ests: new Set(avs.map(a => a.estudianteId || a.estudiante)).size,
+      nota: notas.length ? notas.reduce((x,y)=>x+y,0)/notas.length : null, nNotas: notas.length,
+      logro: evs.length ? evs.reduce((x,e)=>x+e.val,0)/evs.length : null, _notas: notas };
   });
+}
+const _avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+const _fmt = (v, d=2) => v == null ? '—' : v.toFixed(d);
 
-  const el = document.getElementById('r8-body');
-  if (!avaluos.length) {
-    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🎓</div><p>Sin datos</p></div>';
+function renderR7() {
+  document.getElementById('rpt-export-title').textContent = 'R7 · Facultad';
+  const el = document.getElementById('r7-body');
+  const visibles = (db.facultad || []).filter(_facultadVisibleEnR7).sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+  if (!visibles.length) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔒</div><p>No hay facultativos cuya información puedas ver con tu nivel de acceso.</p></div>';
     _reportCSVData = []; return;
   }
 
-  // Filter to those with nota final
-  const withGrade = avaluos.filter(av => av.notaFinal !== '' && av.notaFinal !== undefined && av.notaFinal !== null);
-  const noGrade   = avaluos.length - withGrade.length;
+  // Filtros: año académico, trimestre, profesor
+  const ayEl = document.getElementById('r7-ay'), termEl = document.getElementById('r7-term'), profEl = document.getElementById('r7-prof');
+  const ays = [...new Set((db.secciones||[]).map(s => getAcademicYear(s.semestre)).filter(Boolean))].sort((a,b)=>b-a);
+  const prevAy = ayEl.value;
+  ayEl.innerHTML = '<option value="">Todos</option>' + ays.map(a => `<option value="${a}">AY ${a}</option>`).join('');
+  ayEl.value = ays.map(String).includes(prevAy) ? prevAy : '';
+  profEl.innerHTML = '<option value="">— Resumen de la facultad —</option>' + visibles.map(f => `<option value="${f.id}">${_alEsc(f.nombre || f.email)}</option>`).join('');
+  if (_r7Sel && !visibles.some(f => f.id === _r7Sel)) _r7Sel = null;
+  if (!_r7Sel && visibles.length === 1) _r7Sel = visibles[0].id;      // un profesor ve directamente lo suyo
+  profEl.value = _r7Sel || '';
 
-  // Grade distribution
-  const gradeDist = {A:0, B:0, C:0, D:0, F:0};
-  let gradeSum = 0, gradeCount = 0;
-  withGrade.forEach(av => {
-    const n = parseFloat(av.notaFinal);
-    if (!isNaN(n)) {
-      const l = gradeToLetter(n);
-      gradeDist[l] = (gradeDist[l] || 0) + 1;
-      gradeSum += n; gradeCount++;
-    }
+  const fAy = ayEl.value, fTerm = termEl.value;
+  const secsDe = f => (db.secciones || []).filter(s => _facultadDeSeccion(s)?.id === f.id).filter(s => {
+    if (fAy && String(getAcademicYear(s.semestre)) !== fAy) return false;
+    if (fTerm && parseTermString(s.semestre)?.term !== fTerm) return false;
+    return true;
   });
-  const gradeAvg = gradeCount ? (gradeSum / gradeCount).toFixed(1) : null;
-  const passCount = (gradeDist.A||0) + (gradeDist.B||0) + (gradeDist.C||0);
-  const passRate  = gradeCount ? Math.round(passCount / gradeCount * 100) : 0;
+  const csv = [];
 
+  // ── Sin selección: resumen de los facultativos visibles ──
+  if (!_r7Sel) {
+    csv.push(['Profesor','Email','Departamento','Secciones','Completadas','Por completar','Estudiantes','Nota prom.','Logro prom.']);
+    const filas = visibles.map(f => {
+      const m = _r7Metricas(secsDe(f));
+      const comp = m.filter(x => x.completada).length;
+      const nota = _avg(m.flatMap(x => x._notas)), logro = _avg(m.flatMap(x => x.evs.map(e => e.val)));
+      csv.push([f.nombre, f.email, f.departamento||'', m.length, comp, m.length-comp, m.reduce((a,x)=>a+x.ests,0), _fmt(nota,1), _fmt(logro)]);
+      return `<tr><td><strong><a href="#" class="ficha-link" onclick="event.preventDefault();r7Select('${_alEscAttr(f.id)}')">${_alEsc(f.nombre||f.email)}</a></strong>
+          <span style="margin-left:6px">${fichaLink('profesor', f.id, '↗', 'Ver ficha de profesor')}</span></td>
+        <td style="font-size:0.75rem">${f.departamentoId ? fichaLink('departamento', f.departamentoId, f.departamento || '—') : _alEsc(f.departamento||'—')}</td>
+        <td style="text-align:center">${m.length}</td><td style="text-align:center;color:#10b981;font-weight:700">${comp}</td>
+        <td style="text-align:center;color:${m.length-comp?'#f59e0b':'var(--muted)'};font-weight:700">${m.length-comp}</td>
+        <td style="text-align:center">${m.reduce((a,x)=>a+x.ests,0)}</td>
+        <td style="text-align:center;font-weight:800">${_fmt(nota,1)}</td>
+        <td style="text-align:center;font-weight:800;color:${logro==null?'inherit':_colorForAvg(logro)}">${_fmt(logro)}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">Pulsa el nombre de un/a profesor/a para ver su informe detallado.</div>
+      <div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
+      <th data-sort="text">Profesor/a</th><th data-sort="text">Departamento</th><th data-sort="num">Secciones</th><th data-sort="num">Completadas</th>
+      <th data-sort="num">Por completar</th><th data-sort="num">Estudiantes</th><th data-sort="num">Nota prom.</th><th data-sort="num">Logro prom.</th></tr></thead><tbody>${filas}</tbody></table></div>`;
+    _rptMakeSortable('r7-body'); _reportCSVData = csv; _reportCSVName = 'R7_facultad.csv';
+    return;
+  }
+
+  // ── Informe de un profesor ──
+  const f = visibles.find(x => x.id === _r7Sel);
+  const m = _r7Metricas(secsDe(f)).sort((a,b) => String(a.s.semestre||'').localeCompare(String(b.s.semestre||'')) || String((db.cursos.find(c=>c.id===a.s.cursoId)||{}).codigo||'').localeCompare(String((db.cursos.find(c=>c.id===b.s.cursoId)||{}).codigo||'')));
+  const completadas = m.filter(x => x.completada), pendientes = m.filter(x => !x.completada);
+  const todasEv = m.flatMap(x => x.evs);
+  const notaGlobal = _avg(m.flatMap(x => x._notas)), logroGlobal = _avg(todasEv.map(e => e.val));
+  const cursoDe = s => db.cursos.find(c => c.id === s.cursoId);
+  const secLabel = s => `${cursoDe(s)?.codigo || '—'} · Sec. ${s.numero || '—'} · ${s.semestre || ''}`;
+  const kpi = (n, l, color, icon) => `<div class="dash-kpi"><div class="dash-kpi-accent" style="background:${color}"></div><div class="dash-kpi-icon">${icon}</div><div class="dash-kpi-num">${n}</div><div class="dash-kpi-label">${l}</div></div>`;
+
+  let html = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn btn-outline btn-sm" onclick="r7Select(null)" ${visibles.length === 1 ? 'style="display:none"' : ''}>← Resumen de la facultad</button>
+      <div style="font-size:1.05rem;font-weight:800">${_alEsc(f.nombre || f.email)}</div>
+      ${fichaLink('profesor', f.id, 'Ver ficha', 'Ver ficha de profesor')}
+      <span style="font-size:0.78rem;color:var(--muted)">${f.departamentoId ? fichaLink('departamento', f.departamentoId, f.departamento || '') : _alEsc(f.departamento || '')}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">
+      ${kpi(m.length, 'Secciones', '#8b5cf6', '🏫')}${kpi(completadas.length, 'Avalúos completados', '#10b981', '✅')}
+      ${kpi(pendientes.length, 'Avalúos por completar', '#f59e0b', '⏳')}${kpi(_fmt(notaGlobal,1), 'Nota promedio', '#3b82f6', '🎓')}
+      ${kpi(_fmt(logroGlobal), 'Logro promedio (0–3)', 'var(--egsp-coral)', '🎯')}</div>`;
+
+  // Secciones completadas / pendientes
+  csv.push(['Curso','Sección','Trimestre','Estado','Estudiantes','Nota prom.','Logro prom.']);
+  const filaSec = x => {
+    const c = cursoDe(x.s);
+    csv.push([c?.codigo||'', x.s.numero||'', x.s.semestre||'', x.completada?'Completado':'Por completar', x.ests, _fmt(x.nota,1), _fmt(x.logro)]);
+    return `<tr><td>${c ? `<strong>${fichaLink('curso', c.id, c.codigo)}</strong> <span style="color:var(--muted);font-size:0.74rem">${_alEsc(c.nombre||'')}</span>` : '—'}</td>
+      <td>${fichaLink('seccion', x.s.id, 'Sec. ' + (x.s.numero || '—'))}</td><td>${_alEsc(x.s.semestre||'—')}</td>
+      <td style="text-align:center">${x.ests}</td><td style="text-align:center;font-weight:700">${_fmt(x.nota,1)}</td>
+      <td style="text-align:center;font-weight:800;color:${x.logro==null?'inherit':_colorForAvg(x.logro)}">${_fmt(x.logro)}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="abrirFicha('seccion','${_alEscAttr(x.s.id)}')">👁 Ver</button></td></tr>`;
+  };
+  const tabSec = (arr, vacio) => arr.length ? `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>Curso</th><th>Sección</th><th>Trimestre</th><th>Est.</th><th>Nota prom.</th><th>Logro prom.</th><th></th></tr></thead><tbody>${arr.map(filaSec).join('')}</tbody></table></div>` : `<p style="color:var(--muted);font-size:0.82rem">${vacio}</p>`;
+  html += `<div class="rpt-section-head">✅ Secciones con avalúo completado (${completadas.length})</div>${tabSec(completadas, 'Aún no hay secciones completadas en este período.')}
+    <div class="rpt-section-head" style="margin-top:18px">⏳ Secciones por completar (${pendientes.length})</div>${tabSec(pendientes, 'No hay secciones pendientes.')}`;
+
+  // Resumen de notas y logro por curso (con detalle por sección) + agregado
+  const porCurso = {};
+  m.forEach(x => (porCurso[x.s.cursoId] ||= []).push(x));
+  const cursosOrden = Object.keys(porCurso).sort((a,b) => String(db.cursos.find(c=>c.id===a)?.codigo).localeCompare(String(db.cursos.find(c=>c.id===b)?.codigo)));
+  csv.push([]); csv.push(['Resumen por curso/sección','Secciones','Completadas','Estudiantes','Nota prom.','Logro prom.']);
+  const filasResumen = cursosOrden.map(cid => {
+    const xs = porCurso[cid], c = db.cursos.find(k => k.id === cid);
+    const nota = _avg(xs.flatMap(x => x._notas)), logro = _avg(xs.flatMap(x => x.evs.map(e => e.val)));
+    csv.push([c?.codigo||'', xs.length, xs.filter(x=>x.completada).length, xs.reduce((a,x)=>a+x.ests,0), _fmt(nota,1), _fmt(logro)]);
+    return `<tr style="background:var(--cream)"><td><strong>${c ? fichaLink('curso', c.id, c.codigo) : '—'}</strong> <span style="color:var(--muted);font-size:0.74rem">${_alEsc(c?.nombre||'')}</span></td>
+        <td style="text-align:center">${xs.length}</td><td style="text-align:center">${xs.filter(x=>x.completada).length}</td><td style="text-align:center">${xs.reduce((a,x)=>a+x.ests,0)}</td>
+        <td style="text-align:center;font-weight:800">${_fmt(nota,1)}</td><td style="text-align:center;font-weight:800;color:${logro==null?'inherit':_colorForAvg(logro)}">${_fmt(logro)}</td></tr>` +
+      xs.map(x => { csv.push(['   ' + secLabel(x.s), 1, x.completada?1:0, x.ests, _fmt(x.nota,1), _fmt(x.logro)]);
+        return `<tr><td style="padding-left:28px;font-size:0.78rem">${fichaLink('seccion', x.s.id, 'Sec. ' + (x.s.numero || '—'))} · ${_alEsc(x.s.semestre||'')}</td>
+        <td style="text-align:center;color:var(--muted)">1</td><td style="text-align:center">${x.completada?'✓':'—'}</td><td style="text-align:center">${x.ests}</td>
+        <td style="text-align:center">${_fmt(x.nota,1)}</td><td style="text-align:center;color:${x.logro==null?'inherit':_colorForAvg(x.logro)}">${_fmt(x.logro)}</td></tr>`; }).join('');
+  }).join('');
+  html += `<div class="rpt-section-head" style="margin-top:18px">📚 Notas y logro por curso, sección y agregado</div>
+    <div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>Curso / sección</th><th>Secciones</th><th>Completadas</th><th>Estudiantes</th><th>Nota prom.</th><th>Logro prom.</th></tr></thead><tbody>${filasResumen}
+      <tr style="border-top:2px solid var(--border);font-weight:800"><td>Agregado — todos los cursos</td><td style="text-align:center">${m.length}</td><td style="text-align:center">${completadas.length}</td>
+      <td style="text-align:center">${m.reduce((a,x)=>a+x.ests,0)}</td><td style="text-align:center">${_fmt(notaGlobal,1)}</td><td style="text-align:center;color:${logroGlobal==null?'inherit':_colorForAvg(logroGlobal)}">${_fmt(logroGlobal)}</td></tr></tbody></table></div>`;
+
+  // Avalúo por competencia: columnas por curso, por sección o solo agregado
+  const nivel = document.getElementById('r7-nivel')?.value || 'curso';
+  const grupos = nivel === 'seccion' ? m.filter(x => x.evs.length).map(x => ({ key: x.s.id, label: secLabel(x.s), evs: x.evs }))
+    : nivel === 'curso' ? cursosOrden.map(cid => ({ key: cid, label: db.cursos.find(c=>c.id===cid)?.codigo || '—', evs: porCurso[cid].flatMap(x => x.evs) })).filter(g => g.evs.length)
+    : [];
+  const codigos = [...new Set(todasEv.map(e => e.compCode))].sort((a,b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  html += `<div class="rpt-section-head" style="margin-top:18px">🎯 Avalúo de competencias — ${nivel === 'seccion' ? 'por sección' : nivel === 'curso' ? 'por curso' : 'agregado'}</div>`;
+  if (!codigos.length) html += '<p style="color:var(--muted);font-size:0.82rem">Sin evaluaciones de competencias en este período.</p>';
+  else {
+    csv.push([]); csv.push(['Competencia', ...grupos.map(g => g.label), 'Agregado']);
+    html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>Competencia</th>${grupos.map(g => `<th style="text-align:center;font-size:0.68rem">${_alEsc(g.label)}</th>`).join('')}<th style="text-align:center">Agregado</th></tr></thead><tbody>
+      ${codigos.map(code => {
+        const ev0 = todasEv.find(e => e.compCode === code);
+        const cel = evs => { const v = evs.filter(e => e.compCode === code).map(e => e.val); if (!v.length) return ['<td style="text-align:center;color:#d1d5db">—</td>', '']; const a = _avg(v), c = _bgColParaAvg(a);
+          return [`<td style="text-align:center;background:${c.bg}"><span style="font-weight:800;color:${c.col}">${a.toFixed(2)}</span><br><span style="font-size:0.6rem;color:${c.col}">n=${v.length}</span></td>`, a.toFixed(2)]; };
+        const celdas = grupos.map(g => cel(g.evs)), agg = cel(todasEv);
+        csv.push([code, ...celdas.map(c => c[1]), agg[1]]);
+        return `<tr><td>${compCodeLink(code, ev0?.cursoId, ev0?.compDesc)}</td>${celdas.map(c => c[0]).join('')}${agg[0]}</tr>`; }).join('')}
+      </tbody></table></div>`;
+  }
+  el.innerHTML = html;
+  _rptMakeSortable('r7-body');
+  _reportCSVData = csv; _reportCSVName = 'R7_' + (f.nombre || 'profesor').replace(/\s+/g, '_') + '.csv';
+}
+
+// Código de competencia con texto al pasar el cursor y enlace a su ficha (banco de competencias).
+// Resuelve el banco por curso (sus programas), por programa dado, o —sin ninguno— por el primer curso que tenga ese código.
+function compCodeLink(code, cursoId, descFallback, prog) {
+  const num = String(code || '').replace(/^C/i, '');
+  let progs = prog ? [prog] : [];
+  let cid = cursoId;
+  if (!progs.length && !cid) cid = (db.competencias || []).find(d => d.codigo === code)?.cursoId;
+  if (!progs.length && cid) { const curso = (db.cursos || []).find(c => c.id === cid); progs = curso ? _programasDeCurso(curso) : []; }
+  const bc = (db.bancoCompetencias || []).find(b => String(b.num) === num && progs.includes(b.programa));
+  const dc = (db.competencias || []).find(d => d.codigo === code && (!cid || d.cursoId === cid));
+  const texto = bc?.texto || dc?.descripcion || descFallback || '';
+  const estilo = 'font-weight:800;color:var(--egsp-coral);text-decoration:underline dotted;';
+  if (bc) return `<span class="ficha-clic" style="${estilo}cursor:pointer" ${fichaAttr('competencia', bc.id, texto)}>${_alEsc(code)}</span>`;
+  return `<span style="${estilo}cursor:help" ${_tipAttr(texto)}>${_alEsc(code)}</span>`;
+}
+// Enlace a la ficha de un programa por su nombre
+function progLink(nombre) {
+  const p = (db.programas || []).find(x => x.nombre === nombre);
+  return p ? fichaLink('programa', p.id, nombre) : _alEsc(nombre || '');
+}
+// Enlace a la ficha de un LAO por su nombre dentro de uno de los cursos dados (si no se halla, texto plano)
+function laoLink(nombre, cursoIds) {
+  if (!nombre || nombre === '—') return _alEsc(nombre || '—');
+  const lao = (db.laos || []).find(l => l.nombre === nombre && (!cursoIds || !cursoIds.length || cursoIds.includes(l.cursoId)));
+  return lao ? fichaLink('lao', lao.id, nombre) : _alEsc(nombre);
+}
+
+// ── R8 — Notas Finales (solo directores, decanos y admin) ─────
+function _puedeVerR8() {
+  if (_viewAsRole) return _viewAsRole === 'decano' || _viewAsRole === 'director';
+  const ctx = _dashCtx();
+  return ctx.schoolWide || ctx.isDirector;
+}
+function _r8LabelSeccion(s) {
+  const c = db.cursos.find(x => x.id === s.cursoId);
+  return `${c?.codigo || '—'} · Sec. ${s.numero || '—'} · ${s.semestre || ''} · ${s.profesor || 'sin profesor'}`;
+}
+
+function renderR8() {
+  document.getElementById('rpt-export-title').textContent = 'R8 · Resumen de Notas Finales';
+  const el = document.getElementById('r8-body');
+  if (!_puedeVerR8()) {
+    el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🔒</div><p>Acceso restringido — este informe es solo para directores y decanos.</p></div>';
+    _reportCSVData = []; return;
+  }
+  const val = id => document.getElementById(id)?.value || '';
+  const filterProg = val('r8-prog'), filterCurso = val('r8-curso'), filterAy = val('r8-ay'), filterTerm = val('r8-term');
+  const vista = val('r8-vista') || 'agregado';
+
+  // Alcance base (rol + programa/curso/año/trimestre), sin sección
+  let avaluos = _filterAvaluosByRole(db.avaluos || []);
+  if (filterProg)  avaluos = avaluos.filter(av => _dashProgsCurso(av.cursoId).includes(filterProg));
+  if (filterCurso) avaluos = avaluos.filter(av => av.cursoId === filterCurso);
+  if (filterAy)    avaluos = avaluos.filter(av => String(getAcademicYear(_getSemestre(av))) === filterAy);
+  if (filterTerm)  avaluos = avaluos.filter(av => parseTermString(_getSemestre(av))?.term === filterTerm);
+
+  // Selectores dependientes: año académico y sección (con profesor)
+  const ayEl = document.getElementById('r8-ay'), secEl = document.getElementById('r8-sec');
+  const baseSinAy = _filterAvaluosByRole(db.avaluos || []).filter(av => (!filterCurso || av.cursoId === filterCurso) && (!filterProg || _dashProgsCurso(av.cursoId).includes(filterProg)));
+  const ays = [...new Set(baseSinAy.map(av => getAcademicYear(_getSemestre(av))).filter(Boolean))].sort((a,b)=>b-a);
+  ayEl.innerHTML = '<option value="">Todos</option>' + ays.map(a => `<option value="${a}">AY ${a}</option>`).join('');
+  ayEl.value = ays.map(String).includes(filterAy) ? filterAy : '';
+  const secIds = [...new Set(avaluos.map(av => av.seccionId).filter(Boolean))];
+  const secsDisp = secIds.map(id => (db.secciones || []).find(s => s.id === id)).filter(Boolean)
+    .sort((a,b) => _r8LabelSeccion(a).localeCompare(_r8LabelSeccion(b), undefined, { numeric: true }));
+  const prevSec = val('r8-sec');
+  secEl.innerHTML = '<option value="">Todas (agregado)</option>' + secsDisp.map(s => `<option value="${s.id}">${_alEsc(_r8LabelSeccion(s))}</option>`).join('');
+  secEl.value = secsDisp.some(s => s.id === prevSec) ? prevSec : '';
+  const filterSec = secEl.value;
+  const secSel = filterSec ? secsDisp.find(s => s.id === filterSec) : null;
+  if (filterSec) avaluos = avaluos.filter(av => av.seccionId === filterSec);
+
+  if (!avaluos.length) { el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🎓</div><p>Sin datos</p></div>'; _reportCSVData = []; return; }
+
+  const withGrade = avaluos.filter(av => av.notaFinal !== '' && av.notaFinal !== undefined && av.notaFinal !== null && !isNaN(parseFloat(av.notaFinal)));
+  const noGrade = avaluos.length - withGrade.length;
+  const dist = gs => { const d = {A:0,B:0,C:0,D:0,F:0}; gs.forEach(n => { d[gradeToLetter(n)] = (d[gradeToLetter(n)]||0) + 1; }); return d; };
+  const notas = withGrade.map(av => parseFloat(av.notaFinal));
+  const gDist = dist(notas), gAvg = notas.length ? (notas.reduce((a,b)=>a+b,0)/notas.length).toFixed(1) : null;
+  const pass = d => d.A + d.B + d.C;
+  const passRate = notas.length ? Math.round(pass(gDist)/notas.length*100) : 0;
   const gradeColors = {A:'#10b981',B:'#3b82f6',C:'#f59e0b',D:'#f97316',F:'#ef4444'};
+  const csvRows = [];
 
-  // Group by course
-  const byCurso = {};
-  withGrade.forEach(av => {
-    const cur = db.cursos.find(c=>c.id===av.cursoId);
-    const key = av.cursoId;
-    if (!byCurso[key]) byCurso[key] = { codigo: cur?.codigo||av.cursoCodigo||'—', nombre: cur?.nombre||av.cursoNombre||'—',
-      prog: cur?.programa||'—', grades:[], dist:{A:0,B:0,C:0,D:0,F:0} };
-    const n = parseFloat(av.notaFinal);
-    if (!isNaN(n)) {
-      byCurso[key].grades.push(n);
-      byCurso[key].dist[gradeToLetter(n)]++;
-    }
-  });
+  const encabezadoSec = secSel ? (() => { const c = db.cursos.find(x => x.id === secSel.cursoId);
+    return `<div style="background:var(--cream);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem">
+      <strong>${c ? fichaLink('curso', c.id, c.codigo) : '—'}</strong> ${_alEsc(c?.nombre || '')} · ${fichaLink('seccion', secSel.id, 'Sec. ' + (secSel.numero || '—'))} · ${_alEsc(secSel.semestre || '')}
+      · Profesor/a: <strong>${_fichaLinkProfesorSec(secSel)}</strong></div>`; })() : '';
 
-  const csvRows = [['Curso','Programa','Estudiantes','Promedio','A','B','C','D','F','Aprobación %']];
-
-  let html = `
+  let html = `${encabezadoSec}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">
-      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:var(--egsp-coral)"></div>
-        <div class="dash-kpi-icon">✏️</div><div class="dash-kpi-num">${withGrade.length}</div><div class="dash-kpi-label">Con Nota Final</div></div>
-      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:#10b981"></div>
-        <div class="dash-kpi-icon">📊</div><div class="dash-kpi-num" style="color:#10b981">${gradeAvg ?? '—'}</div><div class="dash-kpi-label">Promedio</div></div>
-      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:#3b82f6"></div>
-        <div class="dash-kpi-icon">✅</div><div class="dash-kpi-num" style="color:#3b82f6">${passRate}%</div><div class="dash-kpi-label">Tasa de Aprobación</div></div>
-      ${noGrade ? `<div class="dash-kpi"><div class="dash-kpi-accent" style="background:#d1d5db"></div>
-        <div class="dash-kpi-icon">—</div><div class="dash-kpi-num" style="color:#9ca3af">${noGrade}</div><div class="dash-kpi-label">Sin Nota</div></div>` : ''}
+      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:var(--egsp-coral)"></div><div class="dash-kpi-icon">✏️</div><div class="dash-kpi-num">${withGrade.length}</div><div class="dash-kpi-label">Con Nota Final</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:#10b981"></div><div class="dash-kpi-icon">📊</div><div class="dash-kpi-num" style="color:#10b981">${gAvg ?? '—'}</div><div class="dash-kpi-label">Promedio</div></div>
+      <div class="dash-kpi"><div class="dash-kpi-accent" style="background:#3b82f6"></div><div class="dash-kpi-icon">✅</div><div class="dash-kpi-num" style="color:#3b82f6">${passRate}%</div><div class="dash-kpi-label">Tasa de Aprobación</div></div>
+      ${noGrade ? `<div class="dash-kpi"><div class="dash-kpi-accent" style="background:#d1d5db"></div><div class="dash-kpi-icon">—</div><div class="dash-kpi-num" style="color:#9ca3af">${noGrade}</div><div class="dash-kpi-label">Sin Nota</div></div>` : ''}
     </div>
-
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
-      ${Object.entries(gradeDist).map(([g,cnt]) => cnt>0 ? `
-        <div style="background:${gradeColors[g]}18;border:2px solid ${gradeColors[g]};border-radius:12px;padding:12px 20px;text-align:center;min-width:80px">
-          <div style="font-size:2rem;font-weight:900;color:${gradeColors[g]}">${g}</div>
-          <div style="font-size:1rem;font-weight:700;color:${gradeColors[g]}">${cnt}</div>
-          <div style="font-size:0.68rem;color:${gradeColors[g]};opacity:0.8">${gradeCount?Math.round(cnt/gradeCount*100):0}%</div>
-        </div>` : '').join('')}
-    </div>
+      ${Object.entries(gDist).map(([g,cnt]) => cnt>0 ? `<div style="background:${gradeColors[g]}18;border:2px solid ${gradeColors[g]};border-radius:12px;padding:12px 20px;text-align:center;min-width:80px">
+        <div style="font-size:2rem;font-weight:900;color:${gradeColors[g]}">${g}</div><div style="font-size:1rem;font-weight:700;color:${gradeColors[g]}">${cnt}</div>
+        <div style="font-size:0.68rem;color:${gradeColors[g]};opacity:0.8">${notas.length?Math.round(cnt/notas.length*100):0}%</div></div>` : '').join('')}
+    </div>`;
 
-    <div class="rpt-section-head">Desglose por Curso</div>
-    <div style="overflow-x:auto">
-    <table class="rpt-table"><thead><tr>
-      <th data-sort="text">Curso</th><th data-sort="text">Programa</th><th data-sort="num">Estudiantes</th><th data-sort="num">Promedio</th>
-      <th data-sort="num" style="color:#10b981">A</th><th data-sort="num" style="color:#3b82f6">B</th><th data-sort="num" style="color:#f59e0b">C</th>
-      <th data-sort="num" style="color:#f97316">D</th><th data-sort="num" style="color:#ef4444">F</th><th data-sort="num">Aprobación</th>
-    </tr></thead><tbody>
-      ${Object.values(byCurso).sort((a,b)=>a.codigo.localeCompare(b.codigo)).map(c => {
-        const avg = c.grades.length ? (c.grades.reduce((s,v)=>s+v,0)/c.grades.length).toFixed(1) : '—';
-        const pass = (c.dist.A+c.dist.B+c.dist.C);
-        const rate = c.grades.length ? Math.round(pass/c.grades.length*100) : 0;
-        return `<tr>
-          <td><strong>${c.codigo}</strong><div style="font-size:0.72rem;color:var(--muted)">${c.nombre}</div></td>
-          <td style="font-size:0.75rem">${c.prog}</td>
-          <td style="text-align:center">${c.grades.length}</td>
-          <td style="text-align:center;font-weight:800">${avg}</td>
-          ${['A','B','C','D','F'].map(g=>`<td style="text-align:center">${c.dist[g]||0}</td>`).join('')}
-          <td style="text-align:center"><span class="badge ${rate>=80?'badge-green':rate>=60?'badge-gold':'badge-red'}">${rate}%</span></td>
-        </tr>`;
-      }).join('')}
-    </tbody></table></div>
+  const celdasDist = (d, g) => ['A','B','C','D','F'].map(l => `<td style="text-align:center">${d[l]||0}</td>`).join('');
+  const thDist = '<th data-sort="num" style="color:#10b981">A</th><th data-sort="num" style="color:#3b82f6">B</th><th data-sort="num" style="color:#f59e0b">C</th><th data-sort="num" style="color:#f97316">D</th><th data-sort="num" style="color:#ef4444">F</th>';
 
-    `;
-
-  Object.values(byCurso).sort((a,b)=>a.codigo.localeCompare(b.codigo)).forEach(c => {
-    const avg = c.grades.length ? (c.grades.reduce((s,v)=>s+v,0)/c.grades.length).toFixed(1) : '—';
-    const pass = (c.dist.A+c.dist.B+c.dist.C);
-    const rate = c.grades.length ? Math.round(pass/c.grades.length*100) : 0;
-    csvRows.push([c.codigo, c.prog, c.grades.length, avg, c.dist.A||0, c.dist.B||0, c.dist.C||0, c.dist.D||0, c.dist.F||0, rate+'%']);
-  });
-
+  // Una sección: lista de estudiantes con su nota
+  if (secSel) {
+    csvRows.push(['Estudiante','ID','Nota final','Letra']);
+    html += `<div class="rpt-section-head">Estudiantes de la sección</div><div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th data-sort="text">Estudiante</th><th>ID</th><th data-sort="num">Nota final</th><th>Letra</th></tr></thead><tbody>
+      ${avaluos.map(av => { const n = parseFloat(av.notaFinal); const l = isNaN(n) ? '' : gradeToLetter(n);
+        csvRows.push([av.estudiante || '', av.estudianteId || '', isNaN(n) ? '' : n, l]);
+        return `<tr><td><strong>${fichaLinkEstudiante(av.estudianteId || av.estudiante, av.estudiante || av.estudianteId)}</strong></td><td style="font-size:0.72rem;color:var(--muted)">${_alEsc(av.estudianteId || '')}</td>
+          <td style="text-align:center;font-weight:800">${isNaN(n) ? '—' : n}</td><td style="text-align:center;font-weight:800;color:${gradeColors[l] || 'inherit'}">${l || '—'}</td></tr>`; }).join('')}</tbody></table></div>`;
+  } else if (vista === 'comparar') {
+    // Comparar secciones lado a lado (todas las que cumplen los filtros)
+    const porSec = {};
+    withGrade.forEach(av => { (porSec[av.seccionId || '__sin__'] ||= []).push(parseFloat(av.notaFinal)); });
+    csvRows.push(['Curso','Sección','Trimestre','Profesor','Estudiantes','Promedio','A','B','C','D','F','Aprobación %']);
+    const filas = Object.entries(porSec).map(([sid, ns]) => ({ s: (db.secciones||[]).find(x => x.id === sid), ns }))
+      .sort((a,b) => (a.s ? _r8LabelSeccion(a.s) : 'zz').localeCompare(b.s ? _r8LabelSeccion(b.s) : 'zz', undefined, { numeric: true }))
+      .map(({ s, ns }) => { const c = s && db.cursos.find(x => x.id === s.cursoId), d = dist(ns), avg = ns.reduce((a,b)=>a+b,0)/ns.length, rate = Math.round(pass(d)/ns.length*100);
+        csvRows.push([c?.codigo||'', s?.numero||'', s?.semestre||'', s?.profesor||'', ns.length, avg.toFixed(1), d.A, d.B, d.C, d.D, d.F, rate+'%']);
+        return `<tr><td>${c ? `<strong>${fichaLink('curso', c.id, c.codigo)}</strong>` : '—'}</td><td>${s ? fichaLink('seccion', s.id, 'Sec. ' + (s.numero||'—')) : '—'}</td><td>${_alEsc(s?.semestre||'—')}</td>
+          <td>${s ? _fichaLinkProfesorSec(s) : '—'}</td><td style="text-align:center">${ns.length}</td><td style="text-align:center;font-weight:800">${avg.toFixed(1)}</td>${celdasDist(d)}<td style="text-align:center">${rate}%</td></tr>`; }).join('');
+    html += `<div class="rpt-section-head">Comparación de secciones</div><div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th data-sort="text">Curso</th><th>Sección</th><th data-sort="text">Trimestre</th><th data-sort="text">Profesor/a</th><th data-sort="num">Est.</th><th data-sort="num">Promedio</th>${thDist}<th data-sort="num">Aprobación</th></tr></thead><tbody>${filas}</tbody></table></div>`;
+  } else {
+    // Agregado por curso
+    const byCurso = {};
+    withGrade.forEach(av => { const c = db.cursos.find(x => x.id === av.cursoId);
+      const o = (byCurso[av.cursoId] ||= { c, codigo: c?.codigo || av.cursoCodigo || '—', nombre: c?.nombre || av.cursoNombre || '—', prog: _dashProgsCurso(av.cursoId).join(', ') || '—', ns: [] });
+      o.ns.push(parseFloat(av.notaFinal)); });
+    csvRows.push(['Curso','Programa','Estudiantes','Promedio','A','B','C','D','F','Aprobación %']);
+    html += `<div class="rpt-section-head">Desglose por Curso</div><div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th data-sort="text">Curso</th><th data-sort="text">Programa</th><th data-sort="num">Estudiantes</th><th data-sort="num">Promedio</th>${thDist}<th data-sort="num">Aprobación</th></tr></thead><tbody>
+      ${Object.values(byCurso).sort((a,b) => a.codigo.localeCompare(b.codigo)).map(o => { const d = dist(o.ns), avg = o.ns.reduce((a,b)=>a+b,0)/o.ns.length, rate = Math.round(pass(d)/o.ns.length*100);
+        csvRows.push([o.codigo, o.prog, o.ns.length, avg.toFixed(1), d.A, d.B, d.C, d.D, d.F, rate+'%']);
+        return `<tr><td><strong>${o.c ? fichaLink('curso', o.c.id, o.codigo) : o.codigo}</strong><div style="font-size:0.72rem;color:var(--muted)">${_alEsc(o.nombre)}</div></td><td style="font-size:0.75rem">${_alEsc(o.prog)}</td>
+          <td style="text-align:center">${o.ns.length}</td><td style="text-align:center;font-weight:800">${avg.toFixed(1)}</td>${celdasDist(d)}<td style="text-align:center">${rate}%</td></tr>`; }).join('')}</tbody></table></div>`;
+  }
   el.innerHTML = html;
   _rptMakeSortable('r8-body');
   _reportCSVData = csvRows; _reportCSVName = 'R8_notas_finales.csv';
@@ -16777,7 +16987,7 @@ function renderR9() {
     if (aniosConDatos.includes(null)) aniosOrdenados.push(null);
 
     // ---- Matriz de conteos: filas = Año Comienzo, columnas = Secuencia ----
-    html += `<div class="rpt-section-head"><span>${nombrePrograma}</span><span style="font-size:0.8rem;font-weight:400;color:var(--muted)">${estudiantesPrograma.length} estudiante(s)</span></div>`;
+    html += `<div class="rpt-section-head"><span>${progLink(nombrePrograma)}</span><span style="font-size:0.8rem;font-weight:400;color:var(--muted)">${estudiantesPrograma.length} estudiante(s)</span></div>`;
     html += `<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>
       <th data-sort="text">Año Comienzo</th>${R9_SECUENCIA_COLS.map(c => `<th data-sort="num">${c}</th>`).join('')}<th data-sort="num">Sin asignar</th><th data-sort="num">Total</th>
     </tr></thead><tbody>`;
@@ -16832,11 +17042,11 @@ function _dashCtx() {
   const email = (u.email || '').toLowerCase();
   const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === email);
   const progsDeDepto = id => id ? (db.programas || []).filter(p => p.departamentoId === id).map(p => p.nombre) : [];
-  const facProgs = fac?.programas ? String(fac.programas).split('|').map(p => p.trim()).filter(Boolean) : [];
+  const facProgs = _coordProgramasDe(fac);   // programas que COORDINA (no los de pertenencia)
   const rolBase = u.rolBase || fac?.rolBase || '';
   const uniq = a => [...new Set(a)];
 
-  const ctx = { schoolWide:false, isDecano:false, isDirector:false, isCoord:false, progs:[], simulado:false, nota:'' };
+  const ctx = { schoolWide:false, isDecano:false, isDirector:false, isCoord:false, progs:[], coordProgs:[], deptIds:[], simulado:false, nota:'' };
 
   if (_viewAsRole) {
     const r = _viewAsRole;
@@ -16844,6 +17054,7 @@ function _dashCtx() {
     else if (r === 'coordinator') {
       ctx.isCoord = true;
       ctx.progs = facProgs.length ? facProgs : [(db.programas || []).map(p => p.nombre).find(n => !_esProgramaCore(n)) || ''].filter(Boolean);
+      ctx.coordProgs = ctx.progs;
       if (!facProgs.length) { ctx.simulado = true; ctx.nota = 'simulando con ' + ctx.progs.join(', '); }
     } else if (r === 'director') {
       ctx.isDirector = true;
@@ -16854,18 +17065,22 @@ function _dashCtx() {
         ctx.simulado = true; ctx.nota = 'simulando con depto. ' + (d?.nombre || '—');
       }
       ctx.progs = ps;
+      const dsim = fac?.departamentoId || (db.departamentos || []).find(d => progsDeDepto(d.id).length && progsDeDepto(d.id).every(n => ps.includes(n)))?.id;
+      ctx.deptIds = dsim ? [dsim] : [];
     }
     return ctx; // profesor / viewer: sin alcance administrativo
   }
 
   ctx.isDecano = rolBase === 'decano' || u.rol === 'decano';
   ctx.schoolWide = ctx.isDecano || u.rol === 'admin';
-  ctx.isCoord = !!(fac && (fac.coordinator === true || fac.coordinator === 'true')) || rolBase === 'coordinator';
+  ctx.isCoord = facProgs.length > 0 || !!(fac && (fac.coordinator === true || fac.coordinator === 'true')) || rolBase === 'coordinator';
   ctx.isDirector = !!(fac && (fac.director === true || fac.director === 'true')) || rolBase === 'director';
   let ps = [];
   if (ctx.isCoord) ps.push(...facProgs);
   if (ctx.isDirector) ps.push(...facProgs, ...progsDeDepto(fac?.departamentoId));
   ctx.progs = uniq(ps);
+  ctx.coordProgs = ctx.isCoord ? facProgs : [];
+  ctx.deptIds = ctx.isDirector && fac?.departamentoId ? [fac.departamentoId] : [];
   return ctx;
 }
 // ¿El curso cae dentro del alcance administrativo? (cursos fusionados: basta UN programa)
@@ -19693,8 +19908,8 @@ const ROLE_ACCESS = {
   admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true, escalas:true, estudiantes:true },
   decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
   director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:false, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
   viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false, estudiantes:false },
 };
 
@@ -19836,9 +20051,15 @@ function enrichCurrentUserPermissions() {
   const fac = db.facultad.find(f => f.email?.toLowerCase() === currentUser.email?.toLowerCase()
     || f.nombre?.toLowerCase() === currentUser.nombre?.toLowerCase());
   if (fac) {
-    currentUser.efectivo.isCoordinator = fac.coordinator === true || fac.coordinator === 'true';
+    currentUser.efectivo.isCoordinator = fac.coordinator === true || fac.coordinator === 'true' || (fac.coordinaProgramaIds||[]).length > 0;
     currentUser.efectivo.isDirector    = fac.director    === true || fac.director    === 'true';
-    currentUser.efectivo.programas     = fac.programas ? fac.programas.split('|').map(p=>p.trim()) : [];
+    // Alcance administrativo = programas que COORDINA + (si dirige) los de su departamento.
+    // Los programas a los que solo pertenece (fac.programas) no dan alcance.
+    const _deptProgs = currentUser.efectivo.isDirector && fac.departamentoId
+      ? (db.programas||[]).filter(p => p.departamentoId === fac.departamentoId).map(p => p.nombre) : [];
+    const _dirSinDepto = currentUser.efectivo.isDirector && !fac.departamentoId && fac.programas
+      ? fac.programas.split('|').map(p=>p.trim()) : [];
+    currentUser.efectivo.programas = [...new Set([..._coordProgramasDe(fac), ..._deptProgs, ..._dirSinDepto])];
   }
   // Advising list
   currentUser.efectivo.advisees = db.asesorias
@@ -21148,7 +21369,7 @@ function renderFacultadList() {
           ${f.rolBase ? `<span class="badge badge-blue">${rolLabelMap[f.rolBase]||f.rolBase}</span>` : ''}
           ${!f.rolBase && !f.esAdmin ? '<span class="badge badge-gold">Sin acceso</span>' : ''}
           ${f.director==='true'||f.director===true ? '<span class="fac-tag fac-tag-dir">🏛 Director/a</span>' : ''}
-          ${f.coordinator==='true'||f.coordinator===true ? '<span class="fac-tag fac-tag-coord">📋 Coordinador/a</span>' : ''}
+          ${(f.coordinaProgramaIds||[]).length || f.coordinator==='true'||f.coordinator===true ? `<span class="fac-tag fac-tag-coord" title="${_coordProgramasDe(f).join(', ')}">📋 Coordinador/a${_coordProgramasDe(f).length ? ' · ' + _coordProgramasDe(f).join(', ') : ''}</span>` : ''}
           ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${p}</span>`).join('')}
         </div>
       </div>
@@ -21246,8 +21467,31 @@ function _ensureFacultadRolMigrado() {
       }
       changed = true;
     }
+    // Coordinación separada de la membresía: antes "coordinator" + programaIds
+    // significaba "coordina todos los programas en que está". Se conserva ese
+    // alcance al migrar, y desde ahora se edita aparte (coordinaProgramaIds).
+    if (f.coordinaProgramaIds === undefined) {
+      const eraCoord = f.coordinator === true || f.coordinator === 'true';
+      f.coordinaProgramaIds = eraCoord ? [...(f.programaIds || [])] : [];
+      changed = true;
+    }
   });
   if (changed) saveDB();
+}
+
+// Programas (nombres) que coordina un/a facultativo/a — independiente de a cuáles pertenece
+function _coordProgramasDe(f) {
+  return (f?.coordinaProgramaIds || []).map(id => db.programas.find(p => p.id === id)?.nombre).filter(Boolean);
+}
+// Fija quién coordina un programa (lista de ids de facultad); una persona puede coordinar varios
+function _setCoordinadoresPrograma(progId, facIds) {
+  const sel = new Set(facIds);
+  (db.facultad || []).forEach(f => {
+    const tiene = (f.coordinaProgramaIds || []).includes(progId);
+    if (sel.has(f.id) && !tiene) f.coordinaProgramaIds = [...(f.coordinaProgramaIds || []), progId];
+    if (!sel.has(f.id) && tiene) f.coordinaProgramaIds = f.coordinaProgramaIds.filter(x => x !== progId);
+    f.coordinator = (f.coordinaProgramaIds || []).length > 0;
+  });
 }
 
 function _populateFacultadDeptoProgSelects() {
@@ -21263,19 +21507,24 @@ function _populateFacultadDeptoProgSelects() {
   progSel.innerHTML = [...db.programas].sort((a,b) => a.nombre.localeCompare(b.nombre))
     .map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
   [...progSel.options].forEach(o => { o.selected = prevSelected.has(o.value); });
+
+  const coordSel = document.getElementById('fac-coord-prog-ids');
+  const prevCoord = new Set([...coordSel.selectedOptions].map(o => o.value));
+  coordSel.innerHTML = progSel.innerHTML;
+  [...coordSel.options].forEach(o => { o.selected = prevCoord.has(o.value); });
 }
 
 function openNuevaFacultad() {
   document.getElementById('fac-edit-id').value = '';
   document.getElementById('fac-modal-title').textContent = '👩‍🏫 Añadir Profesor/a';
   ['fac-nombre','fac-email','fac-tel'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('fac-coordinator').checked = false;
   document.getElementById('fac-director').checked = false;
   document.getElementById('fac-rol').value = '';
   document.getElementById('fac-es-admin').checked = false;
   _populateFacultadDeptoProgSelects();
   document.getElementById('fac-departamento').value = '';
   [...document.getElementById('fac-programa-ids').options].forEach(o => o.selected = false);
+  [...document.getElementById('fac-coord-prog-ids').options].forEach(o => o.selected = false);
   openModal('modal-nueva-facultad');
 }
 
@@ -21287,7 +21536,6 @@ function editarFacultad(id) {
   document.getElementById('fac-nombre').value = f.nombre||'';
   document.getElementById('fac-email').value = f.email||'';
   document.getElementById('fac-tel').value = f.telefono||'';
-  document.getElementById('fac-coordinator').checked = f.coordinator===true||f.coordinator==='true';
   document.getElementById('fac-director').checked = f.director===true||f.director==='true';
   document.getElementById('fac-rol').value = f.rolBase || '';
   document.getElementById('fac-es-admin').checked = !!f.esAdmin;
@@ -21295,6 +21543,8 @@ function editarFacultad(id) {
   document.getElementById('fac-departamento').value = f.departamentoId || '';
   const progIds = new Set(f.programaIds || []);
   [...document.getElementById('fac-programa-ids').options].forEach(o => { o.selected = progIds.has(o.value); });
+  const coordIds = new Set(f.coordinaProgramaIds || []);
+  [...document.getElementById('fac-coord-prog-ids').options].forEach(o => { o.selected = coordIds.has(o.value); });
   openModal('modal-nueva-facultad');
 }
 
@@ -21309,6 +21559,7 @@ async function guardarFacultad() {
   const departamentoObj = departamentoId ? db.departamentos.find(d => d.id === departamentoId) : null;
   const programaIds = [...document.getElementById('fac-programa-ids').selectedOptions].map(o => o.value);
   const programaNombres = programaIds.map(id => db.programas.find(p => p.id === id)?.nombre).filter(Boolean);
+  const coordinaProgramaIds = [...document.getElementById('fac-coord-prog-ids').selectedOptions].map(o => o.value);
 
   const editId = document.getElementById('fac-edit-id').value;
   const record = {
@@ -21316,7 +21567,8 @@ async function guardarFacultad() {
     departamentoId, departamento: departamentoObj ? departamentoObj.nombre : '',
     telefono: document.getElementById('fac-tel').value.trim(),
     programaIds, programas: programaNombres.join('|'),
-    coordinator: document.getElementById('fac-coordinator').checked,
+    coordinaProgramaIds,
+    coordinator: coordinaProgramaIds.length > 0,
     director:    document.getElementById('fac-director').checked,
   };
 
@@ -21470,6 +21722,11 @@ function importarFacultadCSV(input) {
         coordinator: r.coordinator==='true'||r.coordinator==='1',
         director:    r.director   ==='true'||r.director   ==='1',
       };
+      // Coordinación (modelo separado): el CSV marca coordinador + lista de programas
+      if (record.coordinator) {
+        const nombres = (r.programas||'').split('|').map(x=>x.trim().toLowerCase()).filter(Boolean);
+        record.coordinaProgramaIds = (db.programas||[]).filter(pp => nombres.includes(pp.nombre.toLowerCase())).map(pp => pp.id);
+      }
       if (idx>=0) { db.facultad[idx]={...db.facultad[idx],...record}; updated++; }
       else { db.facultad.push({id:'fac_'+Date.now()+'_'+Math.random().toString(36).slice(2),...record,fechaCreacion:new Date().toISOString()}); added++; }
     });
@@ -21957,7 +22214,56 @@ async function guardarConfigInstitucion() {
   notify('Configuración de institución guardada', '💾');
 }
 
+const _MATRIZ_ROLES = [['admin','Admin'],['decano','Decano/a'],['director','Director/a'],['coordinator','Coordinador/a'],['profesor','Profesor/a'],['viewer','Visitante']];
+function renderMatrizAccesos() {
+  const el = document.getElementById('cfg-matriz-accesos');
+  if (!el) return;
+  const th = _MATRIZ_ROLES.map(([, n]) => `<th style="text-align:center">${n}</th>`).join('');
+  const tabla = (titulo, filas, nota) => `<div class="rpt-section-head" style="margin-top:14px">${titulo}</div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.76rem"><thead><tr><th style="min-width:150px">&nbsp;</th>${th}</tr></thead><tbody>${filas}</tbody></table></div>
+    ${nota ? `<div style="font-size:0.72rem;color:var(--muted);margin-top:4px">${nota}</div>` : ''}`;
+  const celda = v => v === true ? '<span style="color:#10b981;font-weight:800">✔ Completo</span>' : v === 'readonly' ? '<span style="color:#3b82f6;font-weight:700">👁 Lectura</span>' : '<span style="color:#d1d5db">—</span>';
+
+  // 1) Menú: generado de ROLE_ACCESS
+  const AREAS = [['dashboard','Panel'],['dashboard2','Analytics'],['departamentos','Departamentos y Programas'],['estudiantes','Estudiantes'],['escalas','Escalas de Niveles'],['cursos','Cursos'],['secciones','Secciones'],['laos','LAOs'],['competencias','Competencias'],['avaluo','Avalúo'],['base-datos','Base de Datos'],['reportes','Reportes'],['matriz','Matriz'],['alineacion','Alineación'],['facultad','Facultad'],['adiestramientos','Adiestramientos'],['solicitudes','Solicitudes'],['configuracion','Configuración']];
+  const menu = AREAS.map(([k, n]) => `<tr><td><strong>${n}</strong></td>${_MATRIZ_ROLES.map(([r]) => `<td style="text-align:center">${celda(ROLE_ACCESS[r]?.[k])}</td>`).join('')}</tr>`).join('');
+
+  // 2) Fichas
+  const t = x => `<td style="font-size:0.72rem">${x}</td>`;
+  const todos = 'Ver';
+  const fila = (n, ...c) => `<tr><td><strong>${n}</strong></td>${c.map(t).join('')}</tr>`;
+  const fichas =
+    fila('Curso', 'Ver y editar', todos, todos, todos, todos, todos) +
+    fila('Programa', 'Ver y editar', todos, todos, todos, todos, todos) +
+    fila('Departamento', 'Ver y editar', todos, todos, todos, todos, todos) +
+    fila('Competencia', 'Ver y editar', todos + ' (solicita edición)', todos + ' (solicita edición)', todos + ' (solicita edición)', todos + ' (solicita edición)', todos) +
+    fila('Profesor/a', 'Ver y editar', 'Ver; secciones: todas', 'Ver; secciones: las de su alcance y las de facultativos de su departamento', 'Ver; secciones: las de su alcance y las de facultativos de sus programas', 'Ver; secciones: solo las suyas', 'Ver; sin secciones') +
+    fila('Sección', 'Todas', 'Todas', 'Programas que dirige y secciones de facultativos de su departamento', 'Programas que coordina y secciones de facultativos de su programa', 'Solo las suyas', '—') +
+    fila('LAO', 'Todos', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios') +
+    fila('Estudiante', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Los de sus secciones y sus asesorados', '—');
+
+  // 3) Reportes
+  const alc = 'Datos de su alcance';
+  const rep = (n, ...c) => fila(n, ...c);
+  const reportes =
+    rep('R1 · Competencias', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
+    rep('R2 · Por Curso', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
+    rep('R3 · Estudiante', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus estudiantes y asesorados', '—') +
+    rep('R4 · Dashboard', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
+    rep('R5 · LAOs', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
+    rep('R6 · En Riesgo', 'Toda la Escuela', 'Toda la Escuela', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus asesorados y estudiantes', '—') +
+    rep('R7 · Facultad', 'Todos los facultativos', 'Todos los facultativos', 'Facultativos de su departamento', 'Facultativos de sus programas', 'Solo el suyo', '—') +
+    rep('R8 · Notas', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance (programas)', '—', '—', '—') +
+    rep('R9 · Matrícula', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus asesorados', '—');
+
+  el.innerHTML =
+    tabla('1 · Áreas del menú', menu, 'Lectura = puede ver pero no editar. Si el/la facultativo/a es coordinador/a o director/a, se le suman los permisos de ese rol al de profesor/a.') +
+    tabla('2 · Fichas (enlaces dentro del sistema)', fichas, 'Editar una ficha o ejecutar sus acciones de administración solo es posible para el administrador; los demás roles pueden solicitar la edición cuando aplica.') +
+    tabla('3 · Reportes (R1–R9)', reportes, 'El administrador puede bloquear cualquier informe R1–R9 desde la pestaña Reportes; mientras esté bloqueado, los demás usuarios no lo ven. Los alcances de coordinación se fijan por programa (pueden ser varios por persona).');
+}
+
 async function renderConfiguracion() {
+  renderMatrizAccesos();
   const cfg = await loadConfiguracion();
   const svcEl = document.getElementById('cfg-emailjs-service');
   if (svcEl && !svcEl.dataset.loaded) {
@@ -22156,7 +22462,9 @@ function _fichaPuedeVerSeccion(sec) {
     if (role === 'director' || role === 'coordinator') return true;
     return _usuarioEsProfesorDeSeccion(sec);
   }
-  return canSeeSeccion(sec);
+  // Además del acceso por sección, quien puede ver el informe R7 de ese/a profesor/a ve sus secciones
+  const _f = _facultadDeSeccion(sec);
+  return canSeeSeccion(sec) || (!!_f && _facultadVisibleEnR7(_f));
 }
 
 // Secciones del año académico más reciente en que el curso tiene secciones
@@ -22380,7 +22688,7 @@ function _liderazgoDePrograma(prog) {
   const si = v => v === true || v === 'true';
   const fac = db.facultad || [];
   return {
-    coordinadores: fac.filter(f => si(f.coordinator) && esDe(f)),
+    coordinadores: fac.filter(f => (f.coordinaProgramaIds || []).includes(prog.id)),
     directores: fac.filter(f => si(f.director) && esDe(f)),
   };
 }
@@ -24961,11 +25269,12 @@ function dummyShowStatus(msg, type) {
       <select id="fac-programa-ids" multiple size="4"></select>
       <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Ctrl/Cmd + clic para seleccionar más de uno.</div>
     </div>
+    <div class="form-group">
+      <label>Coordina el/los programa(s)</label>
+      <select id="fac-coord-prog-ids" multiple size="4"></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Independiente de "Programa(s)" arriba: puede pertenecer a unos programas y coordinar otros. Puede coordinar más de uno.</div>
+    </div>
     <div class="form-row">
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
-        <input type="checkbox" id="fac-coordinator" style="width:auto">
-        <label style="margin:0">Coordinador/a de Programa</label>
-      </div>
       <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
         <input type="checkbox" id="fac-director" style="width:auto">
         <label style="margin:0">Director/a de Departamento</label>
