@@ -1457,6 +1457,11 @@
     .ficha-kv { grid-template-columns: 1fr; }
     .ficha-kv > div:nth-child(odd) { padding-top: 6px; }
   }
+  /* Avalúo en solo lectura (sección que no es del usuario) */
+  #av-grid-container.av-ro input, #av-grid-container.av-ro select, #av-grid-container.av-ro textarea,
+  #av-grid-container.av-ro button { pointer-events: none; opacity: .65; }
+  #av-grid-container.av-ro #av-save-all-btn { display: none; }
+  .av-ro-banner { background:#fef3c7; border:1px solid #fcd34d; color:#92400e; border-radius:8px; padding:8px 12px; font-size:0.82rem; margin-bottom:10px; }
 </style>
 </head>
 <body>
@@ -2594,6 +2599,17 @@
       <input type="file" id="dist-file-input" accept=".xlsx" style="display:none" onchange="handleDistFileInput(this)">
     </div>
 
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="fac-q" placeholder="🔍 Buscar por nombre o correo…" oninput="renderFacultadList()" style="flex:1;min-width:200px">
+      <select id="fac-f-dept" onchange="renderFacultadList()"><option value="">Todos los departamentos</option></select>
+      <select id="fac-f-estado" onchange="renderFacultadList()">
+        <option value="">Activos e inactivos</option><option value="activo">Solo activos</option><option value="inactivo">Solo inactivos</option>
+      </select>
+      <select id="fac-orden" onchange="renderFacultadList()">
+        <option value="az">A → Z</option><option value="za">Z → A</option>
+      </select>
+      <span id="fac-contador" style="font-size:0.78rem;color:var(--muted)"></span>
+    </div>
     <div id="facultad-list"></div>
   </div>
 
@@ -2734,6 +2750,11 @@
     <div class="form-group">
       <label>Nombre *</label>
       <input type="text" id="depto-nombre" placeholder="ej. Administración de Servicios de Salud">
+    </div>
+    <div class="form-group">
+      <label>🏛 Director/a del departamento</label>
+      <select id="depto-directores" multiple size="5"></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Ctrl/Cmd + clic para más de uno. También se puede fijar desde Facultad.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-departamento')">Cancelar</button>
@@ -3020,6 +3041,8 @@
       <div class="form-group">
         <label>Profesor(a)</label>
         <input type="text" id="sec-profesor" placeholder="ej. Dra. María Torres">
+        <div style="margin-top:6px"><label style="font-size:0.75rem;color:var(--muted)">Segundo profesor(a) <span>(opcional)</span></label>
+        <select id="sec-profesor2"><option value="">— Ninguno —</option></select></div>
       </div>
       <div class="form-group">
         <label>Semestre / Período</label>
@@ -3468,8 +3491,16 @@ function showTab(tabId, btn) {
   if (tabId === 'estudiantes') renderEstudiantesTab();
 }
 
+function _poblarProfesor2(selId, actualEmail) {
+  const sel = document.getElementById(selId); if (!sel) return;
+  sel.innerHTML = '<option value="">— Ninguno —</option>' + [...(db.facultad || [])].filter(f => f.activo !== false)
+    .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'))
+    .map(f => `<option value="${_alEsc(f.email || '')}">${_alEsc(f.nombre || f.email)}</option>`).join('');
+  sel.value = actualEmail || '';
+}
 function openModal(id) {
   populateCursoSelects();
+  if (id === 'modal-seccion') _poblarProfesor2('sec-profesor2', '');
   if (id === 'modal-curso') { _populateCursoProgramaSelect(); _actualizarVisibilidadDirectaCurso(); }
   // Para profesores (no-admin), auto-completa y bloquea el campo "Profesor" con
   // su propio nombre de cuenta, para que la sección quede correctamente
@@ -5261,7 +5292,7 @@ async function confirmarImportarProfesores() {
     // esta importación también le da acceso de login como profesor.
     if (!fac.rolBase && !fac.esAdmin) {
       const tempPwd = 'EGSP' + Math.floor(1000 + Math.random() * 9000);
-      fac.rolBase = 'profesor';
+      fac.rolBase = 'profesor'; fac.esProfesor = true; fac.activo = true;
       fac.esAdmin = false;
       fac.pwdHash = await sha256(tempPwd);
       fac.mustChangePwd = true;
@@ -9432,6 +9463,7 @@ function abrirNuevoDepartamento() {
   document.getElementById('depto-modal-title').textContent = '🏛️ Nuevo Departamento';
   document.getElementById('depto-edit-id').value = '';
   document.getElementById('depto-nombre').value = '';
+  _populateDirectoresSelect(null);
   openModal('modal-departamento');
 }
 function abrirEditarDepartamento(id) {
@@ -9440,22 +9472,28 @@ function abrirEditarDepartamento(id) {
   document.getElementById('depto-modal-title').textContent = '🏛️ Editar Departamento';
   document.getElementById('depto-edit-id').value = id;
   document.getElementById('depto-nombre').value = d.nombre;
+  _populateDirectoresSelect(id);
   openModal('modal-departamento');
 }
 function guardarDepartamento() {
   const nombre = document.getElementById('depto-nombre').value.trim();
   if (!nombre) { notify('El nombre es requerido', '⚠️'); return; }
   const editId = document.getElementById('depto-edit-id').value;
+  const dirIds = [...document.getElementById('depto-directores').selectedOptions].map(o => o.value);
   if (editId) {
     const d = db.departamentos.find(x => x.id === editId);
     if (d) d.nombre = nombre;
+    _setDirectoresDepto(editId, dirIds);
   } else {
     if (db.departamentos.some(d => d.nombre.toLowerCase() === nombre.toLowerCase())) {
       notify('Ya existe un departamento con ese nombre', '⚠️'); return;
     }
-    db.departamentos.push({ id: 'depto_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nombre });
+    const nuevoId = 'depto_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    db.departamentos.push({ id: nuevoId, nombre });
+    _setDirectoresDepto(nuevoId, dirIds);
   }
   saveDB();
+  enrichCurrentUserPermissions();
   closeModal('modal-departamento');
   renderDepartamentosProgramas();
   notify('Departamento guardado ✓');
@@ -9465,6 +9503,7 @@ function eliminarDepartamento(id) {
   if (enUso > 0 && !confirm(`${enUso} programa(s) están asignados a este departamento y quedarán "sin asignar". ¿Continuar?`)) return;
   db.departamentos = db.departamentos.filter(d => d.id !== id);
   db.programas.forEach(p => { if (p.departamentoId === id) p.departamentoId = null; });
+  (db.facultad || []).forEach(f => { if ((f.dirigeDepartamentoIds || []).includes(id)) { f.dirigeDepartamentoIds = f.dirigeDepartamentoIds.filter(x => x !== id); _sincronizarRolBase(f); } });
   if (_progTreeSelected?.id === id) _progTreeSelected = null;
   saveDB();
   renderDepartamentosProgramas();
@@ -9549,6 +9588,12 @@ function _populateCoordinadoresSelect(progId) {
   if (!sel) return;
   sel.innerHTML = [...(db.facultad || [])].sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''))
     .map(f => `<option value="${f.id}"${progId && (f.coordinaProgramaIds||[]).includes(progId) ? ' selected' : ''}>${f.nombre}${f.email ? ' — ' + f.email : ''}</option>`).join('');
+}
+function _populateDirectoresSelect(deptId) {
+  const sel = document.getElementById('depto-directores');
+  if (!sel) return;
+  sel.innerHTML = [...(db.facultad || [])].sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''))
+    .map(f => `<option value="${f.id}"${deptId && (f.dirigeDepartamentoIds||[]).includes(deptId) ? ' selected' : ''}>${f.nombre}${f.email ? ' — ' + f.email : ''}</option>`).join('');
 }
 function _populateDeptoSelect() {
   const sel = document.getElementById('prog-cat-departamento');
@@ -9672,6 +9717,12 @@ function removeEstudiantePreview(i) {
   renderEstudiantesPreview();
 }
 
+// Lee el segundo profesor (select por correo) → {profesor2, profesorEmail2}
+function _leerProfesor2(selId) {
+  const em = document.getElementById(selId)?.value || '';
+  const f = em ? (db.facultad || []).find(x => (x.email || '').toLowerCase() === em.toLowerCase()) : null;
+  return f ? { profesor2: f.nombre, profesorEmail2: f.email } : { profesor2: '', profesorEmail2: '' };
+}
 function guardarSeccion() {
   const cursoId = document.getElementById('sec-curso').value;
   const numero = document.getElementById('sec-numero').value.trim();
@@ -9688,6 +9739,7 @@ function guardarSeccion() {
   const seccion = {
     id: `sec_${cursoId}_${numero}_${Date.now()}`,
     cursoId, numero, profesor,
+    ..._leerProfesor2('sec-profesor2'),
     semestre,
     estudiantes: estudiantesPreview.map((e, i) => ({ id: e.id || `E${i+1}`, nombre: e.nombre })),
     fechaCreacion: new Date().toISOString()
@@ -9769,7 +9821,7 @@ function renderSecciones() {
           <span class="badge badge-blue">${sec.estudiantes?.length || 0} estudiantes</span>
           ${sec.semestre ? `<span class="badge badge-gold">${sec.semestre}</span>` : ''}
           ${sec.origenRoster ? `<span class="badge badge-green">📂 Roster RCM</span>` : ''}
-          ${sec.profesor ? `<span style="font-size:0.8rem;color:var(--muted)">👤 ${_fichaLinkProfesorSec(sec)}</span>` : ''}
+          ${sec.profesor ? `<span style="font-size:0.8rem;color:var(--muted)">👤 ${_fichaLinkProfesorSec(sec)}${sec.profesor2 ? ' · ' + _fichaLinkProfesor2Sec(sec) : ''}</span>` : ''}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${currentUser?.rol==='admin' ? `<button class="btn btn-outline btn-sm" onclick="abrirEditarSeccion('${sec.id}')">✏️ Editar</button>` : ''}
@@ -9830,6 +9882,7 @@ function abrirEditarSeccion(secId) {
   document.getElementById('es-numero').value = sec.numero || '';
   document.getElementById('es-semestre').value = sec.semestre || '';
   document.getElementById('es-profesor').value = sec.profesor || '';
+  _poblarProfesor2('es-profesor2', sec.profesorEmail2 || '');
   openModal('modal-editar-seccion');
 }
 
@@ -9840,6 +9893,7 @@ function guardarEdicionSeccion() {
   sec.numero   = document.getElementById('es-numero').value.trim() || sec.numero;
   sec.semestre = document.getElementById('es-semestre').value.trim();
   sec.profesor = document.getElementById('es-profesor').value.trim();
+  Object.assign(sec, _leerProfesor2('es-profesor2'));
   saveDB();
   closeModal('modal-editar-seccion');
   renderSecciones();
@@ -9902,6 +9956,14 @@ function eliminarSeccion(id) {
 
 // ======================== AVALÚO (CLASS GRID) ========================
 let avSeccionActual = null;
+let avSoloLectura = false;   // coordinador/director viendo una sección que no es suya: pueden ver, no evaluar
+// Solo el administrador o el profesor de la sección (1.º o 2.º) pueden evaluarla
+function _puedeEvaluarSeccion(sec) {
+  if (!currentUser || !sec) return false;
+  if (currentUser.rol === 'admin') return true;
+  if (currentUser.rol === 'decano' || currentUser.rol === 'viewer') return false;
+  return _usuarioEsProfesorDeSeccion(sec);
+}
 let avClaseData = {};      // estId -> { porLao: { laoId -> {_criterios|_nivelesDirectos/_notaLao} }, _finalGrade, _comentario }
 let avEstudiantesActuales = []; // students in selected section
 let avGuardados = new Set(); // estIds already saved this session
@@ -10010,10 +10072,13 @@ function _opcionesModalidadHtml(seleccionado, opts = {}) {
 // Clave del profesor de una sección (correo si existe, si no el nombre) —
 // mismo criterio que canSeeSeccion() para reconocer al profesor.
 function _claveProfesorSeccion(sec) {
+  if (sec?.profesorEmail2 && currentUser?.email && sec.profesorEmail2.toLowerCase() === currentUser.email.toLowerCase()
+      && !(sec.profesorEmail && sec.profesorEmail.toLowerCase() === currentUser.email.toLowerCase())) return sec.profesorEmail2.trim().toLowerCase();
   return String(sec?.profesorEmail || sec?.profesor || '').trim().toLowerCase();
 }
 function _usuarioEsProfesorDeSeccion(sec) {
   if (!currentUser || !sec) return false;
+  if (sec.profesorEmail2 && currentUser.email && sec.profesorEmail2.toLowerCase() === currentUser.email.toLowerCase()) return true;
   if (sec.profesorEmail && currentUser.email) return sec.profesorEmail.toLowerCase() === currentUser.email.toLowerCase();
   if (sec.profesor && currentUser.nombre) return sec.profesor.toLowerCase() === currentUser.nombre.toLowerCase();
   return false;
@@ -10374,6 +10439,7 @@ function onSeccionChange() {
 
   avSeccionActual = (db.secciones || []).find(s => s.id === secId);
   if (!avSeccionActual) return;
+  avSoloLectura = !_puedeEvaluarSeccion(avSeccionActual);
 
   const curso = (db.cursos || []).find(c => c.id === cursoId);
   avAlcanceActual = resolverAlcanceCompetenciasAvaluo(cursoId, avSeccionActual);
@@ -10584,7 +10650,14 @@ function buildGridCombinado(cursoId) {
   // así que no hace falta un segundo paso para restaurarlo después.
   renderGridCombinado();
 
-  document.getElementById('av-grid-container').style.display = '';
+  const _gc = document.getElementById('av-grid-container');
+  _gc.style.display = '';
+  _gc.classList.toggle('av-ro', !!avSoloLectura);
+  let _bn = document.getElementById('av-ro-banner');
+  if (avSoloLectura) {
+    if (!_bn) { _bn = document.createElement('div'); _bn.id = 'av-ro-banner'; _bn.className = 'av-ro-banner'; _gc.insertBefore(_bn, _gc.firstChild); }
+    _bn.textContent = '👁 Solo lectura: esta sección no es tuya. Puedes ver las evaluaciones, pero no registrarlas.';
+  } else if (_bn) _bn.remove();
   updateGridProgress();
 }
 
@@ -11082,6 +11155,7 @@ function updateGridProgress() {
 // registro de LAO, para no romper los reportes existentes que ya leen esos
 // campos por avalúo individual.
 function guardarTodaLaClase() {
+  if (avSeccionActual && !_puedeEvaluarSeccion(avSeccionActual)) { notify('Esta sección no es tuya: solo puedes verla, no evaluarla', '🔒'); return; }
   const cursoId = document.getElementById('av-curso').value;
   if (!cursoId || !avSeccionActual || (!avLaosGrid.length && !avDirectaCursoEntry)) { notify('Selecciona curso y sección', '⚠️'); return; }
 
@@ -12700,30 +12774,37 @@ function _allEvals(avaluos) {
   return out;
 }
 
-function _filterAvaluosByRole(avaluos) {
-  const effRole = getEffectiveRole();
-  const e = currentUser?.efectivo;
+// Alcance de datos por rol y, opcionalmente, por informe (rpt = 'r1'…'r6'):
+//   R1  toda la Escuela (competencias de todos los programas) para cualquier rol con acceso.
+//   R2  profesor: solo sus secciones · R3/R6 profesor: solo sus asesorados
+//   R4  profesor: los programas a los que pertenece · R5 profesor: los LAOs de sus secciones
+//   coordinador/director: su alcance (programas que coordina / de los departamentos que dirige)
+//   más lo propio (sus secciones y asesorados). Decano y admin ven todo.
+function _filterAvaluosByRole(avaluos, rpt) {
   if (!currentUser || currentUser.rol === 'admin' || currentUser.rol === 'decano') return avaluos;
-  if (e?.isDirector || e?.isCoordinator) {
-    // Director sin programas asignados = supervisa todo su departamento (ve todo).
-    // Coordinador sin programas asignados = no tiene programa a cargo todavía,
-    // así que NO ve datos de estudiantes hasta que se le asigne uno (Fase 5:
-    // el acceso a información específica de estudiantes queda limitado a su
-    // propio programa, a diferencia del Panel/Dashboard que sí es general).
-    if (!e.programas?.length) return e.isDirector ? avaluos : [];
-    return avaluos.filter(av => {
-      const curso = db.cursos.find(c=>c.id===av.cursoId);
-      return e.programas.includes(curso?.programa);
-    });
+  if (rpt === 'r1') return avaluos;
+  const e = currentUser.efectivo || {};
+  const secIdsPropias = new Set((db.secciones || []).filter(_usuarioEsProfesorDeSeccion).map(s => s.id));
+  const advisees = new Set(e.advisees || []);
+  const esPropio = av => secIdsPropias.has(av.seccionId);
+  const esAsesorado = av => advisees.has(av.estudianteId) || advisees.has(av.estudiante);
+  const enProgramas = (av, progs) => { const c = db.cursos.find(x => x.id === av.cursoId); return !!c && _programasDeCurso(c).some(n => progs.includes(n)); };
+  const alcance = av => (e.programas || []).length > 0 && enProgramas(av, e.programas);
+  if (e.isDirector || e.isCoordinator) {
+    return avaluos.filter(av => alcance(av) || esPropio(av) || esAsesorado(av));
   }
-  // profesor: own sections + advisees
-  const mySecIds = (db.secciones||[]).filter(s=>canSeeSeccion(s)).map(s=>s.id);
-  const myAdvisees = new Set(e?.advisees||[]);
-  return avaluos.filter(av =>
-    mySecIds.includes(av.seccionId) ||
-    myAdvisees.has(av.estudianteId) ||
-    myAdvisees.has(av.estudiante)
-  );
+  // profesor
+  if (rpt === 'r2' || rpt === 'r5') return avaluos.filter(esPropio);
+  if (rpt === 'r3' || rpt === 'r6') return avaluos.filter(esAsesorado);
+  if (rpt === 'r4') { const mp = _dashMisProgramas(); return avaluos.filter(av => enProgramas(av, mp)); }
+  return avaluos.filter(av => esPropio(av) || esAsesorado(av));
+}
+// ¿Puede el usuario abrir este informe? (R9: el profesor no necesita acceso)
+function _puedeVerInforme(id) {
+  if (!currentUser) return false;
+  if (id === 'r9' && currentUser.rol === 'profesor') return false;
+  if (id === 'r8') return _puedeVerR8();
+  return true;
 }
 
 function _getSemestre(av) {
@@ -13065,6 +13146,7 @@ let _reportCSVName = 'reporte.csv';
 
 // ── Tab navigation ─────────────────────────────────────────────
 function showReport(id) {
+  if (!_puedeVerInforme(id)) id = 'r1';
   _activeReport = id;
   document.querySelectorAll('.rpt-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.rpt-pane').forEach(p => p.style.display='none');
@@ -13112,7 +13194,7 @@ function _pintarBloqueosInformes() {
   });
   const box = document.getElementById('rpt-lock-admin');
   if (!box) return;
-  const esAdmin = currentUser?.rol === 'admin' && !_viewAsRole;
+  const esAdmin = (_realUser || currentUser)?.rol === 'admin' && !_realUser;
   box.style.display = esAdmin ? 'flex' : 'none';
   if (esAdmin) box.innerHTML = '<span style="font-weight:700;color:var(--muted)">🔒 Bloquear informes para los demás usuarios:</span>' +
     _RPT_IDS.map(id => `<button class="btn btn-sm ${bloqueados.includes(id) ? '' : 'btn-outline'}" style="padding:2px 10px;font-size:0.72rem;${bloqueados.includes(id) ? 'background:#c0392b;color:#fff;border-color:#c0392b' : ''}" onclick="toggleBloqueoInforme('${id}')" title="${bloqueados.includes(id) ? 'Bloqueado — pulsa para desbloquear' : 'Disponible — pulsa para bloquear'}">${id.toUpperCase()}</button>`).join('');
@@ -13127,9 +13209,11 @@ function renderReportes() {
   multiSelectBuild('r2-ay', _ayOptions().map(v => ({ value: v, label: 'AY' + v })), {
     allLabel: 'Todos los años', defaultAll: true, onChange: () => renderR2(),
   });
-  const scoped = _filterAvaluosByRole(db.avaluos||[]);
+  const scoped = _filterAvaluosByRole(db.avaluos||[], 'r1');           // R1: toda la Escuela
   const progs  = _progOptions(scoped);
   const cursos = db.cursos.filter(c=>scoped.some(a=>a.cursoId===c.id));
+  const _sc = r => _filterAvaluosByRole(db.avaluos||[], r);
+  const cursosDe = r => db.cursos.filter(c => _sc(r).some(a => a.cursoId === c.id));
   // R1 — Programa es un autocompletar (no un <select>): nada se muestra
   // hasta que el usuario elija una opción de la lista, "Todos los
   // programas" incluida como una opción más a escoger.
@@ -13142,7 +13226,7 @@ function renderReportes() {
   // R2 — Curso: mismo patrón de autocompletar que R1-Programa (pedido
   // explícito de Edgardo, 2026-10-26: aplicar las correcciones de estilo
   // de R1 a R2 donde apliquen).
-  autocompleteBuild('r2-curso', cursos.map(c => ({ value: c.id, label: c.codigo + (c.nombre ? ' — ' + c.nombre : '') })), {
+  autocompleteBuild('r2-curso', cursosDe('r2').map(c => ({ value: c.id, label: c.codigo + (c.nombre ? ' — ' + c.nombre : '') })), {
     allowAll: true, allLabel: 'Todos los cursos',
     placeholder: 'Escribe para buscar un curso…',
     initialValue: autocompleteValue('r2-curso'),
@@ -13157,7 +13241,7 @@ function renderReportes() {
   // distinguirlos (también pedido explícitamente).
   {
     const porEst = {}; // estudianteId -> nombre (primera vez que aparece)
-    scoped.forEach(av => {
+    _sc('r3').forEach(av => {
       const estId = av.estudianteId || av.estudiante;
       if (!estId || porEst[estId]) return;
       porEst[estId] = av.estudiante || estId;
@@ -13174,8 +13258,12 @@ function renderReportes() {
       onSelect: () => renderR3(),
     });
   }
-  ['r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id=>_populateSelect(id,progs));
-  ['r5-curso','r8-curso'].forEach(id=>_populateSelect(id,cursos.map(c=>c.id),id=>db.cursos.find(c=>c.id===id)?.codigo||id));
+  ['r4-prog','r5-prog','r6-prog','r8-prog'].forEach(id => {
+    const r = id.slice(0, 2);
+    _populateSelect(id, ['r4','r5','r6'].includes(r) ? _progOptions(_sc(r)) : progs);
+  });
+  _populateSelect('r5-curso', cursosDe('r5').map(c=>c.id), id=>db.cursos.find(c=>c.id===id)?.codigo||id);
+  _populateSelect('r8-curso', cursos.map(c=>c.id), id=>db.cursos.find(c=>c.id===id)?.codigo||id);
   // R6 threshold global default
   const saved = localStorage.getItem('r6_threshold_global');
   if (saved) { const el=document.getElementById('r6-threshold-global'); if(el) el.value=saved; }
@@ -13191,6 +13279,9 @@ function renderReportes() {
   const r8tab = document.getElementById('rtab-r8');
   if (r8tab) r8tab.classList.toggle('hidden', !_puedeVerR8());
   if (_activeReport === 'r8' && !_puedeVerR8()) _activeReport = 'r1';
+  const r9tab = document.getElementById('rtab-r9');
+  if (r9tab) r9tab.classList.toggle('hidden', !_puedeVerInforme('r9'));
+  if (_activeReport === 'r9' && !_puedeVerInforme('r9')) _activeReport = 'r1';
   // R9 — Programa/Año Comienzo, derivados de db.estudiantes visibles para
   // este usuario (no de avaluos/cursos, que es un universo distinto).
   const estVisibles = (db.estudiantes||[]).filter(canSeeEstudiante);
@@ -13673,7 +13764,7 @@ function renderR1General() {
   }
   const filterProg = progVal;
 
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r1');
   if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
@@ -14000,7 +14091,7 @@ function renderR1Focal() {
 
   const aniosSel   = multiSelectValues('r1-ay');
   const filterTerm = document.getElementById('r1-term')?.value||'';
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===progVal);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r1').filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===progVal);
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
     if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
@@ -14244,7 +14335,7 @@ function renderR2General() {
     return;
   }
 
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r2');
   if (cursoVal) avaluos = avaluos.filter(av=>av.cursoId===cursoVal);
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
@@ -14443,7 +14534,7 @@ function renderR2Focal() {
 
   const aniosSel   = multiSelectValues('r2-ay');
   const filterTerm = document.getElementById('r2-term')?.value||'';
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>av.cursoId===cursoVal);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r2').filter(av=>av.cursoId===cursoVal);
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
     if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
@@ -14633,7 +14724,7 @@ function renderR2Secciones() {
 
   const aniosSel   = multiSelectValues('r2-ay');
   const filterTerm = document.getElementById('r2-term')?.value||'';
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]).filter(av=>av.cursoId===cursoVal);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r2').filter(av=>av.cursoId===cursoVal);
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
     if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
@@ -14947,7 +15038,7 @@ function renderR3() {
     _reportCSVData=[]; return;
   }
 
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r3');
   const myAdvisees = new Set(currentUser?.efectivo?.advisees||[]);
 
   let estAvaluos = avaluos.filter(a=>(a.estudianteId||a.estudiante)===estId);
@@ -15050,7 +15141,7 @@ function renderR4() {
   }
 
   // Filter avalúos by program
-  let avaluos = _filterAvaluosByRole(db.avaluos || []);
+  let avaluos = _filterAvaluosByRole(db.avaluos || [], 'r4');
   if (filterProg) avaluos = avaluos.filter(av => {
     const curso = db.cursos.find(c => c.id === av.cursoId);
     return curso?.programa === filterProg;
@@ -15696,7 +15787,7 @@ function _r4RenderV4(avaluos, filterProg) {
   const maxNivel = Math.max(...escalaGlobal.niveles.map(n => n.valor), 1);
 
   // Use ALL avalúos (unfiltered by program) for cross-program comparison
-  const allAvaluos = _filterAvaluosByRole(db.avaluos || []);
+  const allAvaluos = _filterAvaluosByRole(db.avaluos || [], 'r4');
   if (!allAvaluos.length) {
     el.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos de avalúo disponibles</p></div>';
     _reportCSVData = []; _reportCSVName = 'R4_por_programa.csv'; return;
@@ -16433,7 +16524,7 @@ function renderR5() {
   const filterProg  = document.getElementById('r5-prog')?.value||'';
   document.getElementById('rpt-export-title').textContent = 'R5 · Efectividad de LAOs';
 
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r5');
   if (filterCurso) avaluos = avaluos.filter(av=>av.cursoId===filterCurso);
   if (filterProg)  avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
 
@@ -16519,7 +16610,7 @@ function renderR6() {
   const criterioLabel = criterio==='comp' ? 'puntaje de competencias' : criterio==='nota' ? 'nota del curso' : 'competencias o nota del curso';
   document.getElementById('rpt-export-title').textContent = `R6 · Estudiantes en Riesgo (por ${criterioLabel})`;
 
-  let avaluos = _filterAvaluosByRole(db.avaluos||[]);
+  let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r6');
   if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
   if (filterTerm) avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); return t?.term===filterTerm;
@@ -16613,15 +16704,14 @@ let _r7Sel = null;
 function _programasDeFacultad(f) {
   const s = new Set((f.programaIds || []).map(id => (db.programas || []).find(p => p.id === id)?.nombre).filter(Boolean));
   String(f.programas || '').split('|').map(x => x.trim()).filter(Boolean).forEach(n => s.add(n));
-  (db.secciones || []).filter(sec => _facultadDeSeccion(sec)?.id === f.id).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(p => s.add(p)));
+  (db.secciones || []).filter(sec => _facultadesDeSeccion(sec).some(x => x.id === f.id)).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(p => s.add(p)));
   return [...s];
 }
 function _facultadVisibleEnR7(f) {
   if (!f || !currentUser) return false;
   const ctx = _dashCtx();
   if (ctx.schoolWide) return true;
-  if (!_viewAsRole && (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase()) return true;
-  if (_viewAsRole === 'profesor') return (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase();
+  if (f.id === currentUser.perfil?.facId || (f.email || '').toLowerCase() === (currentUser.email || '').toLowerCase()) return true;
   if (ctx.isDirector) {
     if (ctx.deptIds.length) { if (f.departamentoId && ctx.deptIds.includes(f.departamentoId)) return true; }
     else if (_programasDeFacultad(f).some(p => ctx.progs.includes(p))) return true;
@@ -16671,7 +16761,7 @@ function renderR7() {
   profEl.value = _r7Sel || '';
 
   const fAy = ayEl.value, fTerm = termEl.value;
-  const secsDe = f => (db.secciones || []).filter(s => _facultadDeSeccion(s)?.id === f.id).filter(s => {
+  const secsDe = f => (db.secciones || []).filter(s => _facultadesDeSeccion(s).some(x => x.id === f.id)).filter(s => {
     if (fAy && String(getAcademicYear(s.semestre)) !== fAy) return false;
     if (fTerm && parseTermString(s.semestre)?.term !== fTerm) return false;
     return true;
@@ -16815,7 +16905,6 @@ function laoLink(nombre, cursoIds) {
 
 // ── R8 — Notas Finales (solo directores, decanos y admin) ─────
 function _puedeVerR8() {
-  if (_viewAsRole) return _viewAsRole === 'decano' || _viewAsRole === 'director';
   const ctx = _dashCtx();
   return ctx.schoolWide || ctx.isDirector;
 }
@@ -17039,48 +17128,15 @@ let _dashCoreSel = null;   // 'MPH Core' | 'DrPH Core' cuando se pulsa una visua
 // ese rol, se simula con el primero disponible y se avisa (simulado:true).
 function _dashCtx() {
   const u = currentUser || {};
-  const email = (u.email || '').toLowerCase();
-  const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === email);
-  const progsDeDepto = id => id ? (db.programas || []).filter(p => p.departamentoId === id).map(p => p.nombre) : [];
-  const facProgs = _coordProgramasDe(fac);   // programas que COORDINA (no los de pertenencia)
-  const rolBase = u.rolBase || fac?.rolBase || '';
-  const uniq = a => [...new Set(a)];
-
-  const ctx = { schoolWide:false, isDecano:false, isDirector:false, isCoord:false, progs:[], coordProgs:[], deptIds:[], simulado:false, nota:'' };
-
-  if (_viewAsRole) {
-    const r = _viewAsRole;
-    if (r === 'decano') { ctx.isDecano = true; ctx.schoolWide = true; }
-    else if (r === 'coordinator') {
-      ctx.isCoord = true;
-      ctx.progs = facProgs.length ? facProgs : [(db.programas || []).map(p => p.nombre).find(n => !_esProgramaCore(n)) || ''].filter(Boolean);
-      ctx.coordProgs = ctx.progs;
-      if (!facProgs.length) { ctx.simulado = true; ctx.nota = 'simulando con ' + ctx.progs.join(', '); }
-    } else if (r === 'director') {
-      ctx.isDirector = true;
-      let ps = uniq([...facProgs, ...progsDeDepto(fac?.departamentoId)]);
-      if (!ps.length) {
-        const d = (db.departamentos || []).find(d => progsDeDepto(d.id).length);
-        ps = d ? progsDeDepto(d.id) : [];
-        ctx.simulado = true; ctx.nota = 'simulando con depto. ' + (d?.nombre || '—');
-      }
-      ctx.progs = ps;
-      const dsim = fac?.departamentoId || (db.departamentos || []).find(d => progsDeDepto(d.id).length && progsDeDepto(d.id).every(n => ps.includes(n)))?.id;
-      ctx.deptIds = dsim ? [dsim] : [];
-    }
-    return ctx; // profesor / viewer: sin alcance administrativo
-  }
-
-  ctx.isDecano = rolBase === 'decano' || u.rol === 'decano';
+  const e = u.efectivo || {};
+  const ctx = { schoolWide: false, isDecano: false, isDirector: false, isCoord: false, progs: [], coordProgs: [], deptIds: [], simulado: !!u._simulado, nota: '' };
+  ctx.isDecano = u.rol === 'decano' || !!u.perfil?.decano;
   ctx.schoolWide = ctx.isDecano || u.rol === 'admin';
-  ctx.isCoord = facProgs.length > 0 || !!(fac && (fac.coordinator === true || fac.coordinator === 'true')) || rolBase === 'coordinator';
-  ctx.isDirector = !!(fac && (fac.director === true || fac.director === 'true')) || rolBase === 'director';
-  let ps = [];
-  if (ctx.isCoord) ps.push(...facProgs);
-  if (ctx.isDirector) ps.push(...facProgs, ...progsDeDepto(fac?.departamentoId));
-  ctx.progs = uniq(ps);
-  ctx.coordProgs = ctx.isCoord ? facProgs : [];
-  ctx.deptIds = ctx.isDirector && fac?.departamentoId ? [fac.departamentoId] : [];
+  ctx.isCoord = (u.perfil?.coordinaProgIds || []).length > 0;
+  ctx.isDirector = (u.perfil?.dirigeDeptIds || []).length > 0;
+  ctx.progs = [...(e.programas || [])];
+  ctx.coordProgs = [...(e.coordProgs || [])];
+  ctx.deptIds = [...(e.deptIds || [])];
   return ctx;
 }
 // ¿El curso cae dentro del alcance administrativo? (cursos fusionados: basta UN programa)
@@ -17096,11 +17152,10 @@ function _dashProgsCurso(cursoId) {
 }
 // Programas del profesor (para su vista colectiva): asignados + los de los cursos que da
 function _dashMisProgramas() {
-  const u = currentUser || {};
-  const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === (u.email || '').toLowerCase());
-  const s = new Set(fac?.programas ? String(fac.programas).split('|').map(p => p.trim()).filter(Boolean) : []);
-  (db.secciones || []).filter(_usuarioEsProfesorDeSeccion).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(p => s.add(p)));
-  return [...s];
+  const p = currentUser?.perfil || {};
+  const set = new Set((p.progIds || []).map(id => (db.programas || []).find(x => x.id === id)?.nombre).filter(Boolean));
+  (db.secciones || []).filter(_usuarioEsProfesorDeSeccion).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(n => set.add(n)));
+  return [...set];
 }
 
 function _dashSetView(view) {
@@ -19360,8 +19415,7 @@ function renderMatriz() {
     return laosDeCompetencia(dc);
   }
 
-  let totalLinks = 0;
-  allComps.forEach(c => { allCursos.forEach(cu => { if (laosPara(c.num, cu.id).length) totalLinks++; }); });
+  // (Los totales de arriba se calculan más abajo, según el programa seleccionado en el filtro)
 
   // Metadata de presentación (ícono/color) por programa — es solo estética;
   // cualquier programa que no esté aquí usa un estilo genérico automáticamente.
@@ -19474,10 +19528,16 @@ function renderMatriz() {
       </div>`;
   }
 
+  // Totales según lo que se está visualizando (programa filtrado, o todos)
+  const _kSel = programs.map(pr => pr.key);
+  const _compsSel = allComps.filter(c => _kSel.includes(c.programa)).filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
+  const _cursosSel = allCursos.filter(c => _programasDeCurso(c).some(pn => _kSel.includes(pn))).filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
+  let totalLinks = 0;
+  _compsSel.forEach(c => { _cursosSel.forEach(cu => { if (laosPara(c.num, cu.id).length) totalLinks++; }); });
   el.innerHTML = `
     <div class="summary-bar">
-      <div class="summary-chip"><strong>${allComps.length}</strong> Competencias totales</div>
-      <div class="summary-chip"><strong>${allCursos.length}</strong> Cursos</div>
+      <div class="summary-chip"><strong>${_compsSel.length}</strong> Competencias${filterVal ? '' : ' totales'}</div>
+      <div class="summary-chip"><strong>${_cursosSel.length}</strong> Cursos</div>
       <div class="summary-chip"><strong>${totalLinks}</strong> Pares competencia–curso</div>
     </div>
 
@@ -19906,36 +19966,79 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 // Values: true = full access, 'readonly' = read-only, false = blocked
 const ROLE_ACCESS = {
   admin:       { dashboard:true, cursos:true,        secciones:true,  competencias:true,       avaluo:true,  'base-datos':true,       reportes:true, matriz:true, alineacion:true, facultad:true,      dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:true, departamentos:true, laos:true, escalas:true, estudiantes:true },
-  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:true, facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  director:    { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  coordinator: { dashboard:true, cursos:'readonly',   secciones:true,  competencias:'readonly', avaluo:true,  'base-datos':'readonly',  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':'readonly', reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
-  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':'readonly',  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false, estudiantes:false },
+  decano:      { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:false, 'base-datos':'readonly', reportes:true, matriz:true, alineacion:'readonly', facultad:'readonly', dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  director:    { dashboard:true, cursos:'readonly',   secciones:'readonly',  competencias:'readonly', avaluo:true,  'base-datos':false,  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  coordinator: { dashboard:true, cursos:'readonly',   secciones:'readonly',  competencias:'readonly', avaluo:true,  'base-datos':false,  reportes:true, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:'readonly' },
+  profesor:    { dashboard:true, cursos:'readonly',   secciones:'readonly', competencias:'readonly', avaluo:true,  'base-datos':false, reportes:true, matriz:true, alineacion:false, facultad:false, dashboard2:true, adiestramientos:true, solicitudes:true, configuracion:false, departamentos:false, laos:'readonly', escalas:false, estudiantes:false },
+  viewer:      { dashboard:true, cursos:false,        secciones:false, competencias:false,      avaluo:false, 'base-datos':false,  reportes:false, matriz:true, alineacion:false, facultad:false,     dashboard2:true, adiestramientos:true, solicitudes:false, configuracion:false, departamentos:false, laos:false, escalas:false, estudiantes:false },
 };
 
-function setViewAs(role) {
-  _viewAsRole = role;
+// ── "Ver como": suplantación COMPLETA (solo administrador real) ─────────────
+// currentUser se reemplaza por el perfil simulado, así TODO el sistema (menús,
+// botones de editar, secciones, reportes, fichas) se comporta como ese perfil.
+// Se puede simular un rol (coordinador con programas escogidos, director con
+// departamento escogido) o a una persona concreta de Facultad.
+let _realUser = null;
+function setViewAs(role, opts = {}) {
   const banner = document.getElementById('view-as-banner');
-  if (role) {
-    banner.style.display = 'flex';
-    document.getElementById('view-as-label').textContent = role.charAt(0).toUpperCase()+role.slice(1);
-    // Temporarily swap role for UI
-    const realRol = currentUser.rol;
-    currentUser._realRol = realRol;
-    currentUser.rol = role;
-    applyRoleUI();
-    currentUser.rol = realRol; // restore
-  } else {
-    banner.style.display = 'none';
+  const refrescar = () => {
+    _fichaRefrescar(); _dashCoreSel = null; _r7Sel = null;
+    const act = document.querySelector('.tab-btn.active')?.dataset.tab;
+    if (act && authCan(act)) showTab(act, document.querySelector(`.tab-btn[data-tab="${act}"]`));
+    else showTab('dashboard', document.querySelector('.tab-btn[data-tab="dashboard"]'));
+  };
+  if (!role) {                       // salir de "Ver como"
+    if (_realUser) { currentUser = _realUser; _realUser = null; }
     _viewAsRole = null;
-    applyRoleUI();
+    banner.style.display = 'none';
+    enrichCurrentUserPermissions(); applyRoleUI(); refrescar();
+    return;
   }
-  _fichaRefrescar(); // "Ver como" aplica a la ficha abierta
-  _dashCoreSel = null;
-  renderDashboard(); // el Panel recalcula roles/alcance según el rol simulado
+  const real = _realUser || currentUser;
+  if (!real || real.rol !== 'admin') return;     // solo un administrador real puede simular
+  _realUser = real;
+  const progNombre = id => (db.programas || []).find(x => x.id === id)?.nombre;
+  let sim, texto;
+  if (opts.facId) {
+    const f = (db.facultad || []).find(x => x.id === opts.facId);
+    if (!f) { notify('No se halló esa persona', '⚠️'); return; }
+    sim = _buildCurrentUser(f);
+    texto = 'Persona: ' + (f.nombre || f.email) + ' (' + (sim.rol || 'sin acceso') + ')';
+  } else {
+    const rp = real.perfil || {};
+    const perfil = { facId: rp.facId, progIds: [...(rp.progIds || [])], coordinaProgIds: [], dirigeDeptIds: [], decano: false, decanoTipo: '' };
+    const etiquetas = { profesor: 'Profesor/a', coordinator: 'Coordinador/a', director: 'Director/a', decano: 'Decano/a', viewer: 'Visitante' };
+    texto = etiquetas[role] || role;
+    if (role === 'coordinator') {
+      let ids = opts.progIds && opts.progIds.length ? opts.progIds : [];
+      if (!ids.length) { const pr = (db.programas || []).find(x => !_esProgramaCore(x.nombre)); if (pr) ids = [pr.id]; }
+      perfil.coordinaProgIds = ids;
+      texto += ' de ' + ids.map(progNombre).filter(Boolean).join(', ');
+    } else if (role === 'director') {
+      let dep = opts.deptId || (db.departamentos || []).find(d => (db.programas || []).some(x => x.departamentoId === d.id))?.id;
+      perfil.dirigeDeptIds = dep ? [dep] : [];
+      texto += ' del depto. ' + ((db.departamentos || []).find(d => d.id === dep)?.nombre || '—');
+    } else if (role === 'decano') { perfil.decano = true; perfil.decanoTipo = 'decano'; }
+    sim = { ...real, rol: role, rolBase: role, esAdmin: false, mustChangePwd: false, perfil, _simulado: true };
+  }
+  currentUser = sim;
+  _viewAsRole = sim.rol || role;
+  document.getElementById('view-as-label').textContent = texto;
+  banner.style.display = 'flex';
+  enrichCurrentUserPermissions(); applyRoleUI(); refrescar();
 }
+// Llena los selectores de "Ver como" en el perfil (programas, departamentos, personas)
+function _vaPoblar() {
+  const ps = [...(db.programas || [])].sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const sp = document.getElementById('va-progs'); if (sp) sp.innerHTML = ps.map(x => `<option value="${x.id}">${_alEsc(x.nombre)}</option>`).join('');
+  const sd = document.getElementById('va-dept'); if (sd) sd.innerHTML = [...(db.departamentos || [])].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(d => `<option value="${d.id}">${_alEsc(d.nombre)}</option>`).join('');
+  const sf = document.getElementById('va-fac'); if (sf) sf.innerHTML = '<option value="">— Escoge una persona —</option>' + [...(db.facultad || [])].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).map(f => `<option value="${f.id}">${_alEsc(f.nombre || f.email)}</option>`).join('');
+}
+function _vaCoord() { setViewAs('coordinator', { progIds: [...document.getElementById('va-progs').selectedOptions].map(o => o.value) }); closeModal('modal-perfil'); }
+function _vaDir() { setViewAs('director', { deptId: document.getElementById('va-dept').value }); closeModal('modal-perfil'); }
+function _vaPersona() { const id = document.getElementById('va-fac').value; if (!id) { notify('Escoge una persona', '⚠️'); return; } setViewAs('persona', { facId: id }); closeModal('modal-perfil'); }
 function getEffectiveRole() {
-  return _viewAsRole || currentUser?.rol || 'viewer';
+  return currentUser?.rol || 'viewer';
 }
 
 // Dynamic role: coordinator/director permissions derived from facultad masterlist
@@ -20012,9 +20115,10 @@ async function doLogin() {
   // rol EFECTIVO: si es admin (esAdmin), eso manda sobre cualquier rol base
   // (ej. alguien puede ser "decano" y "admin" a la vez — admin gana porque
   // ya incluye todo lo que decano puede ver, más la capacidad de editar).
-  const rolEfectivo = user.esAdmin ? 'admin' : (user.rolBase || '');
-  currentUser = { username: user.email, nombre: user.nombre, rol: rolEfectivo, rolBase: user.rolBase || '', esAdmin: !!user.esAdmin,
-    email: user.email, mustChangePwd: user.mustChangePwd };
+  if (user.activo === false) { errEl.textContent = 'Tu cuenta está inactiva. Comunícate con la administración.'; errEl.style.display='block'; return; }
+  const _nuevo = _buildCurrentUser(user);
+  if (!_nuevo.rol) { errEl.textContent = 'Tu cuenta no tiene acceso al sistema.'; errEl.style.display='block'; return; }
+  currentUser = _nuevo;
   enrichCurrentUserPermissions();
   document.getElementById('auth-overlay').style.display = 'none';
   document.getElementById('login-pwd').value = '';
@@ -20032,57 +20136,69 @@ async function doLogin() {
 
 
 // ── Enrich currentUser with dynamic permissions from facultad masterlist ──
+// ── Modelo de roles (Facultad) ─────────────────────────────────────────────
+// El rol de acceso YA NO se escoge: se deriva de lo que tiene la persona.
+//   decano/a (3 tipos) > director/a de departamento(s) > coordinador/a de programa(s)
+//   > profesor/a (tiene programa asignado) > visitante (casilla) ; "Administrador" es otra casilla.
+function _rolBaseDeFac(f) {
+  if (!f) return '';
+  if (f.decanoTipo) return 'decano';
+  if ((f.dirigeDepartamentoIds || []).length) return 'director';
+  if ((f.coordinaProgramaIds || []).length) return 'coordinator';
+  if ((f.programaIds || []).length || f.esProfesor) return 'profesor';
+  if (f.esVisitante) return 'viewer';
+  return '';
+}
+// Mantiene los campos derivados coherentes (rolBase, coordinator, director)
+function _sincronizarRolBase(f) {
+  f.coordinator = (f.coordinaProgramaIds || []).length > 0;
+  f.director = (f.dirigeDepartamentoIds || []).length > 0;
+  f.rolBase = _rolBaseDeFac(f);
+}
+const DECANO_TIPOS = { decano: 'Decano/a', decano_academicos: 'Decano/a Asociado/a para Asuntos Académicos', decano_estudiantiles: 'Decano/a Auxiliar para Asuntos Estudiantiles' };
+function _perfilDeFac(f) {
+  return { facId: f.id, progIds: [...(f.programaIds || [])], coordinaProgIds: [...(f.coordinaProgramaIds || [])],
+    dirigeDeptIds: [...(f.dirigeDepartamentoIds || [])], decano: !!f.decanoTipo, decanoTipo: f.decanoTipo || '' };
+}
+function _buildCurrentUser(user) {
+  const rolBase = _rolBaseDeFac(user);
+  return { username: user.email, nombre: user.nombre, rol: user.esAdmin ? 'admin' : rolBase, rolBase, esAdmin: !!user.esAdmin,
+    email: user.email, mustChangePwd: user.mustChangePwd, perfil: _perfilDeFac(user) };
+}
+
 function enrichCurrentUserPermissions() {
   if (!currentUser) return;
-  // defaults
-  currentUser.efectivo = {
-    isCoordinator: false,
-    isDirector: false,
+  const p = currentUser.perfil || {};
+  const progNombre = id => (db.programas || []).find(x => x.id === id)?.nombre;
+  const e = currentUser.efectivo = {
+    isCoordinator: (p.coordinaProgIds || []).length > 0,
+    isDirector: (p.dirigeDeptIds || []).length > 0,
     isAdvisor: false,
-    programas: [],      // programs they coordinate/direct
-    advisees: []        // student IDs they advise
+    programas: [],      // programas de su alcance administrativo (coordina + los de los departamentos que dirige)
+    advisees: [],       // IDs de estudiantes que asesora
+    coordProgs: (p.coordinaProgIds || []).map(progNombre).filter(Boolean),
+    deptIds: [...(p.dirigeDeptIds || [])],
   };
-  if (currentUser.rol === 'admin') {
-    currentUser.efectivo.isCoordinator = true;
-    currentUser.efectivo.isDirector = true;
-    return;
-  }
-  // Find faculty record by email
-  const fac = db.facultad.find(f => f.email?.toLowerCase() === currentUser.email?.toLowerCase()
-    || f.nombre?.toLowerCase() === currentUser.nombre?.toLowerCase());
-  if (fac) {
-    currentUser.efectivo.isCoordinator = fac.coordinator === true || fac.coordinator === 'true' || (fac.coordinaProgramaIds||[]).length > 0;
-    currentUser.efectivo.isDirector    = fac.director    === true || fac.director    === 'true';
-    // Alcance administrativo = programas que COORDINA + (si dirige) los de su departamento.
-    // Los programas a los que solo pertenece (fac.programas) no dan alcance.
-    const _deptProgs = currentUser.efectivo.isDirector && fac.departamentoId
-      ? (db.programas||[]).filter(p => p.departamentoId === fac.departamentoId).map(p => p.nombre) : [];
-    const _dirSinDepto = currentUser.efectivo.isDirector && !fac.departamentoId && fac.programas
-      ? fac.programas.split('|').map(p=>p.trim()) : [];
-    currentUser.efectivo.programas = [...new Set([..._coordProgramasDe(fac), ..._deptProgs, ..._dirSinDepto])];
-  }
-  // Advising list
-  currentUser.efectivo.advisees = db.asesorias
-    .filter(a => a.profesorEmail?.toLowerCase() === currentUser.email?.toLowerCase())
-    .map(a => a.studentId);
-  currentUser.efectivo.isAdvisor = currentUser.efectivo.advisees.length > 0;
+  const dirProgs = (db.programas || []).filter(x => e.deptIds.includes(x.departamentoId)).map(x => x.nombre);
+  e.programas = [...new Set([...e.coordProgs, ...dirProgs])];
+  if (currentUser.rol === 'admin') { e.isCoordinator = true; e.isDirector = true; }   // el admin lo ve todo
+  e.advisees = (db.asesorias || []).filter(a => a.profesorEmail?.toLowerCase() === currentUser.email?.toLowerCase()).map(a => a.studentId);
+  e.isAdvisor = e.advisees.length > 0;
 }
 
 // ── Resolve effective role label for display ───────────────────────────────
 function getEffectiveRoleLabel() {
   if (!currentUser) return '';
   // Roles acumulados (ej. "Decano/a · Profesor/a · Coordinador/a"); con "Ver como", solo el simulado
-  if (_viewAsRole) {
-    return { profesor:'Profesor/a', coordinator:'Coordinador/a', director:'Director/a', decano:'Decano/a', viewer:'Viewer' }[_viewAsRole] || _viewAsRole;
-  }
   const ctx = _dashCtx();
   const out = [];
   if (currentUser.rol === 'admin') out.push('Admin');
-  if (ctx.isDecano) out.push('Decano/a');
+  if (currentUser.rol === 'viewer') out.push('Visitante');
+  if (ctx.isDecano) out.push(DECANO_TIPOS[currentUser.perfil?.decanoTipo] || 'Decano/a');
   if (ctx.isDirector) out.push('Director/a');
   if (ctx.isCoord) out.push('Coordinador/a' + (ctx.progs.length > 1 && !ctx.isDirector ? ' (' + ctx.progs.length + ' programas)' : ''));
   const daClases = (db.secciones || []).some(_usuarioEsProfesorDeSeccion);
-  if (daClases || !out.length) out.push('Profesor/a');
+  if ((daClases || !out.length) && currentUser.rol !== 'viewer') out.push('Profesor/a');
   if ((db.asesorias || []).some(a => (a.profesorEmail || '').toLowerCase() === (currentUser.email || '').toLowerCase())) out.push('Asesor/a');
   return out.join(' · ');
 }
@@ -20092,7 +20208,6 @@ function canSeeProgram(progName) {
   if (!currentUser) return false;
   if (currentUser.rol === 'admin' || currentUser.rol === 'decano') return true;
   const e = currentUser.efectivo;
-  if (e.isDirector && e.programas.length === 0) return true; // director of all
   if (e.isDirector || e.isCoordinator) return e.programas.includes(progName);
   return false;
 }
@@ -20108,8 +20223,11 @@ function canSeeSeccion(sec) {
     // Curso fusionado (oct 2026): puede estar en varios programas — basta
     // con que el coordinador/director vea UNO de ellos para ver la sección.
     if (curso && _programasDeCurso(curso).some(p => canSeeProgram(p))) return true;
+    // …y las secciones que dan los facultativos asignados a sus unidades (departamento/programas)
+    if (_facultadesDeSeccion(sec).some(_facultadVisibleEnR7)) return true;
   }
-  // Professor: their own sections
+  // Professor: their own sections (primer o segundo profesor)
+  if (sec.profesorEmail2 && currentUser.email && sec.profesorEmail2.toLowerCase() === currentUser.email.toLowerCase()) return true;
   if (sec.profesorEmail && currentUser.email) {
     return sec.profesorEmail.toLowerCase() === currentUser.email.toLowerCase();
   }
@@ -20169,6 +20287,8 @@ function getAcademicYear(termStr) {
 function doLogout() {
   if (!confirm('¿Cerrar sesión?')) return;
   cerrarFicha();
+  _realUser = null; _viewAsRole = null;
+  const _vb = document.getElementById('view-as-banner'); if (_vb) _vb.style.display = 'none';
   currentUser = null;
   document.getElementById('auth-overlay').style.display = 'flex';
   document.getElementById('login-user').value = '';
@@ -20216,7 +20336,7 @@ function applyRoleUI() {
   });
 
   // Show readonly notices where applicable
-  ['cursos','competencias','base-datos'].forEach(tab => {
+  ['cursos','competencias','base-datos','secciones','alineacion','estudiantes'].forEach(tab => {
     const notice = document.getElementById('readonly-notice-' + tab);
     if (notice) notice.style.display = authIsReadonly(tab) ? 'flex' : 'none';
   });
@@ -20226,7 +20346,7 @@ function applyRoleUI() {
   const btnNComp = document.getElementById('btn-nueva-competencia');
   if (btnNComp) btnNComp.style.display = authIsReadonly('competencias') ? 'none' : '';
   const btnNS = document.getElementById('btn-nueva-seccion');
-  if (btnNS) btnNS.style.display = !authCan('secciones') ? 'none' : '';
+  if (btnNS) btnNS.style.display = rol !== 'admin' ? 'none' : '';
   const sesionWrap = document.getElementById('sesion-dropzone-wrap');
   if (sesionWrap) sesionWrap.style.display = (rol === 'admin') ? '' : 'none';
 
@@ -21321,16 +21441,40 @@ function renderFacultadList() {
   const el = document.getElementById('facultad-list');
   if (!el) return;
   _ensureFacultadRolMigrado();
-  const list = db.facultad || [];
+  const todos = db.facultad || [];
+  // Filtros: buscador, departamento (incl. sin departamento), estado y orden alfabético
+  const dSel = document.getElementById('fac-f-dept');
+  if (dSel && dSel.dataset.n !== String((db.departamentos || []).length)) {
+    const prev = dSel.value;
+    dSel.innerHTML = '<option value="">Todos los departamentos</option><option value="__none__">— Sin departamento asignado —</option>' +
+      [...(db.departamentos || [])].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(d => `<option value="${d.id}">${_alEsc(d.nombre)}</option>`).join('');
+    dSel.value = prev; dSel.dataset.n = String((db.departamentos || []).length);
+  }
+  const _norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const q = _norm(document.getElementById('fac-q')?.value || '').trim();
+  const fDept = dSel?.value || '', fEst = document.getElementById('fac-f-estado')?.value || '', orden = document.getElementById('fac-orden')?.value || 'az';
+  const list = todos.filter(f => {
+    if (q && !(_norm(f.nombre).includes(q) || _norm(f.email).includes(q))) return false;
+    if (fDept === '__none__' ? !!(f.departamentoId || f.departamento) : (fDept && f.departamentoId !== fDept)) return false;
+    if (fEst === 'activo' && f.activo === false) return false;
+    if (fEst === 'inactivo' && f.activo !== false) return false;
+    return true;
+  }).sort((a, b) => (orden === 'za' ? -1 : 1) * (a.nombre || '').localeCompare(b.nombre || '', 'es'));
+  const cont = document.getElementById('fac-contador'); if (cont) cont.textContent = `${list.length} de ${todos.length}`;
   // Depura la selección de ids que ya no existan (ej. se borró uno individualmente)
-  _facSeleccionados = new Set([..._facSeleccionados].filter(id => list.some(f => f.id === id)));
-  if (!list.length) {
+  _facSeleccionados = new Set([..._facSeleccionados].filter(id => todos.some(f => f.id === id)));
+  if (!todos.length) {
     _facVisiblesActuales = [];
     el.innerHTML = '<div class="empty-state"><p>No hay profesores en la lista maestra. Añade uno o importa un CSV.</p></div>';
     return;
   }
+  if (!list.length) {
+    _facVisiblesActuales = [];
+    el.innerHTML = '<div class="empty-state"><p>Nadie coincide con los filtros.</p></div>';
+    return;
+  }
   const isAdmin = currentUser?.rol === 'admin';
-  const misId = isAdmin ? (list.find(f => (f.email||'').toLowerCase() === (currentUser.username||'').toLowerCase())?.id) : null;
+  const misId = isAdmin ? (todos.find(f => (f.email||'').toLowerCase() === (currentUser.username||'').toLowerCase())?.id) : null;
   const rolLabelMap = { decano:'Decano/a', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
 
   // Borrado masivo (solo administrador) — mismo patrón que Estudiantes/
@@ -21358,17 +21502,19 @@ function renderFacultadList() {
     const checkbox = isAdmin
       ? `<input type="checkbox" ${_facSeleccionados.has(f.id) ? 'checked' : ''} ${esUnoMismo ? 'disabled title="No puedes seleccionar tu propia cuenta"' : ''} onchange="toggleFacSeleccion('${f.id}', this.checked)">`
       : '';
-    return `<div class="fac-card" ${isAdmin ? 'style="grid-template-columns:24px 40px 1fr auto"' : ''}>
+    const inactivo = f.activo === false;
+    return `<div class="fac-card" style="${isAdmin ? 'grid-template-columns:24px 40px 1fr auto;' : ''}${inactivo ? 'opacity:.6;' : ''}">
       ${isAdmin ? `<div style="align-self:start;padding-top:2px">${checkbox}</div>` : ''}
       <div class="fac-avatar">${initials}</div>
       <div>
         <div class="fac-name">${fichaLink('profesor', f.id, f.nombre)}</div>
         <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
         <div class="fac-tags">
+          ${inactivo ? '<span class="badge badge-gray" style="background:#e5e7eb;color:#374151">⏸ Inactivo/a</span>' : ''}
           ${f.esAdmin ? '<span class="badge badge-red">🔑 Administrador</span>' : ''}
-          ${f.rolBase ? `<span class="badge badge-blue">${rolLabelMap[f.rolBase]||f.rolBase}</span>` : ''}
+          ${f.rolBase ? `<span class="badge badge-blue">${f.decanoTipo ? (DECANO_TIPOS[f.decanoTipo]||'Decano/a') : (rolLabelMap[f.rolBase]||f.rolBase)}</span>` : ''}
           ${!f.rolBase && !f.esAdmin ? '<span class="badge badge-gold">Sin acceso</span>' : ''}
-          ${f.director==='true'||f.director===true ? '<span class="fac-tag fac-tag-dir">🏛 Director/a</span>' : ''}
+          ${(f.dirigeDepartamentoIds||[]).length ? `<span class="fac-tag fac-tag-dir" title="${_dirigeDeptosDe(f).join(', ')}">🏛 Director/a · ${_dirigeDeptosDe(f).join(', ')}</span>` : ''}
           ${(f.coordinaProgramaIds||[]).length || f.coordinator==='true'||f.coordinator===true ? `<span class="fac-tag fac-tag-coord" title="${_coordProgramasDe(f).join(', ')}">📋 Coordinador/a${_coordProgramasDe(f).length ? ' · ' + _coordProgramasDe(f).join(', ') : ''}</span>` : ''}
           ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${p}</span>`).join('')}
         </div>
@@ -21475,6 +21621,21 @@ function _ensureFacultadRolMigrado() {
       f.coordinaProgramaIds = eraCoord ? [...(f.programaIds || [])] : [];
       changed = true;
     }
+    // Roles derivados (decanato / dirige departamento / visitante / activo)
+    if (f.dirigeDepartamentoIds === undefined) {
+      const eraDir = f.director === true || f.director === 'true';
+      f.dirigeDepartamentoIds = (eraDir && f.departamentoId) ? [f.departamentoId] : [];
+      if (f.decanoTipo === undefined) f.decanoTipo = f.rolBase === 'decano' ? 'decano' : '';
+      if (f.esVisitante === undefined) f.esVisitante = f.rolBase === 'viewer';
+      if (f.activo === undefined) f.activo = true;
+      f.esProfesor = false;
+      if (f.rolBase && !_rolBaseDeFac(f)) f.esProfesor = true;   // conserva el acceso que ya tenía
+      changed = true;
+    }
+    if (f.activo === undefined) { f.activo = true; changed = true; }
+    const rbAntes = f.rolBase, coAntes = f.coordinator, diAntes = f.director;
+    _sincronizarRolBase(f);
+    if (rbAntes !== f.rolBase || coAntes !== f.coordinator || diAntes !== f.director) changed = true;
   });
   if (changed) saveDB();
 }
@@ -21492,6 +21653,31 @@ function _setCoordinadoresPrograma(progId, facIds) {
     if (!sel.has(f.id) && tiene) f.coordinaProgramaIds = f.coordinaProgramaIds.filter(x => x !== progId);
     f.coordinator = (f.coordinaProgramaIds || []).length > 0;
   });
+}
+
+// Departamentos (nombres) que dirige un/a facultativo/a
+function _dirigeDeptosDe(f) {
+  return (f?.dirigeDepartamentoIds || []).map(id => (db.departamentos || []).find(d => d.id === id)?.nombre).filter(Boolean);
+}
+// Fija quién dirige un departamento (lista de ids de facultad); una persona puede dirigir varios
+function _setDirectoresDepto(deptId, facIds) {
+  const sel = new Set(facIds);
+  (db.facultad || []).forEach(f => {
+    const tiene = (f.dirigeDepartamentoIds || []).includes(deptId);
+    if (sel.has(f.id) && !tiene) f.dirigeDepartamentoIds = [...(f.dirigeDepartamentoIds || []), deptId];
+    if (!sel.has(f.id) && tiene) f.dirigeDepartamentoIds = f.dirigeDepartamentoIds.filter(x => x !== deptId);
+    _sincronizarRolBase(f);
+  });
+}
+function _facRolHint() {
+  const g = id => document.getElementById(id);
+  const tmp = { decanoTipo: g('fac-decano-tipo').value, dirigeDepartamentoIds: [...g('fac-dirige-dept-ids').selectedOptions].map(o => o.value),
+    coordinaProgramaIds: [...g('fac-coord-prog-ids').selectedOptions].map(o => o.value), programaIds: [...g('fac-programa-ids').selectedOptions].map(o => o.value),
+    esProfesor: g('fac-es-profesor').checked, esVisitante: g('fac-es-visitante').checked };
+  const rb = _rolBaseDeFac(tmp), adm = g('fac-es-admin').checked;
+  const et = { decano: 'Decano/a', director: 'Director/a', coordinator: 'Coordinador/a', profesor: 'Profesor/a', viewer: 'Visitante' };
+  const txt = [adm ? 'Administrador' : '', rb ? et[rb] : ''].filter(Boolean).join(' + ');
+  g('fac-rol-hint').textContent = txt ? '➡ Rol resultante: ' + txt : '➡ Sin acceso al sistema (solo directorio)';
 }
 
 function _populateFacultadDeptoProgSelects() {
@@ -21512,19 +21698,28 @@ function _populateFacultadDeptoProgSelects() {
   const prevCoord = new Set([...coordSel.selectedOptions].map(o => o.value));
   coordSel.innerHTML = progSel.innerHTML;
   [...coordSel.options].forEach(o => { o.selected = prevCoord.has(o.value); });
+
+  const dirSel = document.getElementById('fac-dirige-dept-ids');
+  const prevDir = new Set([...dirSel.selectedOptions].map(o => o.value));
+  dirSel.innerHTML = [...db.departamentos].sort((a,b) => a.nombre.localeCompare(b.nombre)).map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+  [...dirSel.options].forEach(o => { o.selected = prevDir.has(o.value); });
+  ['fac-programa-ids','fac-coord-prog-ids','fac-dirige-dept-ids'].forEach(id => { document.getElementById(id).onchange = _facRolHint; });
+  ['fac-decano-tipo','fac-es-profesor','fac-es-visitante','fac-es-admin'].forEach(id => { document.getElementById(id).onchange = _facRolHint; });
 }
 
 function openNuevaFacultad() {
   document.getElementById('fac-edit-id').value = '';
   document.getElementById('fac-modal-title').textContent = '👩‍🏫 Añadir Profesor/a';
   ['fac-nombre','fac-email','fac-tel'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('fac-director').checked = false;
-  document.getElementById('fac-rol').value = '';
+  document.getElementById('fac-decano-tipo').value = '';
   document.getElementById('fac-es-admin').checked = false;
+  document.getElementById('fac-es-profesor').checked = false;
+  document.getElementById('fac-es-visitante').checked = false;
+  document.getElementById('fac-activo').checked = true;
   _populateFacultadDeptoProgSelects();
   document.getElementById('fac-departamento').value = '';
-  [...document.getElementById('fac-programa-ids').options].forEach(o => o.selected = false);
-  [...document.getElementById('fac-coord-prog-ids').options].forEach(o => o.selected = false);
+  ['fac-programa-ids','fac-coord-prog-ids','fac-dirige-dept-ids'].forEach(id => [...document.getElementById(id).options].forEach(o => o.selected = false));
+  _facRolHint();
   openModal('modal-nueva-facultad');
 }
 
@@ -21536,15 +21731,20 @@ function editarFacultad(id) {
   document.getElementById('fac-nombre').value = f.nombre||'';
   document.getElementById('fac-email').value = f.email||'';
   document.getElementById('fac-tel').value = f.telefono||'';
-  document.getElementById('fac-director').checked = f.director===true||f.director==='true';
-  document.getElementById('fac-rol').value = f.rolBase || '';
+  document.getElementById('fac-decano-tipo').value = f.decanoTipo || '';
   document.getElementById('fac-es-admin').checked = !!f.esAdmin;
+  document.getElementById('fac-es-profesor').checked = !!f.esProfesor;
+  document.getElementById('fac-es-visitante').checked = !!f.esVisitante;
+  document.getElementById('fac-activo').checked = f.activo !== false;
   _populateFacultadDeptoProgSelects();
   document.getElementById('fac-departamento').value = f.departamentoId || '';
   const progIds = new Set(f.programaIds || []);
   [...document.getElementById('fac-programa-ids').options].forEach(o => { o.selected = progIds.has(o.value); });
   const coordIds = new Set(f.coordinaProgramaIds || []);
   [...document.getElementById('fac-coord-prog-ids').options].forEach(o => { o.selected = coordIds.has(o.value); });
+  const dirIds = new Set(f.dirigeDepartamentoIds || []);
+  [...document.getElementById('fac-dirige-dept-ids').options].forEach(o => { o.selected = dirIds.has(o.value); });
+  _facRolHint();
   openModal('modal-nueva-facultad');
 }
 
@@ -21553,13 +21753,18 @@ async function guardarFacultad() {
   const email  = document.getElementById('fac-email').value.trim().toLowerCase();
   if (!nombre||!email) { notify('Nombre y email son requeridos','⚠️'); return; }
 
-  const nuevoRolBase = document.getElementById('fac-rol').value || '';
   const nuevoEsAdmin = document.getElementById('fac-es-admin').checked;
   const departamentoId = document.getElementById('fac-departamento').value || null;
   const departamentoObj = departamentoId ? db.departamentos.find(d => d.id === departamentoId) : null;
   const programaIds = [...document.getElementById('fac-programa-ids').selectedOptions].map(o => o.value);
   const programaNombres = programaIds.map(id => db.programas.find(p => p.id === id)?.nombre).filter(Boolean);
   const coordinaProgramaIds = [...document.getElementById('fac-coord-prog-ids').selectedOptions].map(o => o.value);
+  const dirigeDepartamentoIds = [...document.getElementById('fac-dirige-dept-ids').selectedOptions].map(o => o.value);
+  const decanoTipo = document.getElementById('fac-decano-tipo').value || '';
+  const esProfesor = document.getElementById('fac-es-profesor').checked;
+  const esVisitante = document.getElementById('fac-es-visitante').checked;
+  const activo = document.getElementById('fac-activo').checked;
+  const nuevoRolBase = _rolBaseDeFac({ decanoTipo, dirigeDepartamentoIds, coordinaProgramaIds, programaIds, esProfesor, esVisitante });
 
   const editId = document.getElementById('fac-edit-id').value;
   const record = {
@@ -21569,7 +21774,8 @@ async function guardarFacultad() {
     programaIds, programas: programaNombres.join('|'),
     coordinaProgramaIds,
     coordinator: coordinaProgramaIds.length > 0,
-    director:    document.getElementById('fac-director').checked,
+    dirigeDepartamentoIds, director: dirigeDepartamentoIds.length > 0,
+    decanoTipo, esProfesor, esVisitante, activo,
   };
 
   let tempPwdParaMostrar = null;
@@ -21581,7 +21787,13 @@ async function guardarFacultad() {
     if (idx>=0) {
       const actual = db.facultad[idx];
       // Evita que un admin se quite su propio acceso de admin por accidente y se bloquee
-      if (actual.email === currentUser?.username && actual.esAdmin && !nuevoEsAdmin) {
+      if (actual.email === (_realUser || currentUser)?.username && !activo) {
+        notify('No puedes desactivar tu propia cuenta', '🔒'); return;
+      }
+      if (actual.esAdmin && (!nuevoEsAdmin || !activo) && !db.facultad.some(x => x.id !== actual.id && x.esAdmin && x.activo !== false)) {
+        notify('Debe quedar al menos un administrador activo', '🔒'); return;
+      }
+      if (actual.email === (_realUser || currentUser)?.username && actual.esAdmin && !nuevoEsAdmin) {
         notify('No puedes quitarte tu propio acceso de administrador — pídele a otro admin que lo haga', '🔒');
         return;
       }
@@ -21727,10 +21939,17 @@ function importarFacultadCSV(input) {
         const nombres = (r.programas||'').split('|').map(x=>x.trim().toLowerCase()).filter(Boolean);
         record.coordinaProgramaIds = (db.programas||[]).filter(pp => nombres.includes(pp.nombre.toLowerCase())).map(pp => pp.id);
       }
+      if (record.director && record.departamento) {
+        const dp = (db.departamentos||[]).find(d => d.nombre.toLowerCase() === record.departamento.toLowerCase());
+        const prev = idx>=0 ? (db.facultad[idx].dirigeDepartamentoIds||[]) : [];
+        if (dp) record.dirigeDepartamentoIds = [...new Set([...prev, dp.id])];
+      }
+      delete record.director; delete record.coordinator;
+      if (record.coordinaProgramaIds === undefined && r.coordinator!=='true' && r.coordinator!=='1') { /* conserva coordinación existente */ }
       if (idx>=0) { db.facultad[idx]={...db.facultad[idx],...record}; updated++; }
       else { db.facultad.push({id:'fac_'+Date.now()+'_'+Math.random().toString(36).slice(2),...record,fechaCreacion:new Date().toISOString()}); added++; }
     });
-    saveDB(); renderFacultadList(); enrichCurrentUserPermissions();
+    _ensureFacultadRolMigrado(); saveDB(); renderFacultadList(); enrichCurrentUserPermissions();
     notify(`Facultad importada: ${added} nuevos, ${updated} actualizados ✓`);
     input.value='';
   };
@@ -21946,7 +22165,8 @@ function openPerfil() {
       </div>
     </div>
   `;
-  document.getElementById('perfil-viewas-section').style.display = currentUser.rol==='admin' ? '' : 'none';
+  document.getElementById('perfil-viewas-section').style.display = (_realUser || currentUser).rol==='admin' ? '' : 'none';
+  _vaPoblar();
   openModal('modal-perfil');
 }
 
@@ -22028,14 +22248,15 @@ function _solEstadoBadge(estado) {
 async function renderSolicitudes() {
   const rol = getEffectiveRole();
   const isAdmin = rol === 'admin';
+  const verTodas = isAdmin || rol === 'decano';
   const el = document.getElementById('solicitudes-list');
   const sub = document.getElementById('sol-section-sub');
-  if (sub) sub.textContent = isAdmin
-    ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba, rechaza o elimina cada una'
+  if (sub) sub.textContent = verTodas
+    ? (isAdmin ? 'Todas las solicitudes de cambios a registros de solo lectura — aprueba, rechaza o elimina cada una' : 'Todas las solicitudes de cambios a registros de solo lectura (consulta)')
     : 'Historial de tus solicitudes de edición y su estado — puedes retirar las que siguen pendientes';
 
   let solicitudes = [...(db.solicitudes||[])];
-  if (!isAdmin) solicitudes = solicitudes.filter(s => s.solicitante === currentUser.username);
+  if (!verTodas) solicitudes = solicitudes.filter(s => s.solicitante === currentUser.username);
 
   if (!solicitudes.length) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No hay solicitudes de edición todavía</p></div>';
@@ -22055,7 +22276,7 @@ async function renderSolicitudes() {
   el.innerHTML = `${barra}<div class="table-wrap"><table>
     <thead><tr>
       <th>Fecha</th><th>Tipo</th><th>Registro</th><th>Descripción</th>
-      ${isAdmin ? '<th>Solicitante</th>' : ''}
+      ${verTodas ? '<th>Solicitante</th>' : ''}
       <th>Estado</th><th>Revisado por</th><th>Acciones</th>
     </tr></thead>
     <tbody>${solicitudes.map(s => `
@@ -22064,7 +22285,7 @@ async function renderSolicitudes() {
         <td><span class="badge badge-blue">${_solTipoLabel(s.coleccion)}</span></td>
         <td style="font-size:0.8rem">${_fichaLinkSolicitud(s) || s.registroLabel || '<span style="color:var(--muted)">—</span>'}</td>
         <td style="font-size:0.82rem;max-width:280px">${s.descripcion}</td>
-        ${isAdmin ? `<td style="font-size:0.78rem">${s.solicitanteNombre||s.solicitante}</td>` : ''}
+        ${verTodas ? `<td style="font-size:0.78rem">${s.solicitanteNombre||s.solicitante}</td>` : ''}
         <td>${_solEstadoBadge(s.estado)}</td>
         <td style="font-size:0.78rem">${s.revisadoPor ? `${s.revisadoPor}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${s.comentarioAdmin}"</span>` : ''}` : '—'}</td>
         <td class="actions-cell">
@@ -22238,26 +22459,26 @@ function renderMatrizAccesos() {
     fila('Departamento', 'Ver y editar', todos, todos, todos, todos, todos) +
     fila('Competencia', 'Ver y editar', todos + ' (solicita edición)', todos + ' (solicita edición)', todos + ' (solicita edición)', todos + ' (solicita edición)', todos) +
     fila('Profesor/a', 'Ver y editar', 'Ver; secciones: todas', 'Ver; secciones: las de su alcance y las de facultativos de su departamento', 'Ver; secciones: las de su alcance y las de facultativos de sus programas', 'Ver; secciones: solo las suyas', 'Ver; sin secciones') +
-    fila('Sección', 'Todas', 'Todas', 'Programas que dirige y secciones de facultativos de su departamento', 'Programas que coordina y secciones de facultativos de su programa', 'Solo las suyas', '—') +
+    fila('Sección', 'Todas', 'Todas', 'Programas que dirige y secciones de facultativos de su departamento', 'Programas que coordina y secciones de facultativos de su programa', 'Solo las suyas (como 1.º o 2.º profesor)', '—') +
     fila('LAO', 'Todos', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios', 'Oficiales, compartidos y propios') +
-    fila('Estudiante', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Los de sus secciones y sus asesorados', '—');
+    fila('Estudiante', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Solo sus asesorados', '—');
 
   // 3) Reportes
   const alc = 'Datos de su alcance';
   const rep = (n, ...c) => fila(n, ...c);
   const reportes =
-    rep('R1 · Competencias', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
-    rep('R2 · Por Curso', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
-    rep('R3 · Estudiante', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus estudiantes y asesorados', '—') +
-    rep('R4 · Dashboard', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
-    rep('R5 · LAOs', 'Toda la Escuela', 'Toda la Escuela', 'Programas del departamento', 'Programas que coordina', 'Sus secciones y asesorados', '—') +
-    rep('R6 · En Riesgo', 'Toda la Escuela', 'Toda la Escuela', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus asesorados y estudiantes', '—') +
+    rep('R1 · Competencias', 'Toda la Escuela', 'Toda la Escuela', 'Toda la Escuela', 'Toda la Escuela', 'Toda la Escuela', '—') +
+    rep('R2 · Por Curso', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance + sus secciones', 'Su alcance + sus secciones', 'Solo sus secciones', '—') +
+    rep('R3 · Estudiante', 'Todos', 'Todos', 'Estudiantes de su alcance + asesorados', 'Estudiantes de su alcance + asesorados', 'Solo sus asesorados', '—') +
+    rep('R4 · Dashboard', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance + sus secciones', 'Su alcance + sus secciones', 'Programa(s) al que pertenece', '—') +
+    rep('R5 · LAOs', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance + sus secciones', 'Su alcance + sus secciones', 'LAOs de sus secciones', '—') +
+    rep('R6 · En Riesgo', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance + asesorados', 'Su alcance + asesorados', 'Solo sus asesorados', '—') +
     rep('R7 · Facultad', 'Todos los facultativos', 'Todos los facultativos', 'Facultativos de su departamento', 'Facultativos de sus programas', 'Solo el suyo', '—') +
     rep('R8 · Notas', 'Toda la Escuela', 'Toda la Escuela', 'Su alcance (programas)', '—', '—', '—') +
-    rep('R9 · Matrícula', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sus asesorados', '—');
+    rep('R9 · Matrícula', 'Todos', 'Todos', 'Estudiantes de sus programas', 'Estudiantes de sus programas', 'Sin acceso', '—');
 
   el.innerHTML =
-    tabla('1 · Áreas del menú', menu, 'Lectura = puede ver pero no editar. Si el/la facultativo/a es coordinador/a o director/a, se le suman los permisos de ese rol al de profesor/a.') +
+    tabla('1 · Áreas del menú', menu, 'Lectura = puede ver pero no editar. El rol se deriva en Facultad (decanato, dirige departamento, coordina programa, programa asignado). Avalúo: coordinadores/directores ven pero no evalúan secciones que no son suyas. Solicitudes: cada cual ve las suyas; decano y administrador ven todas. Base de Datos: solo decano (lectura) y administrador.') +
     tabla('2 · Fichas (enlaces dentro del sistema)', fichas, 'Editar una ficha o ejecutar sus acciones de administración solo es posible para el administrador; los demás roles pueden solicitar la edición cuando aplica.') +
     tabla('3 · Reportes (R1–R9)', reportes, 'El administrador puede bloquear cualquier informe R1–R9 desde la pestaña Reportes; mientras esté bloqueado, los demás usuarios no lo ven. Los alcances de coordinación se fijan por programa (pueden ser varios por persona).');
 }
@@ -22458,13 +22679,8 @@ function _deptoDeCurso(curso) {
 function _fichaPuedeVerSeccion(sec) {
   const role = getEffectiveRole();
   if (role === 'admin' || role === 'decano') return true;
-  if (_viewAsRole) {
-    if (role === 'director' || role === 'coordinator') return true;
-    return _usuarioEsProfesorDeSeccion(sec);
-  }
   // Además del acceso por sección, quien puede ver el informe R7 de ese/a profesor/a ve sus secciones
-  const _f = _facultadDeSeccion(sec);
-  return canSeeSeccion(sec) || (!!_f && _facultadVisibleEnR7(_f));
+  return canSeeSeccion(sec) || _facultadesDeSeccion(sec).some(_facultadVisibleEnR7);
 }
 
 // Secciones del año académico más reciente en que el curso tiene secciones
@@ -22592,10 +22808,11 @@ function _renderFichaCurso(cursoId) {
       const k = _facultadDeSeccion(sx)?.id || (sx.profesor || sx.profesorEmail || '').trim().toLowerCase();
       if (!k || vistos.has(k)) return false; vistos.add(k); return true;
     }).sort((a, b) => String(a.profesor || '').localeCompare(String(b.profesor || '')));
+    secciones.forEach(sx => { const f2 = _facultadDeProfesor2(sx); if (f2 && !vistos.has(f2.id)) { vistos.add(f2.id); profes.push({ ...sx, profesor: sx.profesor2, profesorEmail: sx.profesorEmail2 }); } });
     return `<div class="ficha-ay">${_ayTexto(ay)}</div>
       <div class="ficha-kv" style="margin-bottom:4px"><div>Facultad</div><div>${profes.map(_fichaLinkProfesorSec).join(', ') || '—'}</div></div>` +
       visibles.map(sx => `<div class="ficha-row"><strong style="white-space:nowrap">${fichaLink('seccion', sx.id, 'Sec. ' + (sx.numero || '—'))}</strong>
-          <div style="flex:1;min-width:0">${_alEsc(sx.semestre || '—')} · ${_fichaLinkProfesorSec(sx)}</div>
+          <div style="flex:1;min-width:0">${_alEsc(sx.semestre || '—')} · ${_fichaLinkProfesorSec(sx)}${sx.profesor2 ? ' · ' + _fichaLinkProfesor2Sec(sx) : ''}</div>
           <span class="ficha-muted" style="white-space:nowrap">${(sx.estudiantes || []).length} est.</span></div>`).join('') +
       (ocultas ? `<div class="ficha-muted" style="margin-top:4px">${ocultas} ${ocultas === 1 ? 'sección' : 'secciones'} más de otros profesores.</div>` : '');
   }).join('') : '<div class="ficha-empty">Este curso no tiene secciones registradas.</div>';
@@ -22689,7 +22906,7 @@ function _liderazgoDePrograma(prog) {
   const fac = db.facultad || [];
   return {
     coordinadores: fac.filter(f => (f.coordinaProgramaIds || []).includes(prog.id)),
-    directores: fac.filter(f => si(f.director) && esDe(f)),
+    directores: prog.departamentoId ? fac.filter(f => (f.dirigeDepartamentoIds || []).includes(prog.departamentoId)) : [],
   };
 }
 function _renderFichaPrograma(progId) {
@@ -22803,10 +23020,9 @@ function _renderFichaDepartamento(deptId) {
   const si = v => v === true || v === 'true';
   // Director/a: quien está marcado como director/a en Facultad y pertenece al
   // departamento; si no hay, quien dirige alguno de sus programas.
-  let directores = fac.filter(f => si(f.director));
-  if (!directores.length) directores = (db.facultad || []).filter(f => si(f.director) && progs.some(p => _liderazgoDePrograma(p).directores.includes(f)));
+  const directores = (db.facultad || []).filter(f => (f.dirigeDepartamentoIds || []).includes(d.id));
   const infoDept = `<div class="ficha-kv" style="margin-top:12px">
-    <div>Director/a</div><div>${directores.length ? directores.map(f => fichaLink('profesor', f.id, f.nombre || f.email)).join(', ') : '<span class="ficha-muted">Sin director/a asignado en Facultad</span>'}</div>
+    <div>Director/a</div><div>${directores.length ? directores.map(f => fichaLink('profesor', f.id, f.nombre || f.email)).join(', ') : '<span class="ficha-muted">Sin director/a asignado</span>'}</div>
   </div>`;
 
   const acciones = isAdmin
@@ -22893,10 +23109,27 @@ function _facultadDeSeccion(sec) {
   return (em && fac.find(f => String(f.email || '').toLowerCase() === em)) ||
     (nom && fac.find(f => String(f.nombre || '').trim().toLowerCase() === nom)) || null;
 }
+// Segundo profesor (opcional) de una sección
+function _facultadDeProfesor2(sec) {
+  if (!sec?.profesorEmail2 && !sec?.profesor2) return null;
+  const em = String(sec.profesorEmail2 || '').trim().toLowerCase();
+  const nom = String(sec.profesor2 || '').trim().toLowerCase();
+  const fac = db.facultad || [];
+  return (em && fac.find(f => String(f.email || '').toLowerCase() === em)) ||
+    (nom && fac.find(f => String(f.nombre || '').trim().toLowerCase() === nom)) || null;
+}
+// Todos los registros de facultad que dan la sección (1 o 2)
+function _facultadesDeSeccion(sec) { return [_facultadDeSeccion(sec), _facultadDeProfesor2(sec)].filter(Boolean); }
+function _fichaLinkProfesor2Sec(sec) {
+  const f = _facultadDeProfesor2(sec);
+  const label = sec.profesor2 || f?.nombre || sec.profesorEmail2 || '';
+  return f ? fichaLink('profesor', f.id, label) : _alEsc(label);
+}
 function _fichaLinkProfesorSec(sec) {
   const f = _facultadDeSeccion(sec);
   const label = sec.profesor || f?.nombre || sec.profesorEmail || '';
-  return f ? fichaLink('profesor', f.id, label) : _alEsc(label || 'sin profesor');
+  const uno = f ? fichaLink('profesor', f.id, label) : _alEsc(label || 'sin profesor');
+  return uno;
 }
 function _fichaPuedeVerLao(lao) {
   if (!lao) return false;
@@ -23098,8 +23331,9 @@ function _renderFichaProfesor(facId) {
   const progs = [...progIds].map(id => (db.programas || []).find(p => p.id === id)).filter(Boolean);
 
   const acciones = isAdmin ? `<div class="ficha-acciones"><button class="btn btn-outline btn-sm" onclick="editarFacultad('${_alEscAttr(f.id)}')">✏️ Editar profesor/a</button></div>` : '';
-  const roles = [f.esAdmin ? '🔑 Administrador' : '', f.rolBase ? (rolLabel[f.rolBase] || f.rolBase) : '',
-    si(f.director) ? '🏛 Director/a' : '', si(f.coordinator) ? '📋 Coordinador/a' : ''].filter(Boolean);
+  const roles = [f.esAdmin ? '🔑 Administrador' : '', f.rolBase ? (f.decanoTipo ? (DECANO_TIPOS[f.decanoTipo] || 'Decano/a') : (rolLabel[f.rolBase] || f.rolBase)) : '',
+    si(f.director) ? '🏛 Director/a' + (_dirigeDeptosDe(f).length ? ' · ' + _dirigeDeptosDe(f).join(', ') : '') : '', si(f.coordinator) ? '📋 Coordinador/a' : '',
+    f.activo === false ? '⏸ Inactivo/a' : ''].filter(Boolean);
   const info = `<div class="ficha-kv">
     <div>Correo</div><div>${f.email ? `<a href="mailto:${_alEsc(f.email)}">${_alEsc(f.email)}</a>` : '—'}</div>
     <div>Departamento</div><div>${d ? fichaLink('departamento', d.id, d.nombre) : _alEsc(f.departamento || '—')}</div>
@@ -23107,7 +23341,7 @@ function _renderFichaProfesor(facId) {
     <div>Roles</div><div>${roles.length ? roles.map(r => `<span class="badge badge-gold" style="margin:0 4px 2px 0">${_alEsc(r)}</span>`).join('') : '<span class="ficha-muted">Sin acceso al sistema</span>'}</div>
   </div>`;
 
-  const secs = (db.secciones || []).filter(s => _facultadDeSeccion(s)?.id === f.id);
+  const secs = (db.secciones || []).filter(s => _facultadesDeSeccion(s).some(x => x.id === f.id));
   const gruposAy = _seccionesUltimosAys(secs, 2);
   const secHtml = gruposAy.length ? gruposAy.map(({ ay, secciones }) => {
     const visibles = secciones.filter(_fichaPuedeVerSeccion);
@@ -23159,17 +23393,12 @@ function _avaluosVisiblesDeEstudiante(num) {
   const k = _clave(num);
   const suyos = (db.avaluos || []).filter(a => _clave(a.estudianteId) === k);
   const role = getEffectiveRole();
-  if (_viewAsRole && role !== 'admin' && role !== 'decano') {
-    if (role === 'director' || role === 'coordinator') return suyos;
-    return suyos.filter(a => { const s = (db.secciones || []).find(x => x.id === a.seccionId); return s && _fichaPuedeVerSeccion(s); });
-  }
   return _filterAvaluosByRole(suyos);
 }
 function _fichaPuedeVerEstudiante(num) {
   const role = getEffectiveRole();
   if (role === 'admin' || role === 'decano') return true;
   if (_seccionesDeEstudiante(num).some(_fichaPuedeVerSeccion)) return true;
-  if (_viewAsRole) return role === 'director' || role === 'coordinator';
   const est = _rosterDeEstudiante(num);
   if (est && canSeeEstudiante(est)) return true;
   return _avaluosVisiblesDeEstudiante(num).length > 0;
@@ -23980,7 +24209,7 @@ async function adiesShowReport() {
   const data = await adiesLoadData();
   const prog = await adiesLoadProgress();
   const allBlocks = data.sections.flatMap(s=>s.blocks||[]);
-  const users = (db.facultad || []).filter(f => f.rolBase || f.esAdmin)
+  const users = (db.facultad || []).filter(f => (f.rolBase || f.esAdmin) && f.activo !== false)
     .map(f => ({ username: f.email, nombre: f.nombre, rol: f.esAdmin ? 'admin' : f.rolBase }));
   const reportEl = document.getElementById('adies-report-body');
   if (!users.length || !allBlocks.length) {
@@ -24788,6 +25017,8 @@ function dummyShowStatus(msg, type) {
     <div class="form-group">
       <label>Profesor(a)</label>
       <input type="text" id="es-profesor" placeholder="ej. Dra. María Torres">
+      <div style="margin-top:6px"><label style="font-size:0.75rem;color:var(--muted)">Segundo profesor(a) (opcional)</label>
+      <select id="es-profesor2"><option value="">— Ninguno —</option></select></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-editar-seccion')">Cancelar</button>
@@ -25274,30 +25505,31 @@ function dummyShowStatus(msg, type) {
       <select id="fac-coord-prog-ids" multiple size="4"></select>
       <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Independiente de "Programa(s)" arriba: puede pertenecer a unos programas y coordinar otros. Puede coordinar más de uno.</div>
     </div>
-    <div class="form-row">
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
-        <input type="checkbox" id="fac-director" style="width:auto">
-        <label style="margin:0">Director/a de Departamento</label>
-      </div>
+    <div class="form-group">
+      <label>🏛 Dirige el/los departamento(s)</label>
+      <select id="fac-dirige-dept-ids" multiple size="4"></select>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:3px">Fijar un departamento aquí hace a la persona Director/a de ese departamento (puede dirigir más de uno).</div>
     </div>
     <div class="form-group">
-      <label>Rol de acceso al sistema</label>
-      <select id="fac-rol">
-        <option value="">— Sin acceso (solo directorio) —</option>
+      <label>🎓 Decanato</label>
+      <select id="fac-decano-tipo">
+        <option value="">— No es parte del decanato —</option>
         <option value="decano">Decano/a</option>
-        <option value="director">Director</option>
-        <option value="coordinator">Coordinador</option>
-        <option value="profesor">Profesor</option>
-        <option value="viewer">Visitante (solo lectura)</option>
+        <option value="decano_academicos">Decano/a Asociado/a para Asuntos Académicos</option>
+        <option value="decano_estudiantiles">Decano/a Auxiliar para Asuntos Estudiantiles</option>
       </select>
-      <div id="fac-rol-hint" style="font-size:0.72rem;color:var(--muted);margin-top:3px">
-        "Sin acceso" significa que la persona queda en el directorio pero no puede iniciar sesión. Si le das un rol a alguien nuevo, se le genera una contraseña temporal que verás al guardar.
-        Decano/a puede ver todo el sistema, pero no editar (a menos que también marques "Es Administrador" abajo).
-      </div>
     </div>
-    <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;background:var(--cream);padding:10px 14px;border-radius:8px">
-      <input type="checkbox" id="fac-es-admin" style="width:auto">
-      <label style="margin:0">🔑 Es Administrador (acceso total, independiente del rol de arriba — ej. puede ser Decano/a Y Administrador a la vez)</label>
+    <div style="background:var(--cream);padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:0.8rem">
+      <div style="font-weight:700;margin-bottom:6px">Acceso al sistema</div>
+      <div style="color:var(--muted);margin-bottom:8px">El rol se determina solo: Decanato &gt; Director/a (dirige departamento) &gt; Coordinador/a (coordina programa) &gt; Profesor/a (tiene programa asignado). Estas casillas añaden accesos que no se derivan de lo anterior.</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="fac-es-profesor" style="width:auto"> 👩‍🏫 Profesor/a (da clases aunque no tenga programa asignado)</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="fac-es-visitante" style="width:auto"> 👁 Visitante (solo lectura; aplica si no tiene otro rol)</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fac-es-admin" style="width:auto"> 🔑 Administrador (acceso total, se combina con cualquier otro rol)</label>
+      <div id="fac-rol-hint" style="margin-top:8px;font-weight:600"></div>
+    </div>
+    <div class="form-group" style="flex-direction:row;align-items:center;gap:8px;background:#ecfdf5;padding:10px 14px;border-radius:8px">
+      <input type="checkbox" id="fac-activo" style="width:auto" checked>
+      <label style="margin:0">✅ Activo/a — si se desmarca, pierde acceso al sistema pero su información y entradas permanecen</label>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-nueva-facultad')">Cancelar</button>
@@ -25383,14 +25615,24 @@ function dummyShowStatus(msg, type) {
     <!-- Admin View-As section -->
     <div id="perfil-viewas-section" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
       <div style="font-weight:700;font-size:0.88rem;margin-bottom:10px">🔍 Vista Como (Admin)</div>
-      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">Simula la vista de otro rol para verificar permisos. No afecta los datos.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:10px">Simula por completo el perfil de otro rol o persona (menús, botones de editar, secciones, informes). No afecta los datos.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <button class="btn btn-outline btn-sm" onclick="setViewAs('profesor');closeModal('modal-perfil')">👩‍🏫 Profesor/a</button>
-        <button class="btn btn-outline btn-sm" onclick="setViewAs('coordinator');closeModal('modal-perfil')">📋 Coordinador/a</button>
-        <button class="btn btn-outline btn-sm" onclick="setViewAs('director');closeModal('modal-perfil')">🏛 Director/a</button>
         <button class="btn btn-outline btn-sm" onclick="setViewAs('decano');closeModal('modal-perfil')">🎓 Decano/a</button>
-        <button class="btn btn-outline btn-sm" onclick="setViewAs('viewer');closeModal('modal-perfil')">👁 Viewer</button>
+        <button class="btn btn-outline btn-sm" onclick="setViewAs('viewer');closeModal('modal-perfil')">👁 Visitante</button>
         <button class="btn btn-primary btn-sm" onclick="setViewAs(null);closeModal('modal-perfil')">↩ Vista Admin</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:8px">
+        <div><label style="font-size:0.72rem;font-weight:700">📋 Coordinador/a de (Ctrl/Cmd + clic para varios programas)</label><select id="va-progs" multiple size="4" style="width:100%"></select></div>
+        <button class="btn btn-outline btn-sm" onclick="_vaCoord()">Ver como coordinador/a</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;margin-bottom:8px">
+        <div><label style="font-size:0.72rem;font-weight:700">🏛 Director/a del departamento</label><select id="va-dept" style="width:100%"></select></div>
+        <button class="btn btn-outline btn-sm" onclick="_vaDir()">Ver como director/a</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
+        <div><label style="font-size:0.72rem;font-weight:700">👤 Una persona de Facultad (con sus roles, programas y secciones reales)</label><select id="va-fac" style="width:100%"></select></div>
+        <button class="btn btn-outline btn-sm" onclick="_vaPersona()">Ver como esta persona</button>
       </div>
     </div>
     <div class="modal-footer">
