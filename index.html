@@ -22040,6 +22040,18 @@ const _xlSiNo = v => /^(si|sí|yes|true|1|x)$/i.test(_xlNorm(v));
 const _xlNombresDeptoNorm = t => _xlNorm(t).replace(/^(departamento|depto\.?)\s+(de(l| la)?\s+)?/, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const _xlTitulo = t => String(t || '').toLowerCase().replace(/(^|\s|\()([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(De|Del|La|Y|En)\b/g, w => w.toLowerCase()).replace(/\(([a-z0-9\- ]+)\)/gi, (m, g) => '(' + g.toUpperCase() + ')').replace(/^departamento de /i, '').replace(/^./, c => c.toUpperCase());
 
+// Coincidencia por nombre (cuando el correo no existe en el sistema): evita duplicar a quien ya está con otro correo
+const _xlTokensNombre = t => new Set(_xlNorm(t).replace(/[.,()]/g, ' ').split(' ').filter(w => w.length >= 3 && !['dra', 'dr', 'prof', 'mph', 'phd', 'del', 'las', 'los'].includes(w)));
+function _facXlCandidatoPorNombre(nombre) {
+  const a = _xlTokensNombre(nombre); if (a.size < 2) return null;
+  let mejor = null, mejorN = 0;
+  (db.facultad || []).forEach(f => {
+    const b = _xlTokensNombre(f.nombre); if (!b.size) return;
+    const n = [...a].filter(x => b.has(x)).length;
+    if (n >= 2 && n >= Math.min(a.size, b.size) && n > mejorN) { mejor = f; mejorN = n; }
+  });
+  return mejor;
+}
 function _facXlEsInforme(rows) {
   const h = (rows[0] || []).map(_xlNorm);
   return h.some(x => _XL_HDR.email.includes(x)) && h.some(x => _XL_HDR.nombre.includes(x) || _XL_HDR.situacionActual.includes(x));
@@ -22083,7 +22095,7 @@ function facXlProcesarFilas(rows, nombreArchivo) {
       (db.departamentos || []).find(d => { const a = _xlNombresDeptoNorm(d.nombre); return a && n && (a.includes(n) || n.includes(a)) && Math.min(a.length, n.length) >= 6; });
     decDept[t] = m ? { tipo: 'existente', id: m.id, reconocido: true } : { tipo: 'ninguno', reconocido: false };
   });
-  _facXl = { nombreArchivo, filas, decDept, dec: {}, sinCorreo, duplicados, aviso };
+  _facXl = { nombreArchivo, filas, decDept, dec: {}, vinc: {}, sinCorreo, duplicados, aviso };
   facXlRender();
   openModal('modal-fac-xl');
 }
@@ -22099,6 +22111,7 @@ function _facXlCampos() {
   const decKey = t => Object.entries(DECANO_TIPOS).find(([, l]) => _xlNorm(l) === _xlNorm(t))?.[0] || '';
   const sn = b => b ? 'Sí' : 'No';
   return [
+    { k: 'email', label: 'Correo electrónico', sys: f => f.email || '', apply: (f, v) => { f.email = String(v).toLowerCase(); } },
     { k: 'nombre', label: 'Nombre', sys: f => f.nombre || '', apply: (f, v) => { f.nombre = v; } },
     { k: 'rangoDocente', label: 'Rango docente', sys: f => f.rangoDocente || '', apply: (f, v) => { f.rangoDocente = v; } },
     { k: 'situacionActual', label: 'Situación actual', sys: f => f.activo === false ? 'INACTIVO' : (f.situacionActual || 'ACTIVO'),
@@ -22134,8 +22147,13 @@ function _facXlPlan() {
   const campos = _facXlCampos();
   const plan = [];
   _facXl.filas.forEach(fila => {
-    const ex = (db.facultad || []).find(f => (f.email || '').toLowerCase() === fila.email);
-    const item = { fila, ex, cambios: [], auto: [] };
+    let ex = (db.facultad || []).find(f => (f.email || '').toLowerCase() === fila.email);
+    let cand = null;
+    if (!ex && fila.nombre) {
+      cand = _facXlCandidatoPorNombre(fila.nombre);
+      if (cand && (_facXl.vinc[fila.email] || 'misma') === 'misma') ex = cand;
+    }
+    const item = { fila, ex, cand, cambios: [], auto: [] };
     campos.forEach(c => {
       const crudo = fila[c.k];
       const archivo = c.file ? c.file(crudo) : String(crudo || '');
@@ -22165,7 +22183,7 @@ function _facXlPlan() {
 function facXlRender() {
   const st = _facXl; if (!st) return;
   const plan = _facXlPlan(); st.plan = plan;
-  const nuevos = plan.filter(p => !p.ex).length;
+  const nuevos = plan.filter(p => !p.ex).length;   // sin coincidencia por correo ni por nombre
   const conCambios = plan.filter(p => p.ex && (p.cambios.length || p.auto.length)).length;
   const sinCambios = plan.filter(p => p.ex && !p.cambios.length && !p.auto.length).length;
   const esc = _alEsc;
@@ -22201,6 +22219,17 @@ function facXlRender() {
         <button class="btn btn-outline btn-sm" onclick="facXlTodos('cambiar')">Cambiar todo</button><button class="btn btn-outline btn-sm" onclick="facXlTodos('mantener')">Mantener todo</button></div>
       <div class="table-wrap"><table><thead><tr><th>Persona</th><th>Campo</th><th>En el sistema</th><th>En el archivo</th><th>Decisión</th></tr></thead><tbody>${filasCamb.join('')}</tbody></table></div></div>`
     : '<div style="' + ayuda + ';margin-bottom:12px">No hay cambios que contradigan lo que ya está en el sistema.</div>';
+  // Posibles coincidencias por nombre
+  const cands = plan.filter(p => p.cand);
+  const html3 = cands.length ? `<div class="card" style="padding:12px 14px;margin-bottom:12px;background:#eff6ff;border:1px solid #bfdbfe">
+      <div style="font-weight:700;margin-bottom:4px">Posibles coincidencias por nombre (${cands.length})</div>
+      <div style="${ayuda};margin-bottom:8px">Estos correos no están en el sistema, pero hay alguien con un nombre muy parecido. Indica si es la misma persona (se actualiza su registro y puedes decidir si cambiar su correo) o una persona distinta (se crea nueva).</div>
+      ${cands.map(p => { const v = st.vinc[p.fila.email] || 'misma'; const k = encodeURIComponent(p.fila.email); return `<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin-bottom:6px;font-size:0.8rem">
+        <div><strong>Archivo:</strong> ${esc(p.fila.nombre)}<br><span style="color:var(--muted)">${esc(p.fila.email)}</span></div>
+        <div><strong>Sistema:</strong> ${esc(p.cand.nombre)}<br><span style="color:var(--muted)">${esc(p.cand.email || '—')}</span></div>
+        <div style="white-space:nowrap"><label style="margin-right:10px"><input type="radio" name="v_${esc(p.fila.email)}" ${v === 'misma' ? 'checked' : ''} onchange="facXlVinc('${k}','misma')"> Misma persona</label>
+        <label><input type="radio" name="v_${esc(p.fila.email)}" ${v === 'nueva' ? 'checked' : ''} onchange="facXlVinc('${k}','nueva')"> Persona distinta</label></div></div>`; }).join('')}
+    </div>` : '';
   // avisos
   const noRecProg = new Set();
   const campos = _facXlCampos().filter(c => c.noRec);
@@ -22213,13 +22242,14 @@ function facXlRender() {
     <div style="${ayuda};margin-bottom:8px">Archivo: <strong>${esc(st.nombreArchivo || '')}</strong>. El correo electrónico identifica a cada persona; las celdas vacías nunca borran datos del sistema, y lo que el sistema tenga vacío se completa sin preguntar.</div>
     <div class="summary-bar" style="margin-bottom:12px"><div class="summary-chip"><strong>${nuevos}</strong> nuevos</div><div class="summary-chip"><strong>${conCambios}</strong> con datos a actualizar</div><div class="summary-chip"><strong>${sinCambios}</strong> sin cambios</div></div>
     ${avisos.length ? `<div style="${ayuda};margin-bottom:10px">${avisos.map(a => '• ' + a).join('<br>')}</div>` : ''}
-    ${html1}${html2}`;
+    ${html3}${html1}${html2}`;
 }
 function facXlDept(key, val) {
   const t = decodeURIComponent(key);
   _facXl.decDept[t] = val === '__nuevo__' ? { tipo: 'nuevo', nombre: _xlTitulo(t), reconocido: false } : val ? { tipo: 'existente', id: val, reconocido: false } : { tipo: 'ninguno', reconocido: false };
   facXlRender();
 }
+function facXlVinc(key, val) { _facXl.vinc[decodeURIComponent(key)] = val; facXlRender(); }
 function facXlDeptNombre(key, val) { const d = _facXl.decDept[decodeURIComponent(key)]; if (d) d.nombre = val; }
 function facXlDec(key, val) { _facXl.dec[decodeURIComponent(key)] = val; }
 function facXlTodos(val) { _facXl.plan.forEach(p => p.cambios.forEach(c => { _facXl.dec[p.fila.email + '|' + c.k] = val; })); facXlRender(); }
@@ -22249,7 +22279,7 @@ async function facXlAplicar() {
     const aplicar = k => {
       const c = porK[k]; if (!c) return;
       // Protecciones: no quitarte tu propia cuenta ni dejar al sistema sin administrador activo
-      if (!nueva && f.email === yo && ((k === 'esAdmin' && !_xlSiNo(fila[k]) && f.esAdmin) || (k === 'situacionActual' && !_xlEsActiva(fila[k])))) { omitidos++; return; }
+      if (!nueva && f.email === yo && ((k === 'esAdmin' && !_xlSiNo(fila[k]) && f.esAdmin) || (k === 'situacionActual' && !_xlEsActiva(fila[k])) || k === 'email')) { omitidos++; return; }
       c.apply(f, fila[k]); toco = true;
     };
     const idsDecididos = new Set(p.auto);
