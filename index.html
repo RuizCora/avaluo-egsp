@@ -1016,6 +1016,33 @@
   .dash-kpi-label { font-size: 0.73rem; font-weight: 600; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.05em; }
   .dash-kpi-sub { font-size: 0.7rem; color: var(--muted); }
+  .dash-kpi-clickable { cursor: pointer; }
+  .dash-kpi-clickable:hover { border-color: var(--egsp-coral); box-shadow: var(--shadow-lg); }
+  .dash-kpi-clickable .dash-kpi-num { color: var(--egsp-coral); }
+  .dash-detail-panel {
+    background: var(--white); border: 1.5px solid var(--border); border-radius: 12px;
+    padding: 16px; margin-bottom: 14px; animation: fadeIn 0.2s;
+  }
+  .dash-detail-panel .detail-title {
+    font-size: 0.82rem; font-weight: 800; color: var(--ink); margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dash-detail-panel .detail-close {
+    margin-left: auto; cursor: pointer; font-size: 0.9rem; color: var(--muted);
+    background: none; border: none; padding: 2px 6px; border-radius: 6px;
+  }
+  .dash-detail-panel .detail-close:hover { background: var(--cream); }
+  .dash-completion-strip {
+    background: var(--white); border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 12px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 14px;
+  }
+  .dash-completion-strip .comp-pct {
+    font-size: 1.6rem; font-weight: 800; font-family: 'Montserrat', sans-serif;
+  }
+  .dash-completion-strip .comp-bar {
+    flex: 1; height: 10px; background: var(--cream); border-radius: 6px; overflow: hidden;
+  }
+  .dash-completion-strip .comp-bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s; }
 
   /* Charts layout */
   .dash-charts-row {
@@ -1607,82 +1634,35 @@
 <!-- ==================== DASHBOARD ==================== -->
 <div id="panel-dashboard" class="panel active">
 
-  <!-- ── FILTER BAR ─────────────────────────────────────── -->
-  <div class="dash-filter-bar">
-    <div class="dash-filter-group">
-      <label class="dash-filter-label">Año Académico</label>
-      <select id="dash-ay" onchange="renderDashboard()" class="dash-select">
-        <option value="">Todos</option>
-      </select>
-    </div>
-    <div class="dash-filter-group">
-      <label class="dash-filter-label">Trimestre</label>
-      <select id="dash-term" onchange="renderDashboard()" class="dash-select">
-        <option value="">Todos</option>
-        <option value="T1">T1 (Ago–Oct)</option>
-        <option value="T2">T2 (Nov–Feb)</option>
-        <option value="T3">T3 (Mar–May)</option>
-        <option value="V">V (Verano)</option>
-      </select>
-    </div>
-    <div class="dash-filter-group">
-      <label class="dash-filter-label">Programa</label>
-      <select id="dash-prog" onchange="renderDashboard()" class="dash-select">
-        <option value="">Todos</option>
-      </select>
-    </div>
-    <button class="dash-reset-btn" onclick="resetDashFilters()">↺ Reiniciar</button>
-    <div id="dash-scope-badge" class="dash-scope-badge" style="display:none"></div>
-  </div>
+  <!-- ── COMPLETION % BAR (coord/dir/decano only) ────────── -->
+  <div id="dash-completion-bar" style="display:none"></div>
 
-  <!-- ── KPI CARDS ──────────────────────────────────────── -->
-  <div id="dash-kpi-row" class="dash-kpi-row"></div>
-
-  <!-- ── CHARTS ROW 1 ───────────────────────────────────── -->
-  <div class="dash-charts-row">
-    <div class="dash-chart-card" style="flex:2">
-      <div class="dash-chart-header">
-        <div class="dash-chart-title">📊 Logro Promedio por Competencia</div>
-        <div class="dash-chart-sub" id="dash-bar-sub"></div>
-      </div>
-      <div id="dash-bar-chart" class="dash-chart-body"></div>
+  <!-- ── VIEW TOGGLE ─────────────────────────────────────── -->
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="dash-scope-badge" class="dash-scope-badge" style="display:none"></div>
     </div>
-    <div class="dash-chart-card" style="flex:1">
-      <div class="dash-chart-header">
-        <div class="dash-chart-title">🥧 Distribución de Niveles</div>
-        <div class="dash-chart-sub" id="dash-pie-sub"></div>
-      </div>
-      <div id="dash-pie-chart" class="dash-chart-body" style="display:flex;align-items:center;justify-content:center"></div>
+    <div style="display:flex;gap:0;border:1.5px solid var(--border);border-radius:8px;overflow:hidden">
+      <button id="dash-view-personal" class="btn btn-sm" onclick="_dashSetView('personal')"
+        style="border:none;border-radius:0;font-size:0.78rem;padding:6px 16px;font-weight:700">👤 Personal</button>
+      <button id="dash-view-colectiva" class="btn btn-sm btn-outline" onclick="_dashSetView('colectiva')"
+        style="border:none;border-radius:0;font-size:0.78rem;padding:6px 16px;font-weight:700;border-left:1.5px solid var(--border)">🏛 Colectiva</button>
     </div>
   </div>
 
-  <!-- ── CHARTS ROW 2 ───────────────────────────────────── -->
-  <div class="dash-charts-row">
-    <div class="dash-chart-card" style="flex:2">
-      <div class="dash-chart-header">
-        <div class="dash-chart-title">📈 Tendencia de Logro por Trimestre</div>
-        <div class="dash-chart-sub" id="dash-line-sub"></div>
-      </div>
-      <div id="dash-line-chart" class="dash-chart-body"></div>
-    </div>
-    <div class="dash-chart-card" style="flex:1">
-      <div class="dash-chart-header">
-        <div class="dash-chart-title">🗂 Cobertura por Programa</div>
-      </div>
-      <div id="dash-prog-table" class="dash-chart-body" style="overflow-y:auto;max-height:260px"></div>
-    </div>
+  <!-- ── PERSONAL VIEW ───────────────────────────────────── -->
+  <div id="dash-personal" style="display:block">
+    <div id="dash-kpi-row" class="dash-kpi-row"></div>
+    <div id="dash-personal-lists" style="margin-top:16px"></div>
+    <div id="dash-personal-viz" style="margin-top:18px"></div>
   </div>
 
-  <!-- ── RECENT ACTIVITY ────────────────────────────────── -->
-  <div class="dash-charts-row">
-    <div class="dash-chart-card" style="flex:1">
-      <div class="dash-chart-header"><div class="dash-chart-title">🕐 Actividad Reciente</div></div>
-      <div id="dash-recent" class="dash-chart-body"></div>
-    </div>
-    <div class="dash-chart-card" style="flex:1">
-      <div class="dash-chart-header"><div class="dash-chart-title">🏆 Top Competencias Logradas</div></div>
-      <div id="dash-top-comps" class="dash-chart-body"></div>
-    </div>
+  <!-- ── COLLECTIVE VIEW ─────────────────────────────────── -->
+  <div id="dash-colectiva" style="display:none">
+    <!-- Admin filter bar for collective view -->
+    <div id="dash-col-filters" class="dash-filter-bar" style="margin-bottom:16px"></div>
+    <div id="dash-col-admin" style="margin-bottom:18px"></div>
+    <div id="dash-col-content"></div>
   </div>
 
 </div>
@@ -1691,14 +1671,18 @@
 <div id="panel-dashboard2" class="panel">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
     <div>
-      <div class="section-title">📊 Analytics Avanzado</div>
-      <div class="section-sub">Análisis profundo de logro, tendencias y brechas por programa, curso y cohorte</div>
+      <div class="section-title">📊 Analytics</div>
+      <div class="section-sub">Mapa de calor de logro por competencia y programa</div>
     </div>
     <button class="btn btn-outline btn-sm" onclick="renderDashboard2()">↺ Actualizar</button>
   </div>
 
   <!-- Filter bar -->
   <div class="dash-filter-bar" style="margin-bottom:18px">
+    <div class="dash-filter-group">
+      <label class="dash-filter-label">Departamento</label>
+      <select id="d2-dept" class="dash-select" onchange="renderDashboard2()"><option value="">Todos</option></select>
+    </div>
     <div class="dash-filter-group">
       <label class="dash-filter-label">Programa</label>
       <select id="d2-prog" class="dash-select" onchange="renderDashboard2()"><option value="">Todos</option></select>
@@ -1709,52 +1693,14 @@
         <option value="">Todos</option><option value="T1">T1</option><option value="T2">T2</option><option value="T3">T3</option><option value="V">V</option>
       </select>
     </div>
-    <div class="dash-filter-group">
-      <label class="dash-filter-label">Umbral Logro</label>
-      <select id="d2-threshold" class="dash-select" onchange="renderDashboard2()">
-        <option value="2.5">≥ 2.5 (Óptimo)</option>
-        <option value="2.0">≥ 2.0</option>
-        <option value="1.5" selected>≥ 1.5 (Mínimo)</option>
-        <option value="1.0">≥ 1.0</option>
-      </select>
-    </div>
   </div>
 
-  <!-- Section 1: Heatmap competencies × programs -->
-  <div class="card" style="margin-bottom:18px">
+  <!-- Heatmap competencies × programs -->
+  <div class="card">
     <div class="card-header">
       <div class="card-title">🔥 Mapa de Calor — Logro por Competencia y Programa</div>
     </div>
     <div id="d2-heatmap" style="overflow-x:auto"></div>
-  </div>
-
-  <!-- Section 2: Grade distribution -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
-    <div class="card">
-      <div class="card-header"><div class="card-title">🎓 Distribución de Notas Finales</div></div>
-      <div id="d2-grade-dist"></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div class="card-title">⚠️ Competencias con Brecha Más Alta</div></div>
-      <div id="d2-gap-chart"></div>
-    </div>
-  </div>
-
-  <!-- Section 3: Course completion & student summary -->
-  <div class="card" style="margin-bottom:18px">
-    <div class="card-header">
-      <div class="card-title">📋 Resumen de Logro por Curso</div>
-    </div>
-    <div id="d2-course-summary" style="overflow-x:auto"></div>
-  </div>
-
-  <!-- Section 4: Cohort progression (students in multiple courses) -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">👥 Estudiantes con Múltiples Cursos Evaluados</div>
-      <span id="d2-cohort-count" class="badge badge-blue"></span>
-    </div>
-    <div id="d2-cohort-table" style="overflow-x:auto"></div>
   </div>
 </div>
 
@@ -16873,471 +16819,695 @@ function renderR9() {
 }
 
 // ======================== DASHBOARD ========================
-function renderDashboard() {
-  // ── POPULATE FILTERS ──────────────────────────────────────────
-  _dashPopulateFilters();
+let _dashCurrentView = 'personal';
 
-  // ── READ FILTERS ──────────────────────────────────────────────
-  const filterAY   = document.getElementById('dash-ay')?.value   || '';
-  const filterTerm = document.getElementById('dash-term')?.value || '';
-  const filterProg = document.getElementById('dash-prog')?.value || '';
+function _dashSetView(view) {
+  _dashCurrentView = view;
+  const pBtn = document.getElementById('dash-view-personal');
+  const cBtn = document.getElementById('dash-view-colectiva');
+  const pEl  = document.getElementById('dash-personal');
+  const cEl  = document.getElementById('dash-colectiva');
+  if (view === 'personal') {
+    pBtn.className = 'btn btn-sm'; pBtn.style.background = 'var(--egsp-coral)'; pBtn.style.color = '#fff';
+    cBtn.className = 'btn btn-sm btn-outline'; cBtn.style.background = ''; cBtn.style.color = '';
+    pEl.style.display = 'block'; cEl.style.display = 'none';
+  } else {
+    cBtn.className = 'btn btn-sm'; cBtn.style.background = 'var(--egsp-coral)'; cBtn.style.color = '#fff';
+    pBtn.className = 'btn btn-sm btn-outline'; pBtn.style.background = ''; pBtn.style.color = '';
+    pEl.style.display = 'none'; cEl.style.display = 'block';
+  }
+  renderDashboard();
+}
+
+function renderDashboard() {
+  // Ensure toggle button state matches current view
+  const pBtn = document.getElementById('dash-view-personal');
+  const cBtn = document.getElementById('dash-view-colectiva');
+  const pEl  = document.getElementById('dash-personal');
+  const cEl  = document.getElementById('dash-colectiva');
+  if (pBtn && cBtn) {
+    if (_dashCurrentView === 'personal') {
+      pBtn.style.background = 'var(--egsp-coral)'; pBtn.style.color = '#fff'; pBtn.className = 'btn btn-sm';
+      cBtn.style.background = ''; cBtn.style.color = ''; cBtn.className = 'btn btn-sm btn-outline';
+      if (pEl) pEl.style.display = 'block';
+      if (cEl) cEl.style.display = 'none';
+    } else {
+      cBtn.style.background = 'var(--egsp-coral)'; cBtn.style.color = '#fff'; cBtn.className = 'btn btn-sm';
+      pBtn.style.background = ''; pBtn.style.color = ''; pBtn.className = 'btn btn-sm btn-outline';
+      if (pEl) pEl.style.display = 'none';
+      if (cEl) cEl.style.display = 'block';
+    }
+  }
+
+  const effRole = getEffectiveRole();
+  const e = currentUser?.efectivo;
+  const isAdmin = effRole === 'admin';
+  const isDecano = effRole === 'decano';
+  const isDirector = e?.isDirector;
+  const isCoord = e?.isCoordinator;
+  const isProf = !isAdmin && !isDecano && !isDirector && !isCoord;
 
   // ── SCOPE BADGE ───────────────────────────────────────────────
   const scopeBadge = document.getElementById('dash-scope-badge');
-  if (currentUser && currentUser.rol !== 'admin') {
-    const label = getEffectiveRoleLabel();
-    scopeBadge.textContent = '👤 Vista: ' + label;
+  if (currentUser && !isAdmin) {
+    scopeBadge.textContent = '👤 ' + getEffectiveRoleLabel();
     scopeBadge.style.display = 'flex';
   } else {
     scopeBadge.style.display = 'none';
   }
 
-  // ── FILTER AVALUOS ────────────────────────────────────────────
-  let avaluos = db.avaluos || [];
-
-  // Role scoping — Fase 5: el Panel/Dashboard muestra información GENERAL
-  // (agregada) de todos los programas para coordinador/director/decano —
-  // el acceso restringido por programa aplica solo a datos ESPECÍFICOS de
-  // estudiantes (Secciones, Avalúo, Base de Datos, Reportes — ver
-  // canSeeSeccion() y _filterAvaluosByRole()), no a estas cifras generales.
-  const effRole = getEffectiveRole();
-  const e = currentUser?.efectivo;
-  if (effRole === 'profesor' && !(e?.isCoordinator || e?.isDirector)) {
-    // Professor: only their sections
-    const mySecIds = (db.secciones||[])
-      .filter(s => canSeeSeccion(s))
-      .map(s => s.id);
-    avaluos = avaluos.filter(a => mySecIds.includes(a.seccionId) || !a.seccionId);
+  // ── COMPLETION % BAR (coord/dir/decano/admin) ─────────────────
+  const compBar = document.getElementById('dash-completion-bar');
+  if (!isProf) {
+    const allSecs = db.secciones || [];
+    let scopedSecs = allSecs;
+    if (isCoord && e.programas?.length) {
+      scopedSecs = allSecs.filter(s => {
+        const c = db.cursos.find(cc=>cc.id===s.cursoId);
+        return e.programas.includes(c?.programa);
+      });
+    } else if (isDirector && e.programas?.length) {
+      scopedSecs = allSecs.filter(s => {
+        const c = db.cursos.find(cc=>cc.id===s.cursoId);
+        return e.programas.includes(c?.programa);
+      });
+    }
+    const totalSecsCount = scopedSecs.length;
+    const secsWithAvaluo = new Set((db.avaluos||[]).map(a=>a.seccionId).filter(Boolean));
+    const completedSecs = scopedSecs.filter(s => secsWithAvaluo.has(s.id)).length;
+    const pct = totalSecsCount > 0 ? Math.round((completedSecs / totalSecsCount) * 100) : 0;
+    const pctColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+    const scopeLabel = isDecano || isAdmin ? 'Escuela' : isDirector ? 'Departamento' : 'Programa';
+    compBar.style.display = 'flex';
+    compBar.innerHTML = `<div class="dash-completion-strip">
+      <div style="min-width:60px;text-align:center">
+        <div class="comp-pct" style="color:${pctColor}">${pct}%</div>
+        <div style="font-size:0.65rem;color:var(--muted);text-transform:uppercase">Avalúo</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:0.78rem;font-weight:700;margin-bottom:4px">Cursos con avalúo completado — ${scopeLabel}</div>
+        <div class="comp-bar"><div class="comp-bar-fill" style="width:${pct}%;background:${pctColor}"></div></div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:3px">${completedSecs} de ${totalSecsCount} secciones</div>
+      </div>
+    </div>`;
+  } else {
+    compBar.style.display = 'none';
   }
 
-  // Program filter
-  if (filterProg) {
-    avaluos = avaluos.filter(a => {
-      const curso = db.cursos.find(cc => cc.id === a.cursoId);
-      return curso?.programa === filterProg;
-    });
+  if (_dashCurrentView === 'personal') {
+    _renderDashPersonal(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin);
+  } else {
+    _renderDashColectiva(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin);
   }
+}
 
-  // AY + term filter
-  if (filterAY || filterTerm) {
-    avaluos = avaluos.filter(a => {
-      const sec = db.secciones?.find(s => s.id === a.seccionId);
-      const termStr = sec?.semestre || a.semestre || '';
-      if (!termStr) return !filterAY && !filterTerm;
-      const parsed = parseTermString(termStr);
-      if (!parsed) return false;
-      const ay = getAcademicYear(termStr);
-      if (filterAY && String(ay) !== filterAY) return false;
-      if (filterTerm && parsed.term !== filterTerm) return false;
-      return true;
-    });
-  }
+// ── PERSONAL VIEW ────────────────────────────────────────────────
+function _renderDashPersonal(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin) {
+  const kpiEl = document.getElementById('dash-kpi-row');
+  const listsEl = document.getElementById('dash-personal-lists');
+  const vizEl = document.getElementById('dash-personal-viz');
 
-  // ── COMPUTE STATISTICS ────────────────────────────────────────
-  // nivel: 3=Logrado, 2=En Progreso, 1=No Logrado, 0=No Evaluado
+  // ── Professor's own data ──────────────────────────────────────
+  const mySecs = (db.secciones||[]).filter(s => canSeeSeccion(s));
+  const mySecIds = mySecs.map(s => s.id);
+  const myAvaluos = (db.avaluos||[]).filter(a => mySecIds.includes(a.seccionId));
+  const myAdvisees = e?.advisees || [];
+
+  // Pending vs completed avalúos: a section is "pending" if it has no avalúos
+  const secsWithAvaluo = new Set(myAvaluos.map(a => a.seccionId).filter(Boolean));
+  const pendingSecs = mySecs.filter(s => !secsWithAvaluo.has(s.id));
+  const completedSecs = mySecs.filter(s => secsWithAvaluo.has(s.id));
+
+  // Completed avalúo count (unique sections)
+  const completedCount = completedSecs.length;
+  const pendingCount = pendingSecs.length;
+
+  // Advisees at risk (from R6 logic)
+  const adviseeStudents = (db.estudiantes||[]).filter(est => myAdvisees.includes(est.numero));
+  const adviseeAvaluos = (db.avaluos||[]).filter(av =>
+    myAdvisees.includes(av.estudianteId) || myAdvisees.includes(av.estudiante)
+  );
   const NIVEL_VAL = { '3':3, '2':2, '1':1, '0':0, 'L':3, 'P':2, 'N':1 };
-  const NIVEL_LABEL = { '3':'Logrado', '2':'En Progreso', '1':'No Logrado', '0':'No Evaluado',
-                        'L':'Logrado', 'P':'En Progreso', 'N':'No Logrado' };
+  let adviseeAtRisk = 0;
+  const adviseeIds = new Set(myAdvisees);
+  const adviseeEvalMap = {};
+  adviseeAvaluos.forEach(av => {
+    const id = av.estudianteId || av.estudiante;
+    if (!adviseeEvalMap[id]) adviseeEvalMap[id] = [];
+    const evs = _allEvals([av]);
+    adviseeEvalMap[id].push(...evs);
+  });
+  Object.entries(adviseeEvalMap).forEach(([id, evs]) => {
+    if (!evs.length) return;
+    const avg = evs.reduce((s,ev)=>s+ev.val,0) / evs.length;
+    if (avg < 1.5) adviseeAtRisk++;
+  });
 
-  // All individual evaluations (student × competency)
+  // ── KPI CARDS ─────────────────────────────────────────────────
+  kpiEl.innerHTML = `
+    <div class="dash-kpi dash-kpi-clickable" onclick="_dashToggleDetail('pendientes')">
+      <div class="dash-kpi-accent" style="background:#f59e0b"></div>
+      <div class="dash-kpi-icon">⏳</div>
+      <div class="dash-kpi-num">${pendingCount}</div>
+      <div class="dash-kpi-label">Avalúos Pendientes</div>
+    </div>
+    <div class="dash-kpi dash-kpi-clickable" onclick="_dashToggleDetail('completados')">
+      <div class="dash-kpi-accent" style="background:#10b981"></div>
+      <div class="dash-kpi-icon">✅</div>
+      <div class="dash-kpi-num">${completedCount}</div>
+      <div class="dash-kpi-label">Avalúos Completados</div>
+    </div>
+    <div class="dash-kpi dash-kpi-clickable" onclick="_dashToggleDetail('asesorados')">
+      <div class="dash-kpi-accent" style="background:#3b82f6"></div>
+      <div class="dash-kpi-icon">🎓</div>
+      <div class="dash-kpi-num">${myAdvisees.length}</div>
+      <div class="dash-kpi-label">Estudiantes Asesorados</div>
+    </div>
+    <div class="dash-kpi${adviseeAtRisk > 0 ? ' dash-kpi-clickable' : ''}" ${adviseeAtRisk > 0 ? `onclick="_dashToggleDetail('riesgo')"` : ''}>
+      <div class="dash-kpi-accent" style="background:${adviseeAtRisk > 0 ? '#ef4444' : '#d1d5db'}"></div>
+      <div class="dash-kpi-icon">⚠️</div>
+      <div class="dash-kpi-num" style="color:${adviseeAtRisk > 0 ? '#ef4444' : 'var(--muted)'}">${adviseeAtRisk}</div>
+      <div class="dash-kpi-label">Asesorados en Riesgo</div>
+    </div>
+  `;
+
+  // ── DETAIL LISTS (populated on click) ─────────────────────────
+  listsEl.innerHTML = `<div id="dash-detail-pendientes" style="display:none"></div>
+    <div id="dash-detail-completados" style="display:none"></div>
+    <div id="dash-detail-asesorados" style="display:none"></div>
+    <div id="dash-detail-riesgo" style="display:none"></div>`;
+
+  // Pre-populate detail data (hidden until clicked)
+  _dashBuildDetailPendientes(pendingSecs);
+  _dashBuildDetailCompletados(completedSecs, myAvaluos);
+  _dashBuildDetailAsesorados(myAdvisees);
+  _dashBuildDetailRiesgo(adviseeEvalMap, adviseeAtRisk);
+
+  // ── VISUALIZATION: course performance ─────────────────────────
   const allEvals = [];
-  avaluos.forEach(av => {
-    // New format: av.evaluaciones (array)
-    if (av.evaluaciones && av.evaluaciones.length) {
+  myAvaluos.forEach(av => {
+    if (av.evaluaciones?.length) {
       av.evaluaciones.forEach(ev => {
         const nivel = ev.nivel;
         if (nivel === '' || nivel === undefined || nivel === null) return;
         const val = NIVEL_VAL[String(nivel)];
         if (val !== undefined) {
-          allEvals.push({ compId: ev.competenciaId || ev.competenciaCodigo, nivel: String(nivel), val,
-            avaluoId: av.id, cursoId: av.cursoId, semestre: av.semestre, fecha: av.fecha });
+          allEvals.push({ compId: ev.competenciaId || ev.competenciaCodigo, val, cursoId: av.cursoId });
         }
       });
-      return;
+    } else {
+      Object.entries(av.respuestas||{}).forEach(([compId, resp]) => {
+        const nivel = resp?.nivel ?? resp;
+        const val = NIVEL_VAL[String(nivel)];
+        if (val !== undefined) allEvals.push({ compId, val, cursoId: av.cursoId });
+      });
     }
-    // Old format: av.respuestas (object)
-    const respuestas = av.respuestas || {};
-    Object.entries(respuestas).forEach(([compId, resp]) => {
-      const nivel = resp?.nivel ?? resp;
-      const val = NIVEL_VAL[String(nivel)];
-      if (val !== undefined) {
-        allEvals.push({ compId, nivel: String(nivel), val, avaluoId: av.id,
-          cursoId: av.cursoId, semestre: av.semestre, fecha: av.fecha });
-      }
-    });
   });
 
-  const totalAvaluos  = avaluos.length;
-  const totalEsts     = new Set(avaluos.map(a => a.estudianteId || a.estudiante)).size;
-  const totalSecs     = new Set(avaluos.map(a => a.seccionId).filter(Boolean)).size;
-  const avgAttainment = allEvals.length
-    ? (allEvals.reduce((s,e) => s + e.val, 0) / allEvals.length).toFixed(2)
-    : null;
+  if (allEvals.length) {
+    // Bar chart: avg per competency in professor's courses
+    const compStats = {};
+    allEvals.forEach(ev => {
+      const code = ev.compId?.startsWith?.('C') ? ev.compId :
+        (db.competencias.find(cc => cc.id === ev.compId)?.codigo || ev.compId);
+      if (!compStats[code]) compStats[code] = { sum:0, count:0, desc: db.competencias.find(cc=>cc.codigo===code||cc.id===ev.compId)?.descripcion||'' };
+      compStats[code].sum += ev.val;
+      compStats[code].count += 1;
+    });
+    const compEntries = Object.entries(compStats)
+      .map(([code,s]) => ({code, avg: s.sum/s.count, count: s.count, desc: s.desc}))
+      .sort((a,b) => b.avg - a.avg);
 
-  // Programs covered
-  const progsCovered = new Set(
-    avaluos.map(a => db.cursos.find(cc => cc.id === a.cursoId)?.programa).filter(Boolean)
-  ).size;
+    const avgOverall = allEvals.reduce((s,ev)=>s+ev.val,0) / allEvals.length;
+    const avgCol = avgOverall >= 2.5 ? '#10b981' : avgOverall >= 1.5 ? '#f59e0b' : '#ef4444';
 
-  // ── KPI CARDS ─────────────────────────────────────────────────
-  const kpiEl = document.getElementById('dash-kpi-row');
-  const attColor = avgAttainment >= 2.5 ? '#10b981' : avgAttainment >= 1.5 ? '#f59e0b' : '#ef4444';
-  const attLabel = avgAttainment >= 2.5 ? 'Óptimo' : avgAttainment >= 1.5 ? 'En progreso' : 'Necesita atención';
-  kpiEl.innerHTML = `
-    <div class="dash-kpi">
-      <div class="dash-kpi-accent" style="background:var(--egsp-coral)"></div>
-      <div class="dash-kpi-icon">✏️</div>
-      <div class="dash-kpi-num">${totalAvaluos}</div>
-      <div class="dash-kpi-label">Avalúos</div>
-    </div>
-    <div class="dash-kpi">
-      <div class="dash-kpi-accent" style="background:#3b82f6"></div>
-      <div class="dash-kpi-icon">👥</div>
-      <div class="dash-kpi-num">${totalEsts}</div>
-      <div class="dash-kpi-label">Estudiantes Evaluados</div>
-    </div>
-    <div class="dash-kpi">
-      <div class="dash-kpi-accent" style="background:#8b5cf6"></div>
-      <div class="dash-kpi-icon">🏫</div>
-      <div class="dash-kpi-num">${totalSecs}</div>
-      <div class="dash-kpi-label">Secciones</div>
-    </div>
-    <div class="dash-kpi">
-      <div class="dash-kpi-accent" style="background:${attColor}"></div>
-      <div class="dash-kpi-icon">🎯</div>
-      <div class="dash-kpi-num" style="color:${attColor}">${avgAttainment ?? '—'}</div>
-      <div class="dash-kpi-label">Logro Promedio</div>
-      ${avgAttainment ? `<div class="dash-kpi-sub" style="color:${attColor}">${attLabel} (escala 0–3)</div>` : ''}
-    </div>
-    <div class="dash-kpi">
-      <div class="dash-kpi-accent" style="background:#10b981"></div>
-      <div class="dash-kpi-icon">🗂</div>
-      <div class="dash-kpi-num">${progsCovered}</div>
-      <div class="dash-kpi-label">Programas con Datos</div>
+    vizEl.innerHTML = `
+      <div class="dash-chart-card">
+        <div class="dash-chart-header">
+          <div class="dash-chart-title">📊 Ejecución en mis cursos</div>
+          <div class="dash-chart-sub">${allEvals.length} evaluaciones · Logro promedio: <strong style="color:${avgCol}">${avgOverall.toFixed(2)}</strong></div>
+        </div>
+        <div class="dash-chart-body">
+          <div class="dash-bar-wrap">
+            ${compEntries.slice(0,15).map(c => {
+              const pct = Math.round((c.avg/3)*100);
+              const col = c.avg >= 2.5 ? '#10b981' : c.avg >= 1.5 ? '#f59e0b' : '#ef4444';
+              return `<div class="dash-bar-row" title="${c.desc} (n=${c.count})">
+                <div class="dash-bar-label">${c.code}</div>
+                <div class="dash-bar-track">
+                  <div class="dash-bar-fill" style="width:${pct}%;background:${col}">
+                    ${pct > 20 ? `<span class="dash-bar-val">${c.avg.toFixed(2)}</span>` : ''}
+                  </div>
+                </div>
+                ${pct <= 20 ? `<span class="dash-bar-val-out">${c.avg.toFixed(2)}</span>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>`;
+  } else {
+    vizEl.innerHTML = `<div class="dash-chart-card">
+      <div class="dash-chart-header"><div class="dash-chart-title">📊 Ejecución en mis cursos</div></div>
+      <div class="dash-chart-body"><div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos de avalúo en tus secciones</p></div></div>
+    </div>`;
+  }
+}
+
+// ── Detail panel helpers ─────────────────────────────────────────
+function _dashToggleDetail(panelId) {
+  const el = document.getElementById('dash-detail-' + panelId);
+  if (!el) return;
+  const wasVisible = el.style.display !== 'none';
+  // hide all detail panels
+  document.querySelectorAll('[id^="dash-detail-"]').forEach(p => p.style.display = 'none');
+  if (!wasVisible) el.style.display = 'block';
+}
+
+function _dashBuildDetailPendientes(pendingSecs) {
+  const el = document.getElementById('dash-detail-pendientes');
+  if (!el) return;
+  if (!pendingSecs.length) {
+    el.innerHTML = `<div class="dash-detail-panel"><div class="detail-title">⏳ Avalúos Pendientes <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+      <p style="color:var(--muted);font-size:0.82rem">No tienes secciones pendientes de avalúo.</p></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="dash-detail-panel">
+    <div class="detail-title">⏳ Avalúos Pendientes (${pendingSecs.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
+      <thead><tr><th>Curso</th><th>Sección</th><th>Trimestre</th><th></th></tr></thead>
+      <tbody>${pendingSecs.map(s => {
+        const curso = db.cursos.find(c=>c.id===s.cursoId);
+        return `<tr>
+          <td><strong>${curso?.codigo||'—'}</strong> <span style="color:var(--muted)">${curso?.nombre||''}</span></td>
+          <td>${s.seccion||s.id}</td>
+          <td>${s.semestre||'—'}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="showTab('avaluo',document.querySelector('[data-tab=avaluo]'))">Ir a Avalúo</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>`;
+}
+
+function _dashBuildDetailCompletados(completedSecs, myAvaluos) {
+  const el = document.getElementById('dash-detail-completados');
+  if (!el) return;
+  if (!completedSecs.length) {
+    el.innerHTML = `<div class="dash-detail-panel"><div class="detail-title">✅ Avalúos Completados <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+      <p style="color:var(--muted);font-size:0.82rem">No hay avalúos completados aún.</p></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="dash-detail-panel">
+    <div class="detail-title">✅ Avalúos Completados (${completedSecs.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
+      <thead><tr><th>Curso</th><th>Sección</th><th>Trimestre</th><th>Estudiantes</th></tr></thead>
+      <tbody>${completedSecs.map(s => {
+        const curso = db.cursos.find(c=>c.id===s.cursoId);
+        const secAvaluos = myAvaluos.filter(a=>a.seccionId===s.id);
+        const estCount = new Set(secAvaluos.map(a=>a.estudianteId||a.estudiante)).size;
+        return `<tr>
+          <td><strong>${curso?.codigo||'—'}</strong> <span style="color:var(--muted)">${curso?.nombre||''}</span></td>
+          <td>${s.seccion||s.id}</td>
+          <td>${s.semestre||'—'}</td>
+          <td style="text-align:center">${estCount}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>`;
+}
+
+function _dashBuildDetailAsesorados(adviseeIds) {
+  const el = document.getElementById('dash-detail-asesorados');
+  if (!el) return;
+  if (!adviseeIds.length) {
+    el.innerHTML = `<div class="dash-detail-panel"><div class="detail-title">🎓 Estudiantes Asesorados <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+      <p style="color:var(--muted);font-size:0.82rem">No tienes estudiantes asignados para asesoría.</p></div>`;
+    return;
+  }
+  const students = adviseeIds.map(id => {
+    const est = (db.estudiantes||[]).find(e=>e.numero===id);
+    return { id, nombre: est?.nombre || id };
+  }).sort((a,b) => a.nombre.localeCompare(b.nombre));
+
+  el.innerHTML = `<div class="dash-detail-panel">
+    <div class="detail-title">🎓 Estudiantes Asesorados (${students.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
+      <thead><tr><th>Estudiante</th><th>ID</th></tr></thead>
+      <tbody>${students.map(s =>
+        `<tr><td><strong>${fichaLinkEstudiante(s.id, s.nombre)}</strong></td><td style="color:var(--muted)">${s.id}</td></tr>`
+      ).join('')}</tbody>
+    </table></div></div>`;
+}
+
+function _dashBuildDetailRiesgo(adviseeEvalMap, count) {
+  const el = document.getElementById('dash-detail-riesgo');
+  if (!el) return;
+  if (!count) {
+    el.innerHTML = `<div class="dash-detail-panel"><div class="detail-title">⚠️ Asesorados en Riesgo <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+      <p style="color:var(--muted);font-size:0.82rem">Ningún asesorado en riesgo.</p></div>`;
+    return;
+  }
+  const atRisk = [];
+  Object.entries(adviseeEvalMap).forEach(([id, evs]) => {
+    if (!evs.length) return;
+    const avg = evs.reduce((s,ev)=>s+ev.val,0) / evs.length;
+    if (avg < 1.5) {
+      const est = (db.estudiantes||[]).find(e=>e.numero===id);
+      atRisk.push({ id, nombre: est?.nombre || id, avg });
+    }
+  });
+  atRisk.sort((a,b) => a.avg - b.avg);
+
+  el.innerHTML = `<div class="dash-detail-panel">
+    <div class="detail-title">⚠️ Asesorados en Riesgo (${atRisk.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+    <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
+      <thead><tr><th>Estudiante</th><th>ID</th><th>Logro Promedio</th></tr></thead>
+      <tbody>${atRisk.map(s => {
+        const col = _colorForAvg(s.avg);
+        return `<tr>
+          <td><strong>${fichaLinkEstudiante(s.id, s.nombre)}</strong></td>
+          <td style="color:var(--muted)">${s.id}</td>
+          <td style="text-align:center"><span style="font-weight:800;color:${col}">${s.avg.toFixed(2)}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// ── COLLECTIVE VIEW ──────────────────────────────────────────────
+function _renderDashColectiva(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin) {
+  const filtersEl = document.getElementById('dash-col-filters');
+  const adminEl = document.getElementById('dash-col-admin');
+  const contentEl = document.getElementById('dash-col-content');
+
+  // ── Build filter bar for collective view ──────────────────────
+  // Decano/admin: filter by program (they see everything)
+  // Director: filter by program within their department programs
+  // Coordinator: filter by their assigned programs
+  // Professor: sees only their program's general info
+  let progOptions = [];
+  const allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
+  if (isAdmin || isDecano) {
+    progOptions = allProgs;
+  } else if (isDirector) {
+    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : allProgs;
+  } else if (isCoord) {
+    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : [];
+  } else {
+    // Professor: their program (from facultad record)
+    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : allProgs.slice(0,1);
+  }
+
+  filtersEl.innerHTML = `
+    ${(isDecano || isAdmin) ? `<div class="dash-filter-group">
+      <label class="dash-filter-label">Departamento</label>
+      <select id="dash-col-dept" class="dash-select" onchange="_dashColDeptChange()"><option value="">Todos</option>
+        ${(db.departamentos||[]).sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('')}
+      </select>
+    </div>` : ''}
+    <div class="dash-filter-group">
+      <label class="dash-filter-label">Programa</label>
+      <select id="dash-col-prog" class="dash-select" onchange="_dashColRefresh()">
+        <option value="">Todos</option>
+        ${progOptions.map(p=>`<option value="${p}">${p}</option>`).join('')}
+      </select>
     </div>
   `;
 
-  // ── BAR CHART: avg nivel per competency ───────────────────────
-  const barEl  = document.getElementById('dash-bar-chart');
-  const barSub = document.getElementById('dash-bar-sub');
+  _dashColRefresh();
+}
 
-  // Group by competency code
-  const compStats = {};
-  allEvals.forEach(ev => {
-    const code = ev.compId && ev.compId.startsWith('C') ? ev.compId :
-      (db.competencias.find(cc => cc.id === ev.compId)?.codigo || ev.compId);
-    if (!compStats[code]) compStats[code] = { sum: 0, count: 0, desc: db.competencias.find(cc=>cc.codigo===code||cc.id===ev.compId)?.descripcion || '' };
-    compStats[code].sum   += ev.val;
-    compStats[code].count += 1;
-  });
+function _dashColDeptChange() {
+  const deptId = document.getElementById('dash-col-dept')?.value || '';
+  const progSel = document.getElementById('dash-col-prog');
+  if (!progSel) return;
+  const allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
+  let filteredProgs = allProgs;
+  if (deptId) {
+    const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===deptId).map(p=>p.nombre);
+    filteredProgs = allProgs.filter(p => deptProgs.includes(p));
+  }
+  progSel.innerHTML = `<option value="">Todos</option>` + filteredProgs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  _dashColRefresh();
+}
 
-  const compEntries = Object.entries(compStats)
-    .map(([code, s]) => ({ code, avg: s.sum / s.count, count: s.count, desc: s.desc }))
-    .sort((a, b) => b.avg - a.avg);
+function _dashColRefresh() {
+  const adminEl = document.getElementById('dash-col-admin');
+  const contentEl = document.getElementById('dash-col-content');
+  const filterProg = document.getElementById('dash-col-prog')?.value || '';
+  const filterDept = document.getElementById('dash-col-dept')?.value || '';
 
-  if (!compEntries.length) {
-    barEl.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📊</div><p>Sin datos para los filtros seleccionados</p></div>';
-    barSub.textContent = '';
-  } else {
-    const top = compEntries.slice(0, 15);
-    barSub.textContent = `${top.length} competencias · ${allEvals.length} evaluaciones`;
-    barEl.innerHTML = `<div class="dash-bar-wrap">` +
-      top.map(c => {
-        const pct = Math.round((c.avg / 3) * 100);
-        const col = c.avg >= 2.5 ? '#10b981' : c.avg >= 1.5 ? '#f59e0b' : '#ef4444';
-        const label = c.avg.toFixed(2);
-        return `<div class="dash-bar-row" title="${c.desc} (n=${c.count})">
-          <div class="dash-bar-label">${c.code}</div>
-          <div class="dash-bar-track">
-            <div class="dash-bar-fill" style="width:${pct}%;background:${col}">
-              ${pct > 20 ? `<span class="dash-bar-val">${label}</span>` : ''}
-            </div>
-          </div>
-          ${pct <= 20 ? `<span class="dash-bar-val-out">${label}</span>` : ''}
-        </div>`;
-      }).join('') +
-    `</div>`;
+  const effRole = getEffectiveRole();
+  const e = currentUser?.efectivo;
+  const isAdmin = effRole === 'admin';
+  const isDecano = effRole === 'decano';
+  const isDirector = e?.isDirector;
+  const isCoord = e?.isCoordinator;
+  const isProf = !isAdmin && !isDecano && !isDirector && !isCoord;
+
+  // ── Scope avalúos for collective view ─────────────────────────
+  let avaluos = db.avaluos || [];
+  // Apply program filter
+  if (filterProg) {
+    avaluos = avaluos.filter(a => {
+      const c = db.cursos.find(cc=>cc.id===a.cursoId);
+      return c?.programa === filterProg;
+    });
+  }
+  // Apply department filter
+  if (filterDept) {
+    const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
+    avaluos = avaluos.filter(a => {
+      const c = db.cursos.find(cc=>cc.id===a.cursoId);
+      return deptProgs.includes(c?.programa);
+    });
   }
 
-  // ── PIE CHART: nivel distribution ─────────────────────────────
-  const pieEl  = document.getElementById('dash-pie-chart');
-  const pieSub = document.getElementById('dash-pie-sub');
+  const NIVEL_VAL = { '3':3, '2':2, '1':1, '0':0, 'L':3, 'P':2, 'N':1 };
+  const allEvals = [];
+  avaluos.forEach(av => {
+    if (av.evaluaciones?.length) {
+      av.evaluaciones.forEach(ev => {
+        const nivel = ev.nivel;
+        if (nivel === '' || nivel === undefined || nivel === null) return;
+        const val = NIVEL_VAL[String(nivel)];
+        if (val !== undefined) {
+          allEvals.push({ compId: ev.competenciaId || ev.competenciaCodigo, val, cursoId: av.cursoId });
+        }
+      });
+    } else {
+      Object.entries(av.respuestas||{}).forEach(([compId, resp]) => {
+        const nivel = resp?.nivel ?? resp;
+        const val = NIVEL_VAL[String(nivel)];
+        if (val !== undefined) allEvals.push({ compId, val, cursoId: av.cursoId });
+      });
+    }
+  });
 
-  const nivelCounts = { '3': 0, '2': 0, '1': 0, '0': 0 };
-  allEvals.forEach(ev => { nivelCounts[ev.nivel] = (nivelCounts[ev.nivel] || 0) + 1; });
-  const pieTotal = allEvals.length;
+  // ── Admin info section (coord/dir/decano) ─────────────────────
+  let adminHtml = '';
+  if (!isProf) {
+    // Courses pending evaluation
+    let scopedSecs = db.secciones || [];
+    if (filterProg) {
+      scopedSecs = scopedSecs.filter(s => {
+        const c = db.cursos.find(cc=>cc.id===s.cursoId);
+        return c?.programa === filterProg;
+      });
+    }
+    if (filterDept) {
+      const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
+      scopedSecs = scopedSecs.filter(s => {
+        const c = db.cursos.find(cc=>cc.id===s.cursoId);
+        return deptProgs.includes(c?.programa);
+      });
+    }
+    if (!isAdmin && !isDecano && !filterProg && !filterDept && e?.programas?.length) {
+      scopedSecs = scopedSecs.filter(s => {
+        const c = db.cursos.find(cc=>cc.id===s.cursoId);
+        return e.programas.includes(c?.programa);
+      });
+    }
+    const secsWithAv = new Set((db.avaluos||[]).map(a=>a.seccionId).filter(Boolean));
+    const pendSecs = scopedSecs.filter(s => !secsWithAv.has(s.id));
 
-  const PIE_META = [
-    { key: '3', label: 'Logrado',       color: '#10b981' },
-    { key: '2', label: 'En Progreso',   color: '#f59e0b' },
-    { key: '1', label: 'No Logrado',    color: '#ef4444' },
-    { key: '0', label: 'No Evaluado',   color: '#d1d5db' },
-  ];
+    // Students at risk in scope
+    let scopedAvaluos = avaluos;
+    if (!filterProg && !filterDept && !isAdmin && !isDecano && e?.programas?.length) {
+      scopedAvaluos = scopedAvaluos.filter(av => {
+        const c = db.cursos.find(cc=>cc.id===av.cursoId);
+        return e.programas.includes(c?.programa);
+      });
+    }
+    const byEst = {};
+    scopedAvaluos.forEach(av => {
+      const id = av.estudianteId || av.estudiante;
+      if (!byEst[id]) byEst[id] = [];
+      const evs = _allEvals([av]);
+      byEst[id].push(...evs);
+    });
+    let riskCount = 0;
+    Object.values(byEst).forEach(evs => {
+      if (!evs.length) return;
+      const avg = evs.reduce((s,ev)=>s+ev.val,0) / evs.length;
+      if (avg < 1.5) riskCount++;
+    });
 
-  if (!pieTotal) {
-    pieEl.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🥧</div><p>Sin datos</p></div>';
-    pieSub.textContent = '';
+    adminHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+      <div class="dash-kpi dash-kpi-clickable" onclick="_dashColToggleAdmin('pendAdmin')">
+        <div class="dash-kpi-accent" style="background:#f59e0b"></div>
+        <div class="dash-kpi-icon">📋</div>
+        <div class="dash-kpi-num">${pendSecs.length}</div>
+        <div class="dash-kpi-label">Cursos Pendientes de Evaluar</div>
+      </div>
+      <div class="dash-kpi">
+        <div class="dash-kpi-accent" style="background:${riskCount > 0 ? '#ef4444' : '#d1d5db'}"></div>
+        <div class="dash-kpi-icon">⚠️</div>
+        <div class="dash-kpi-num" style="color:${riskCount > 0 ? '#ef4444' : 'var(--muted)'}">${riskCount}</div>
+        <div class="dash-kpi-label">Estudiantes en Riesgo</div>
+      </div>
+    </div>
+    <div id="dash-col-detail-pendAdmin" style="display:none">
+      <div class="dash-detail-panel">
+        <div class="detail-title">📋 Secciones Pendientes de Evaluar (${pendSecs.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+        ${pendSecs.length ? `<div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
+          <thead><tr><th>Curso</th><th>Sección</th><th>Profesor</th><th>Programa</th></tr></thead>
+          <tbody>${pendSecs.slice(0,50).map(s => {
+            const curso = db.cursos.find(c=>c.id===s.cursoId);
+            return `<tr>
+              <td><strong>${curso?.codigo||'—'}</strong></td>
+              <td>${s.seccion||s.id}</td>
+              <td>${s.profesor||'—'}</td>
+              <td style="font-size:0.75rem">${curso?.programa||'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>${pendSecs.length > 50 ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:6px">Mostrando 50 de ${pendSecs.length}</div>` : ''}` : '<p style="color:var(--muted);font-size:0.82rem">Todas las secciones tienen avalúo.</p>'}
+      </div>
+    </div>`;
+  }
+  adminEl.innerHTML = adminHtml;
+
+  // ── Competency table + visualizations ─────────────────────────
+  // Build competency × program table
+  const compStats = {};
+  allEvals.forEach(ev => {
+    const code = ev.compId?.startsWith?.('C') ? ev.compId :
+      (db.competencias.find(cc => cc.id === ev.compId)?.codigo || ev.compId);
+    const curso = db.cursos.find(c=>c.id===ev.cursoId);
+    const prog = curso?.programa || '—';
+    if (!compStats[code]) compStats[code] = { desc: db.competencias.find(cc=>cc.codigo===code||cc.id===ev.compId)?.descripcion||'', byProg: {}, all: [] };
+    if (!compStats[code].byProg[prog]) compStats[code].byProg[prog] = [];
+    compStats[code].byProg[prog].push(ev.val);
+    compStats[code].all.push(ev.val);
+  });
+
+  const compCodes = Object.keys(compStats).sort();
+  const progsInData = [...new Set(allEvals.map(ev => {
+    const c = db.cursos.find(cc=>cc.id===ev.cursoId);
+    return c?.programa || '—';
+  }))].sort();
+
+  let tableHtml = '';
+  if (compCodes.length) {
+    tableHtml = `<div class="dash-chart-card" style="margin-bottom:18px">
+      <div class="dash-chart-header"><div class="dash-chart-title">📋 Nivel de Ejecución por Competencia</div></div>
+      <div class="dash-chart-body" style="overflow-x:auto">
+        <table style="border-collapse:collapse;font-size:0.75rem;width:100%">
+          <thead><tr style="background:var(--ink);color:var(--paper)">
+            <th style="padding:8px 12px;text-align:left;min-width:80px">Comp.</th>
+            <th style="padding:8px 12px;text-align:left;min-width:180px">Descripción</th>
+            ${progsInData.length > 1 ? progsInData.map(p=>`<th style="padding:8px 6px;text-align:center;min-width:70px;font-size:0.65rem">${p}</th>`).join('') : ''}
+            <th style="padding:8px 10px;text-align:center;min-width:60px">Promedio</th>
+          </tr></thead>
+          <tbody>${compCodes.map(code => {
+            const cs = compStats[code];
+            const globalAvg = cs.all.reduce((s,v)=>s+v,0) / cs.all.length;
+            const { bg, col } = _bgColParaAvg(globalAvg);
+            return `<tr style="border-bottom:1px solid var(--cream)">
+              <td style="padding:6px 12px;font-weight:800;color:var(--egsp-coral)">${code}</td>
+              <td style="padding:6px 12px;font-size:0.72rem;max-width:200px;color:var(--muted)">${cs.desc.substring(0,55)}${cs.desc.length>55?'…':''}</td>
+              ${progsInData.length > 1 ? progsInData.map(p => {
+                const vals = cs.byProg[p];
+                if (!vals?.length) return `<td style="text-align:center;color:#d1d5db">—</td>`;
+                const avg = vals.reduce((s,v)=>s+v,0)/vals.length;
+                const { bg:bg2, col:col2 } = _bgColParaAvg(avg);
+                return `<td style="text-align:center;padding:4px;background:${bg2}"><span style="font-weight:800;font-size:0.78rem;color:${col2}">${avg.toFixed(2)}</span></td>`;
+              }).join('') : ''}
+              <td style="text-align:center;padding:4px;background:${bg};border-left:2px solid var(--border)"><span style="font-weight:800;color:${col}">${globalAvg.toFixed(2)}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
   } else {
-    pieSub.textContent = pieTotal + ' evaluaciones totales';
-    // Build SVG donut
-    const R = 60, r = 34, cx = 70, cy = 70;
-    let startAngle = -Math.PI / 2;
-    const slices = PIE_META.map(m => {
-      const count = nivelCounts[m.key] || 0;
-      return { ...m, count, frac: count / pieTotal };
-    }).filter(s => s.count > 0);
-
-    const paths = slices.map(s => {
-      const angle = s.frac * 2 * Math.PI;
-      const endAngle = startAngle + angle;
-      const x1 = cx + R * Math.cos(startAngle);
-      const y1 = cy + R * Math.sin(startAngle);
-      const x2 = cx + R * Math.cos(endAngle);
-      const y2 = cy + R * Math.sin(endAngle);
-      const xi1 = cx + r * Math.cos(startAngle);
-      const yi1 = cy + r * Math.sin(startAngle);
-      const xi2 = cx + r * Math.cos(endAngle);
-      const yi2 = cy + r * Math.sin(endAngle);
-      const large = angle > Math.PI ? 1 : 0;
-      const d = `M${x1},${y1} A${R},${R} 0 ${large},1 ${x2},${y2} L${xi2},${yi2} A${r},${r} 0 ${large},0 ${xi1},${yi1} Z`;
-      const midA = startAngle + angle / 2;
-      startAngle = endAngle;
-      const pct = Math.round(s.frac * 100);
-      return `<path d="${d}" fill="${s.color}" opacity="0.9">
-        <title>${s.label}: ${s.count} (${pct}%)</title>
-      </path>`;
-    }).join('');
-
-    const svgDonut = `<svg viewBox="0 0 140 140" width="140" height="140">
-      ${paths}
-      <text x="${cx}" y="${cy - 6}" text-anchor="middle" font-family="Montserrat,sans-serif"
-        font-size="14" font-weight="800" fill="#1a1a1a">${pieTotal}</text>
-      <text x="${cx}" y="${cy + 12}" text-anchor="middle" font-family="Montserrat,sans-serif"
-        font-size="7" font-weight="600" fill="#797A7D" text-transform="uppercase">TOTAL</text>
-    </svg>`;
-
-    const legendHtml = PIE_META.filter(m => nivelCounts[m.key] > 0).map(m => {
-      const pct = Math.round((nivelCounts[m.key] / pieTotal) * 100);
-      return `<div class="dash-pie-leg-row">
-        <div class="dash-pie-dot" style="background:${m.color}"></div>
-        <span style="flex:1">${m.label}</span>
-        <span style="font-weight:700">${pct}%</span>
-      </div>`;
-    }).join('');
-
-    pieEl.innerHTML = `<div class="dash-pie-wrap">
-      ${svgDonut}
-      <div class="dash-pie-legend">${legendHtml}</div>
+    tableHtml = `<div class="dash-chart-card" style="margin-bottom:18px">
+      <div class="dash-chart-header"><div class="dash-chart-title">📋 Nivel de Ejecución por Competencia</div></div>
+      <div class="dash-chart-body"><div class="dash-empty"><div class="dash-empty-icon">📋</div><p>Sin datos para los filtros seleccionados</p></div></div>
     </div>`;
   }
 
-  // ── LINE CHART: trend by term ──────────────────────────────────
-  const lineEl  = document.getElementById('dash-line-chart');
-  const lineSub = document.getElementById('dash-line-sub');
-
-  // Group evals by term
-  const termData = {};
-  allEvals.forEach(ev => {
-    const av = avaluos.find(a => a.id === ev.avaluoId);
-    const sec = db.secciones?.find(s => s.id === av?.seccionId);
-    const termStr = sec?.semestre || av?.semestre || '';
-    const parsed = parseTermString(termStr);
-    if (!parsed) return;
-    const key = parsed.year + parsed.term;
-    if (!termData[key]) termData[key] = { label: parsed.term + ' ' + parsed.year, sum: 0, count: 0, sortKey: parsed.year * 10 + ['T1','T2','T3','V'].indexOf(parsed.term) };
-    termData[key].sum   += ev.val;
-    termData[key].count += 1;
-  });
-
-  const termPoints = Object.values(termData)
-    .sort((a, b) => a.sortKey - b.sortKey)
-    .map(t => ({ label: t.label, avg: t.sum / t.count }));
-
-  if (termPoints.length < 2) {
-    lineEl.innerHTML = termPoints.length === 1
-      ? `<div class="dash-empty"><div class="dash-empty-icon">📈</div><p>Solo hay datos de un trimestre — se necesitan al menos dos para mostrar tendencia</p></div>`
-      : `<div class="dash-empty"><div class="dash-empty-icon">📈</div><p>Sin datos de trimestres</p></div>`;
-    lineSub.textContent = '';
-  } else {
-    lineSub.textContent = termPoints.length + ' trimestres';
-    const W = 460, H = 160, PAD = { top: 18, right: 20, bottom: 32, left: 32 };
-    const iW = W - PAD.left - PAD.right;
-    const iH = H - PAD.top  - PAD.bottom;
-    const maxV = 3, minV = 0;
-    const xScale = i => PAD.left + (i / (termPoints.length - 1)) * iW;
-    const yScale = v => PAD.top  + iH - ((v - minV) / (maxV - minV)) * iH;
-
-    // Y gridlines at 0, 1, 2, 3
-    const gridLines = [0,1,2,3].map(v => {
-      const y = yScale(v);
-      return `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + iW}" y2="${y}"
-        stroke="#efefef" stroke-width="1"/>
-        <text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end"
-          font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${v}</text>`;
-    }).join('');
-
-    const pts = termPoints.map((t, i) => ({ x: xScale(i), y: yScale(t.avg), avg: t.avg, label: t.label }));
-    const polyline = 'M' + pts.map(p => `${p.x},${p.y}`).join(' L');
-    const areaClose = ` L${pts[pts.length-1].x},${yScale(0)} L${pts[0].x},${yScale(0)} Z`;
-    const area = polyline + areaClose;
-
-    const dots = pts.map(p => {
-      const col = p.avg >= 2.5 ? '#10b981' : p.avg >= 1.5 ? '#f59e0b' : '#ef4444';
-      return `<circle cx="${p.x}" cy="${p.y}" r="4" fill="${col}" stroke="white" stroke-width="2">
-        <title>${p.label}: ${p.avg.toFixed(2)}</title>
-      </circle>`;
-    }).join('');
-
-    const xLabels = pts.map((p, i) =>
-      `<text x="${p.x}" y="${H - 6}" text-anchor="middle"
-        font-size="8" fill="#797A7D" font-family="Montserrat,sans-serif">${p.label}</text>`
-    ).join('');
-
-    lineEl.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" class="dash-line-svg">
-        ${gridLines}
-        <path d="${area}" fill="var(--egsp-coral)" fill-opacity="0.08"/>
-        <path d="${polyline}" fill="none" stroke="var(--egsp-coral)" stroke-width="2.5"
-          stroke-linejoin="round" stroke-linecap="round"/>
-        ${dots}
-        ${xLabels}
-      </svg>`;
+  // Core MPH & DrPH shortcuts (available to all professors)
+  let coreHtml = '';
+  const coreProgs = ['MPH/MPHE Core', 'DrPH Core'].filter(p => (db.cursos||[]).some(c => c.programa === p));
+  if (coreProgs.length && !filterProg) {
+    coreHtml = `<div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap">
+      ${coreProgs.map(p => `<button class="btn btn-outline btn-sm" onclick="document.getElementById('dash-col-prog').value='${p}';_dashColRefresh()">📊 Ver ${p}</button>`).join('')}
+    </div>`;
   }
 
-  // ── PROGRAM COVERAGE TABLE ─────────────────────────────────────
-  const progTableEl = document.getElementById('dash-prog-table');
-  const allProgs = [...new Set(db.cursos.map(c => c.programa).filter(Boolean))].sort();
-  const filteredProgs = filterProg ? [filterProg] : allProgs;
+  contentEl.innerHTML = tableHtml + coreHtml;
+}
 
-  if (!filteredProgs.length) {
-    progTableEl.innerHTML = '<div class="dash-empty" style="height:80px"><p>Sin programas</p></div>';
-  } else {
-    const maxAv = Math.max(...filteredProgs.map(p => {
-      return avaluos.filter(a => db.cursos.find(cc=>cc.id===a.cursoId)?.programa===p).length;
-    }), 1);
-
-    progTableEl.innerHTML = filteredProgs.map(prog => {
-      const progAvaluos = avaluos.filter(a => db.cursos.find(cc=>cc.id===a.cursoId)?.programa===prog).length;
-      const pct = Math.round((progAvaluos / maxAv) * 100);
-      const progEvals = allEvals.filter(ev => {
-        const av = avaluos.find(a => a.id === ev.avaluoId);
-        return db.cursos.find(cc=>cc.id===av?.cursoId)?.programa===prog;
-      });
-      const progAvg = progEvals.length ? (progEvals.reduce((s,e)=>s+e.val,0)/progEvals.length).toFixed(1) : '—';
-      return `<div class="dash-prog-row">
-        <div class="dash-prog-name">${prog}</div>
-        <div class="dash-prog-bar-wrap">
-          <div class="dash-prog-bar-fill" style="width:${pct}%"></div>
-        </div>
-        <span class="dash-prog-pct">${progAvg}</span>
-      </div>`;
-    }).join('');
-  }
-
-  // ── RECENT ACTIVITY ────────────────────────────────────────────
-  const recentEl = document.getElementById('dash-recent');
-  const recent = [...avaluos].sort((a,b) => (b.fecha||'').localeCompare(a.fecha||'')).slice(0,8);
-  if (!recent.length) {
-    recentEl.innerHTML = '<div class="dash-empty" style="height:80px"><p>Sin actividad reciente</p></div>';
-  } else {
-    recentEl.innerHTML = recent.map(av => {
-      const curso = db.cursos.find(c=>c.id===av.cursoId);
-      const nComp = av.evaluaciones?.length || Object.keys(av.respuestas||{}).length;
-      return `<div class="dash-activity-item">
-        <div class="dash-activity-dot"></div>
-        <div class="dash-activity-text">
-          <strong>${av.estudiante||av.estudianteId||'Estudiante'}</strong>
-          <span style="color:var(--muted)"> · ${curso?.codigo||'—'} · ${nComp} comp.</span>
-        </div>
-        <div class="dash-activity-date">${av.fecha||'—'}</div>
-      </div>`;
-    }).join('');
-  }
-
-  // ── TOP COMPETENCIES ───────────────────────────────────────────
-  const topEl = document.getElementById('dash-top-comps');
-  const topComps = [...compEntries].sort((a,b) => b.avg - a.avg).slice(0,8);
-  if (!topComps.length) {
-    topEl.innerHTML = '<div class="dash-empty" style="height:80px"><p>Sin datos</p></div>';
-  } else {
-    topEl.innerHTML = topComps.map((c, i) => `
-      <div class="dash-top-row">
-        <div class="dash-top-rank">#${i+1}</div>
-        <div class="dash-top-code">${c.code}</div>
-        <div class="dash-top-label" title="${c.desc}">${c.desc.substring(0,55)}${c.desc.length>55?'…':''}</div>
-        <div class="dash-top-score">${c.avg.toFixed(2)}</div>
-      </div>`).join('');
-  }
+function _dashColToggleAdmin(panelId) {
+  const el = document.getElementById('dash-col-detail-' + panelId);
+  if (!el) return;
+  const wasVisible = el.style.display !== 'none';
+  document.querySelectorAll('[id^="dash-col-detail-"]').forEach(p => p.style.display = 'none');
+  if (!wasVisible) el.style.display = 'block';
 }
 
 // ── FILTER POPULATION HELPER ────────────────────────────────────
-function _dashPopulateFilters() {
-  // Academic years
-  const aySel = document.getElementById('dash-ay');
-  if (aySel && aySel.options.length <= 1) {
-    const years = new Set();
-    (db.secciones||[]).forEach(s => {
-      const ay = getAcademicYear(s.semestre);
-      if (ay) years.add(ay);
-    });
-    (db.avaluos||[]).forEach(a => {
-      const ay = getAcademicYear(a.semestre);
-      if (ay) years.add(ay);
-    });
-    [...years].sort((a,b)=>b-a).forEach(y => {
-      const o = document.createElement('option'); o.value=y; o.textContent='AY '+y;
-      aySel.appendChild(o);
-    });
-  }
-
-  // Programs (role-scoped) - always repopulate in case new data
-  const progSel = document.getElementById('dash-prog');
-  if (progSel) {
-    const curProg = progSel.value;
-    while(progSel.options.length > 1) progSel.remove(1);
-    const effRole = getEffectiveRole();
-    const e = currentUser?.efectivo;
-    let progs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
-    if ((effRole==='coordinator' || e?.isCoordinator || e?.isDirector) && e?.programas?.length) {
-      progs = progs.filter(p => e.programas.includes(p));
-    }
-    progs.forEach(p => {
-      const o = document.createElement('option'); o.value=p; o.textContent=p;
-      progSel.appendChild(o);
-    });
-    if (curProg) progSel.value = curProg;
-  }
-}
-
-function resetDashFilters() {
-  ['dash-ay','dash-term','dash-prog'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) { el.value=''; while(el.options.length>1) el.remove(1); }
-  });
-  renderDashboard();
-}
+// (Old _dashPopulateFilters / resetDashFilters removed — filters now live inside _renderDashColectiva)
 
 // ======================== DASHBOARD 2 — ANALYTICS ========================
 function renderDashboard2() {
-  // Populate program filter
-  const progSel = document.getElementById('d2-prog');
-  if (progSel) {
-    const allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
-    const existing = [...progSel.options].map(o=>o.value);
-    allProgs.forEach(p => {
-      if (!existing.includes(p)) {
-        const o = document.createElement('option'); o.value=p; o.textContent=p;
-        progSel.appendChild(o);
-      }
+  // ── Populate department selector ──────────────────────────────
+  const deptSel = document.getElementById('d2-dept');
+  if (deptSel && deptSel.options.length <= 1) {
+    (db.departamentos||[]).sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(d => {
+      const o = document.createElement('option'); o.value=d.id; o.textContent=d.nombre;
+      deptSel.appendChild(o);
     });
   }
 
-  const filterProg = document.getElementById('d2-prog')?.value || '';
-  const filterTerm = document.getElementById('d2-term')?.value || '';
-  const threshold  = parseFloat(document.getElementById('d2-threshold')?.value || '1.5');
+  // ── Populate program filter (scoped by department) ────────────
+  const progSel = document.getElementById('d2-prog');
+  if (progSel) {
+    const curProg = progSel.value;
+    while(progSel.options.length > 1) progSel.remove(1);
+    const filterDept = deptSel?.value || '';
+    let allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
+    if (filterDept) {
+      const deptProgNames = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
+      allProgs = allProgs.filter(p => deptProgNames.includes(p));
+    }
+    allProgs.forEach(p => {
+      const o = document.createElement('option'); o.value=p; o.textContent=p;
+      progSel.appendChild(o);
+    });
+    if (curProg && allProgs.includes(curProg)) progSel.value = curProg;
+  }
 
-  let avaluos = _filterAvaluosByRole(db.avaluos || []);
+  const filterProg = progSel?.value || '';
+  const filterTerm = document.getElementById('d2-term')?.value || '';
+  const filterDept = deptSel?.value || '';
+
+  // ── Filter avalúos ────────────────────────────────────────────
+  let avaluos = db.avaluos || [];
   if (filterProg) avaluos = avaluos.filter(av => db.cursos.find(c=>c.id===av.cursoId)?.programa === filterProg);
+  if (filterDept) {
+    const deptProgNames = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
+    avaluos = avaluos.filter(av => {
+      const c = db.cursos.find(cc=>cc.id===av.cursoId);
+      return deptProgNames.includes(c?.programa);
+    });
+  }
   if (filterTerm) avaluos = avaluos.filter(av => {
     const t = parseTermString(_getSemestre(av)); return t?.term === filterTerm;
   });
@@ -17398,142 +17568,6 @@ function renderDashboard2() {
           }).join('')}
         </tbody>
       </table>`;
-  }
-
-  // ── GRADE DISTRIBUTION ───────────────────────────────────────
-  const gradeEl = document.getElementById('d2-grade-dist');
-  const gradeCounts = {A:0,B:0,C:0,D:0,F:0,'—':0};
-  avaluos.forEach(av => {
-    const l = av.notaFinalLetra || (av.notaFinal !== '' && av.notaFinal !== undefined ? gradeToLetter(parseFloat(av.notaFinal)) : '—');
-    gradeCounts[l in gradeCounts ? l : '—']++;
-  });
-  const gradeColors = {A:'#10b981',B:'#3b82f6',C:'#f59e0b',D:'#f97316',F:'#ef4444','—':'#d1d5db'};
-  const gradeTotal = avaluos.length;
-  if (!gradeTotal) {
-    gradeEl.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">🎓</div><p>Sin datos</p></div>';
-  } else {
-    gradeEl.innerHTML = `<div class="dash-bar-wrap">` +
-      Object.entries(gradeCounts).filter(([,v])=>v>0).map(([g,cnt])=>{
-        const pct = Math.round(cnt/gradeTotal*100);
-        return `<div class="dash-bar-row">
-          <div class="dash-bar-label" style="font-size:1rem;font-weight:900;color:${gradeColors[g]}">${g}</div>
-          <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pct}%;background:${gradeColors[g]}">
-            ${pct>12?`<span class="dash-bar-val">${cnt}</span>`:''}
-          </div></div>
-          ${pct<=12?`<span class="dash-bar-val-out">${cnt}</span>`:''}
-          <span class="dash-bar-val-out" style="min-width:36px">${pct}%</span>
-        </div>`;
-      }).join('') + `</div>
-      <div style="font-size:0.72rem;color:var(--muted);margin-top:8px;text-align:center">${gradeTotal} estudiantes con nota registrada</div>`;
-  }
-
-  // ── GAP CHART: competencies below threshold ──────────────────
-  const gapEl = document.getElementById('d2-gap-chart');
-  const compAvgs = {};
-  evals.forEach(ev => {
-    if (!compAvgs[ev.compCode]) compAvgs[ev.compCode] = { sum:0, count:0, desc: ev.compDesc };
-    compAvgs[ev.compCode].sum   += ev.val;
-    compAvgs[ev.compCode].count += 1;
-  });
-  const gaps = Object.entries(compAvgs)
-    .map(([code,s])=>({code, avg: s.sum/s.count, desc: s.desc, count: s.count}))
-    .filter(c => c.avg < threshold)
-    .sort((a,b) => a.avg - b.avg);
-  if (!gaps.length) {
-    gapEl.innerHTML = `<div class="dash-empty"><div class="dash-empty-icon">✅</div><p>Todas las competencias superan el umbral ${threshold}</p></div>`;
-  } else {
-    gapEl.innerHTML = `<div style="margin-bottom:8px;font-size:0.78rem;color:var(--rust);font-weight:700">${gaps.length} competencias bajo umbral ${threshold}</div>
-      <div class="dash-bar-wrap">` +
-      gaps.slice(0,10).map(c => {
-        const pct = Math.round((c.avg/3)*100);
-        const gap = threshold - c.avg;
-        return `<div class="dash-bar-row" title="${c.desc}">
-          <div class="dash-bar-label" style="color:var(--rust)">${c.code}</div>
-          <div class="dash-bar-track">
-            <div class="dash-bar-fill" style="width:${pct}%;background:#ef4444">
-              ${pct>12?`<span class="dash-bar-val">${c.avg.toFixed(2)}</span>`:''}
-            </div>
-          </div>
-          ${pct<=12?`<span style="font-size:0.7rem;font-weight:700;color:#ef4444">${c.avg.toFixed(2)}</span>`:''}
-          <span style="font-size:0.65rem;color:var(--muted);white-space:nowrap">−${gap.toFixed(2)}</span>
-        </div>`;
-      }).join('') + `</div>`;
-  }
-
-  // ── COURSE SUMMARY TABLE ──────────────────────────────────────
-  const crsEl = document.getElementById('d2-course-summary');
-  const crsSummary = {};
-  avaluos.forEach(av => {
-    if (!crsSummary[av.cursoId]) {
-      const cur = db.cursos.find(c=>c.id===av.cursoId);
-      crsSummary[av.cursoId] = { codigo: cur?.codigo||av.cursoCodigo||'—', nombre: cur?.nombre||av.cursoNombre||'—',
-        prog: cur?.programa||'—', evals:[], students: new Set(), sections: new Set(), grades:[] };
-    }
-    crsSummary[av.cursoId].students.add(av.estudianteId||av.estudiante);
-    if (av.seccionId) crsSummary[av.cursoId].sections.add(av.seccionId);
-    if (av.notaFinal !== '' && av.notaFinal !== undefined) crsSummary[av.cursoId].grades.push(parseFloat(av.notaFinal));
-    const cEvals = _allEvals([av]);
-    crsSummary[av.cursoId].evals.push(...cEvals.map(e=>e.val));
-  });
-
-  const crsRows = Object.values(crsSummary).sort((a,b)=>a.codigo.localeCompare(b.codigo));
-  if (!crsRows.length) {
-    crsEl.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">📚</div><p>Sin datos</p></div>';
-  } else {
-    crsEl.innerHTML = `<table class="rpt-table">
-      <thead><tr><th>Curso</th><th>Programa</th><th>Secciones</th><th>Estudiantes</th><th>Evaluaciones</th><th>Logro Avg</th><th>Nota Avg</th><th>Estado</th></tr></thead>
-      <tbody>${crsRows.map(c => {
-        const avg = c.evals.length ? _avgNivel(c.evals) : null;
-        const gradeAvg = c.grades.length ? (c.grades.reduce((s,v)=>s+v,0)/c.grades.length).toFixed(1) : '—';
-        const col = _colorForAvg(avg);
-        const ok = avg !== null && avg >= threshold;
-        return `<tr>
-          <td><strong>${c.codigo}</strong><div style="font-size:0.72rem;color:var(--muted)">${c.nombre}</div></td>
-          <td style="font-size:0.75rem">${c.prog}</td>
-          <td style="text-align:center">${c.sections.size}</td>
-          <td style="text-align:center">${c.students.size}</td>
-          <td style="text-align:center">${c.evals.length}</td>
-          <td style="text-align:center"><span style="font-weight:800;color:${col}">${avg!==null?avg.toFixed(2):'—'}</span></td>
-          <td style="text-align:center">${gradeAvg !== '—' ? gradeAvg : '—'}</td>
-          <td style="text-align:center">${avg===null?'<span style="color:var(--muted)">—</span>':ok?'<span class="badge badge-green">✓ Logrado</span>':'<span class="badge badge-red">⚠ Revisar</span>'}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table>`;
-  }
-
-  // ── COHORT TABLE: students with multiple courses ──────────────
-  const cohEl = document.getElementById('d2-cohort-table');
-  const cohCount = document.getElementById('d2-cohort-count');
-  const byStudent = {};
-  avaluos.forEach(av => {
-    const id = av.estudianteId || av.estudiante;
-    if (!byStudent[id]) byStudent[id] = { nombre: av.estudiante||id, id, courses:[], avgs:[] };
-    const stEvals = _allEvals([av]).map(e=>e.val);
-    const stAvg = stEvals.length ? _avgNivel(stEvals) : null;
-    const cur = db.cursos.find(c=>c.id===av.cursoId);
-    byStudent[id].courses.push({ code: cur?.codigo||av.cursoCodigo||'—', avg: stAvg, notaFinal: av.notaFinal });
-    if (stAvg !== null) byStudent[id].avgs.push(stAvg);
-  });
-
-  const multiCourse = Object.values(byStudent).filter(s=>s.courses.length>1).sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  cohCount.textContent = multiCourse.length + ' estudiantes';
-  if (!multiCourse.length) {
-    cohEl.innerHTML = '<div class="dash-empty"><div class="dash-empty-icon">👥</div><p>No hay estudiantes con más de un curso evaluado</p></div>';
-  } else {
-    cohEl.innerHTML = `<table class="rpt-table">
-      <thead><tr><th>Estudiante</th><th>ID</th><th>Cursos</th><th>Logro Global</th><th>Detalle</th></tr></thead>
-      <tbody>${multiCourse.slice(0,50).map(s => {
-        const globalAvg = s.avgs.length ? _avgNivel(s.avgs) : null;
-        const col = _colorForAvg(globalAvg);
-        return `<tr>
-          <td><strong>${fichaLinkEstudiante(s.id, s.nombre)}</strong></td>
-          <td style="font-size:0.72rem;color:var(--muted)">${s.id}</td>
-          <td style="text-align:center">${s.courses.length}</td>
-          <td style="text-align:center"><span style="font-weight:800;color:${col}">${globalAvg!==null?globalAvg.toFixed(2):'—'}</span></td>
-          <td style="font-size:0.72rem">${s.courses.map(c=>`<span class="badge badge-blue" style="margin:1px">${c.code}: ${c.avg!==null?c.avg.toFixed(1):'—'}</span>`).join(' ')}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table>`;
   }
 }
 
