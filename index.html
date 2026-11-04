@@ -9328,7 +9328,7 @@ function selectDept(deptId) {
     <div class="prog-detail-header">
       <div><div class="prog-detail-name"> ${dept.nombre}</div></div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
-        <button class="btn btn-outline btn-sm" onclick="abrirFicha('departamento','${deptId}')" title="Abrir la ficha del departamento"> Ficha</button>
+        ${_fichaVedada('departamento') ? '' : `<button class="btn btn-outline btn-sm" onclick="abrirFicha('departamento','${deptId}')" title="Abrir la ficha del departamento"> Ficha</button>`}
         <button class="btn btn-outline btn-sm" onclick="abrirEditarDepartamento('${deptId}')"> Editar</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarDepartamento('${deptId}')">Eliminar</button>
       </div>` : ''}
@@ -9426,7 +9426,7 @@ function selectPrograma(programaId) {
         })()}</div>
       </div>
       ${isAdmin ? `<div style="display:flex;gap:6px">
-        <button class="btn btn-outline btn-sm" onclick="abrirFicha('programa','${programaId}')" title="Abrir la ficha del programa"> Ficha</button>
+        ${_fichaVedada('programa') ? '' : `<button class="btn btn-outline btn-sm" onclick="abrirFicha('programa','${programaId}')" title="Abrir la ficha del programa"> Ficha</button>`}
         <button class="btn btn-outline btn-sm" onclick="abrirEditarPrograma('${programaId}')"> Editar</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarPrograma('${programaId}')">Eliminar</button>
       </div>` : ''}
@@ -22923,8 +22923,13 @@ const FICHA_TIPOS = {
 function _fichaAdmin() { return getEffectiveRole() === 'admin'; }
 
 // Enlace que abre una ficha. `label` se escapa; usar dentro de innerHTML.
+// El Visitante no abre fichas de catálogo (curso, programa, departamento, competencia)
+const _FICHAS_VEDADAS_VISITANTE = ['curso', 'programa', 'departamento', 'competencia'];
+function _fichaVedada(tipo) {
+  return getEffectiveRole() === 'viewer' && _FICHAS_VEDADAS_VISITANTE.includes(tipo);
+}
 function fichaLink(tipo, id, label, title) {
-  if (!id) return _alEsc(label);
+  if (!id || _fichaVedada(tipo)) return _alEsc(label);
   const t = title || `Ver ficha de ${(FICHA_TIPOS[tipo]?.nombre || '').toLowerCase()}`;
   return `<a href="#" class="ficha-link" title="${_alEsc(t)}" onclick="event.preventDefault();event.stopPropagation();abrirFicha('${_alEscAttr(tipo)}','${_alEscAttr(id)}')">${_alEsc(label)}</a>`;
 }
@@ -22933,6 +22938,7 @@ function _fichaAbierta() { return !!document.getElementById('ficha-panel')?.clas
 
 function abrirFicha(tipo, id) {
   if (!FICHA_TIPOS[tipo] || !currentUser) return;
+  if (_fichaVedada(tipo)) return;
   if (!_fichaAbierta()) _fichaStack = [];
   // Si la ficha ya está en el recorrido, se vuelve a ella en vez de repetirla
   const idx = _fichaStack.findIndex(x => x.tipo === tipo && x.id === id);
@@ -23421,7 +23427,7 @@ Object.assign(FICHA_TIPOS, {
 // Atributos para hacer clicable un elemento existente (badge, chip, encabezado)
 // sin cambiar su estilo; añadir también class="ficha-clic".
 function fichaAttr(tipo, id, tip) {
-  if (!id) return tip ? _tipAttr(tip) : '';
+  if (!id || _fichaVedada(tipo)) return tip ? _tipAttr(tip) : '';
   const t = tip ? _tipAttr(tip) : `title="Ver ficha de ${_alEsc((FICHA_TIPOS[tipo]?.nombre || '').toLowerCase())}"`;
   return `onclick="event.preventDefault();event.stopPropagation();abrirFicha('${_alEscAttr(tipo)}','${_alEscAttr(id)}')" ${t} role="link" tabindex="0"`;
 }
