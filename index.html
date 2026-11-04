@@ -16820,6 +16820,74 @@ function renderR9() {
 
 // ======================== DASHBOARD ========================
 let _dashCurrentView = 'personal';
+let _dashCoreSel = null;   // 'MPH Core' | 'DrPH Core' cuando se pulsa una visualización Core en la vista colectiva
+
+// ── Contexto de roles del Panel ──────────────────────────────────────────────
+// Un facultativo puede acumular roles (decano + profesor, coordinador de varios
+// programas, director + coordinador…). Cada rol suma alcance; la vista Personal
+// siempre es la de profesor (solo SUS secciones). Con "Ver como" (admin) se
+// simula UN rol puro; si el admin no tiene programas/departamento reales para
+// ese rol, se simula con el primero disponible y se avisa (simulado:true).
+function _dashCtx() {
+  const u = currentUser || {};
+  const email = (u.email || '').toLowerCase();
+  const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === email);
+  const progsDeDepto = id => id ? (db.programas || []).filter(p => p.departamentoId === id).map(p => p.nombre) : [];
+  const facProgs = fac?.programas ? String(fac.programas).split('|').map(p => p.trim()).filter(Boolean) : [];
+  const rolBase = u.rolBase || fac?.rolBase || '';
+  const uniq = a => [...new Set(a)];
+
+  const ctx = { schoolWide:false, isDecano:false, isDirector:false, isCoord:false, progs:[], simulado:false, nota:'' };
+
+  if (_viewAsRole) {
+    const r = _viewAsRole;
+    if (r === 'decano') { ctx.isDecano = true; ctx.schoolWide = true; }
+    else if (r === 'coordinator') {
+      ctx.isCoord = true;
+      ctx.progs = facProgs.length ? facProgs : [(db.programas || []).map(p => p.nombre).find(n => !_esProgramaCore(n)) || ''].filter(Boolean);
+      if (!facProgs.length) { ctx.simulado = true; ctx.nota = 'simulando con ' + ctx.progs.join(', '); }
+    } else if (r === 'director') {
+      ctx.isDirector = true;
+      let ps = uniq([...facProgs, ...progsDeDepto(fac?.departamentoId)]);
+      if (!ps.length) {
+        const d = (db.departamentos || []).find(d => progsDeDepto(d.id).length);
+        ps = d ? progsDeDepto(d.id) : [];
+        ctx.simulado = true; ctx.nota = 'simulando con depto. ' + (d?.nombre || '—');
+      }
+      ctx.progs = ps;
+    }
+    return ctx; // profesor / viewer: sin alcance administrativo
+  }
+
+  ctx.isDecano = rolBase === 'decano' || u.rol === 'decano';
+  ctx.schoolWide = ctx.isDecano || u.rol === 'admin';
+  ctx.isCoord = !!(fac && (fac.coordinator === true || fac.coordinator === 'true')) || rolBase === 'coordinator';
+  ctx.isDirector = !!(fac && (fac.director === true || fac.director === 'true')) || rolBase === 'director';
+  let ps = [];
+  if (ctx.isCoord) ps.push(...facProgs);
+  if (ctx.isDirector) ps.push(...facProgs, ...progsDeDepto(fac?.departamentoId));
+  ctx.progs = uniq(ps);
+  return ctx;
+}
+// ¿El curso cae dentro del alcance administrativo? (cursos fusionados: basta UN programa)
+function _dashCursoEnAlcance(cursoId, ctx) {
+  if (ctx.schoolWide) return true;
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  return !!c && _programasDeCurso(c).some(p => ctx.progs.includes(p));
+}
+// Programas de un curso (lista; soporta cursos en varios programas)
+function _dashProgsCurso(cursoId) {
+  const c = (db.cursos || []).find(x => x.id === cursoId);
+  return c ? _programasDeCurso(c) : [];
+}
+// Programas del profesor (para su vista colectiva): asignados + los de los cursos que da
+function _dashMisProgramas() {
+  const u = currentUser || {};
+  const fac = (db.facultad || []).find(f => (f.email || '').toLowerCase() === (u.email || '').toLowerCase());
+  const s = new Set(fac?.programas ? String(fac.programas).split('|').map(p => p.trim()).filter(Boolean) : []);
+  (db.secciones || []).filter(_usuarioEsProfesorDeSeccion).forEach(sec => _dashProgsCurso(sec.cursoId).forEach(p => s.add(p)));
+  return [...s];
+}
 
 function _dashSetView(view) {
   _dashCurrentView = view;
@@ -16859,45 +16927,28 @@ function renderDashboard() {
     }
   }
 
-  const effRole = getEffectiveRole();
-  const e = currentUser?.efectivo;
-  const isAdmin = effRole === 'admin';
-  const isDecano = effRole === 'decano';
-  const isDirector = e?.isDirector;
-  const isCoord = e?.isCoordinator;
-  const isProf = !isAdmin && !isDecano && !isDirector && !isCoord;
+  const ctx = _dashCtx();
+  const tieneAdmin = ctx.schoolWide || ctx.isDirector || ctx.isCoord;
 
-  // ── SCOPE BADGE ───────────────────────────────────────────────
+  // ── SCOPE BADGE (todos los roles acumulados + aviso de simulación) ──
   const scopeBadge = document.getElementById('dash-scope-badge');
-  if (currentUser && !isAdmin) {
-    scopeBadge.textContent = '👤 ' + getEffectiveRoleLabel();
+  if (currentUser) {
+    scopeBadge.textContent = '👤 ' + getEffectiveRoleLabel() + (ctx.nota ? ' (' + ctx.nota + ')' : '');
     scopeBadge.style.display = 'flex';
   } else {
     scopeBadge.style.display = 'none';
   }
 
-  // ── COMPLETION % BAR (coord/dir/decano/admin) ─────────────────
+  // ── COMPLETION % BAR (decano/director/coordinador/admin) ──────
   const compBar = document.getElementById('dash-completion-bar');
-  if (!isProf) {
-    const allSecs = db.secciones || [];
-    let scopedSecs = allSecs;
-    if (isCoord && e.programas?.length) {
-      scopedSecs = allSecs.filter(s => {
-        const c = db.cursos.find(cc=>cc.id===s.cursoId);
-        return e.programas.includes(c?.programa);
-      });
-    } else if (isDirector && e.programas?.length) {
-      scopedSecs = allSecs.filter(s => {
-        const c = db.cursos.find(cc=>cc.id===s.cursoId);
-        return e.programas.includes(c?.programa);
-      });
-    }
+  if (tieneAdmin) {
+    const scopedSecs = (db.secciones || []).filter(s => _dashCursoEnAlcance(s.cursoId, ctx));
     const totalSecsCount = scopedSecs.length;
     const secsWithAvaluo = new Set((db.avaluos||[]).map(a=>a.seccionId).filter(Boolean));
     const completedSecs = scopedSecs.filter(s => secsWithAvaluo.has(s.id)).length;
     const pct = totalSecsCount > 0 ? Math.round((completedSecs / totalSecsCount) * 100) : 0;
     const pctColor = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
-    const scopeLabel = isDecano || isAdmin ? 'Escuela' : isDirector ? 'Departamento' : 'Programa';
+    const scopeLabel = ctx.schoolWide ? 'Escuela' : ctx.isDirector ? 'Departamento' : 'Programa' + (ctx.progs.length > 1 ? 's' : '');
     compBar.style.display = 'flex';
     compBar.innerHTML = `<div class="dash-completion-strip">
       <div style="min-width:60px;text-align:center">
@@ -16914,24 +16965,25 @@ function renderDashboard() {
     compBar.style.display = 'none';
   }
 
-  if (_dashCurrentView === 'personal') {
-    _renderDashPersonal(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin);
-  } else {
-    _renderDashColectiva(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin);
-  }
+  if (_dashCurrentView === 'personal') _renderDashPersonal(ctx);
+  else _renderDashColectiva(ctx);
 }
 
 // ── PERSONAL VIEW ────────────────────────────────────────────────
-function _renderDashPersonal(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin) {
+function _renderDashPersonal(ctx) {
   const kpiEl = document.getElementById('dash-kpi-row');
   const listsEl = document.getElementById('dash-personal-lists');
   const vizEl = document.getElementById('dash-personal-viz');
 
-  // ── Professor's own data ──────────────────────────────────────
-  const mySecs = (db.secciones||[]).filter(s => canSeeSeccion(s));
+  // ── Datos PROPIOS del usuario como profesor/a ──────────────────
+  // Solo sus secciones (no canSeeSeccion: ese da acceso a todo a admin/decano)
+  // y sus asesorados (leídos de db.asesorias; efectivo.advisees queda vacío para admin).
+  const mySecs = (db.secciones||[]).filter(s => _usuarioEsProfesorDeSeccion(s));
   const mySecIds = mySecs.map(s => s.id);
   const myAvaluos = (db.avaluos||[]).filter(a => mySecIds.includes(a.seccionId));
-  const myAdvisees = e?.advisees || [];
+  const miEmail = (currentUser?.email || '').toLowerCase();
+  const myAdvisees = [...new Set((db.asesorias||[])
+    .filter(a => (a.profesorEmail || '').toLowerCase() === miEmail).map(a => a.studentId))];
 
   // Pending vs completed avalúos: a section is "pending" if it has no avalúos
   const secsWithAvaluo = new Set(myAvaluos.map(a => a.seccionId).filter(Boolean));
@@ -17191,267 +17243,202 @@ function _dashBuildDetailRiesgo(adviseeEvalMap, count) {
 }
 
 // ── COLLECTIVE VIEW ──────────────────────────────────────────────
-function _renderDashColectiva(effRole, e, isProf, isCoord, isDirector, isDecano, isAdmin) {
-  const filtersEl = document.getElementById('dash-col-filters');
-  const adminEl = document.getElementById('dash-col-admin');
-  const contentEl = document.getElementById('dash-col-content');
+function _dashTodosProgramas() {
+  return [...new Set([...(db.cursos||[]).flatMap(c => _programasDeCurso(c)), ...(db.programas||[]).map(p => p.nombre)].filter(Boolean))].sort();
+}
+// Programas cuyo avalúo ve el usuario en la tabla: alcance administrativo + los suyos como profesor
+function _dashProgsVisibles(ctx) {
+  if (ctx.schoolWide) return _dashTodosProgramas();
+  return [...new Set([...ctx.progs, ..._dashMisProgramas()])].sort();
+}
 
-  // ── Build filter bar for collective view ──────────────────────
-  // Decano/admin: filter by program (they see everything)
-  // Director: filter by program within their department programs
-  // Coordinator: filter by their assigned programs
-  // Professor: sees only their program's general info
-  let progOptions = [];
-  const allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
-  if (isAdmin || isDecano) {
-    progOptions = allProgs;
-  } else if (isDirector) {
-    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : allProgs;
-  } else if (isCoord) {
-    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : [];
-  } else {
-    // Professor: their program (from facultad record)
-    progOptions = e?.programas?.length ? e.programas.filter(p=>allProgs.includes(p)) : allProgs.slice(0,1);
-  }
+function _renderDashColectiva(ctx) {
+  const filtersEl = document.getElementById('dash-col-filters');
+  const visibles = _dashProgsVisibles(ctx);
+  const deptsVisibles = (db.departamentos||[]).filter(d =>
+    (db.programas||[]).some(p => p.departamentoId === d.id && visibles.includes(p.nombre)))
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const prevDept = document.getElementById('dash-col-dept')?.value || '';
+  const prevProg = document.getElementById('dash-col-prog')?.value || '';
 
   filtersEl.innerHTML = `
-    ${(isDecano || isAdmin) ? `<div class="dash-filter-group">
+    ${deptsVisibles.length > 1 ? `<div class="dash-filter-group">
       <label class="dash-filter-label">Departamento</label>
       <select id="dash-col-dept" class="dash-select" onchange="_dashColDeptChange()"><option value="">Todos</option>
-        ${(db.departamentos||[]).sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('')}
+        ${deptsVisibles.map(d=>`<option value="${d.id}"${d.id===prevDept?' selected':''}>${d.nombre}</option>`).join('')}
       </select>
     </div>` : ''}
     <div class="dash-filter-group">
       <label class="dash-filter-label">Programa</label>
       <select id="dash-col-prog" class="dash-select" onchange="_dashColRefresh()">
-        <option value="">Todos</option>
-        ${progOptions.map(p=>`<option value="${p}">${p}</option>`).join('')}
+        <option value="">${visibles.length > 1 ? 'Todos' : (visibles[0] ? 'Todos (' + visibles[0] + ')' : 'Sin programa asignado')}</option>
+        ${visibles.map(p=>`<option value="${p}"${p===prevProg?' selected':''}>${p}</option>`).join('')}
       </select>
     </div>
-  `;
-
+    <div class="dash-filter-group">
+      <label class="dash-filter-label">Core de la Escuela</label>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="_dashCore('MPH Core')">📊 MPH Core</button>
+        <button class="btn btn-outline btn-sm" onclick="_dashCore('DrPH Core')">📊 DrPH Core</button>
+      </div>
+    </div>`;
   _dashColRefresh();
 }
 
+function _dashCore(nombre) { _dashCoreSel = nombre; _dashColRefresh(); }
+function _dashCoreCerrar() { _dashCoreSel = null; _dashColRefresh(); }
+
 function _dashColDeptChange() {
+  const ctx = _dashCtx();
   const deptId = document.getElementById('dash-col-dept')?.value || '';
   const progSel = document.getElementById('dash-col-prog');
   if (!progSel) return;
-  const allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
-  let filteredProgs = allProgs;
+  let progs = _dashProgsVisibles(ctx);
   if (deptId) {
     const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===deptId).map(p=>p.nombre);
-    filteredProgs = allProgs.filter(p => deptProgs.includes(p));
+    progs = progs.filter(p => deptProgs.includes(p));
   }
-  progSel.innerHTML = `<option value="">Todos</option>` + filteredProgs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  progSel.innerHTML = `<option value="">Todos</option>` + progs.map(p=>`<option value="${p}">${p}</option>`).join('');
   _dashColRefresh();
 }
 
 function _dashColRefresh() {
   const adminEl = document.getElementById('dash-col-admin');
   const contentEl = document.getElementById('dash-col-content');
+  if (!adminEl || !contentEl) return;
+  const ctx = _dashCtx();
+  const tieneAdmin = ctx.schoolWide || ctx.isDirector || ctx.isCoord;
   const filterProg = document.getElementById('dash-col-prog')?.value || '';
   const filterDept = document.getElementById('dash-col-dept')?.value || '';
-
-  const effRole = getEffectiveRole();
-  const e = currentUser?.efectivo;
-  const isAdmin = effRole === 'admin';
-  const isDecano = effRole === 'decano';
-  const isDirector = e?.isDirector;
-  const isCoord = e?.isCoordinator;
-  const isProf = !isAdmin && !isDecano && !isDirector && !isCoord;
-
-  // ── Scope avalúos for collective view ─────────────────────────
-  let avaluos = db.avaluos || [];
-  // Apply program filter
-  if (filterProg) {
-    avaluos = avaluos.filter(a => {
-      const c = db.cursos.find(cc=>cc.id===a.cursoId);
-      return c?.programa === filterProg;
-    });
-  }
-  // Apply department filter
-  if (filterDept) {
-    const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
-    avaluos = avaluos.filter(a => {
-      const c = db.cursos.find(cc=>cc.id===a.cursoId);
-      return deptProgs.includes(c?.programa);
-    });
-  }
-
+  const deptProgs = filterDept ? (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre) : null;
   const NIVEL_VAL = { '3':3, '2':2, '1':1, '0':0, 'L':3, 'P':2, 'N':1 };
-  const allEvals = [];
-  avaluos.forEach(av => {
-    if (av.evaluaciones?.length) {
-      av.evaluaciones.forEach(ev => {
-        const nivel = ev.nivel;
-        if (nivel === '' || nivel === undefined || nivel === null) return;
-        const val = NIVEL_VAL[String(nivel)];
-        if (val !== undefined) {
-          allEvals.push({ compId: ev.competenciaId || ev.competenciaCodigo, val, cursoId: av.cursoId });
-        }
-      });
-    } else {
-      Object.entries(av.respuestas||{}).forEach(([compId, resp]) => {
-        const nivel = resp?.nivel ?? resp;
-        const val = NIVEL_VAL[String(nivel)];
-        if (val !== undefined) allEvals.push({ compId, val, cursoId: av.cursoId });
-      });
-    }
-  });
+  const pDeCurso = id => _dashProgsCurso(id);
 
-  // ── Admin info section (coord/dir/decano) ─────────────────────
+  // Programas efectivos para el filtro actual (null = todos los de la Escuela)
+  const aplicaFiltro = progs => {           // progs: alcance base (null = toda la Escuela)
+    let base = progs;
+    if (deptProgs) base = base ? base.filter(p => deptProgs.includes(p)) : deptProgs;
+    if (filterProg) base = base ? base.filter(p => p === filterProg) : [filterProg];
+    return base;
+  };
+  const enProgs = (cursoId, progs) => !progs || pDeCurso(cursoId).some(p => progs.includes(p));
+
+  // ── Vista Core (accesible a todo profesor) ─────────────────────
+  const core = _dashCoreSel;
+  const tablaProgs = core ? [core] : aplicaFiltro(ctx.schoolWide ? null : _dashProgsVisibles(ctx));
+  const adminProgs = aplicaFiltro(ctx.schoolWide ? null : ctx.progs);
+
+  const evalsDe = progs => {
+    const out = [];
+    (db.avaluos||[]).filter(a => enProgs(a.cursoId, progs)).forEach(av => {
+      if (av.evaluaciones?.length) {
+        av.evaluaciones.forEach(ev => {
+          if (ev.nivel === '' || ev.nivel == null) return;
+          const val = NIVEL_VAL[String(ev.nivel)];
+          if (val !== undefined) out.push({ compId: ev.competenciaId || ev.competenciaCodigo, val, cursoId: av.cursoId, est: av.estudianteId || av.estudiante });
+        });
+      } else {
+        Object.entries(av.respuestas||{}).forEach(([compId, resp]) => {
+          const val = NIVEL_VAL[String(resp?.nivel ?? resp)];
+          if (val !== undefined) out.push({ compId, val, cursoId: av.cursoId, est: av.estudianteId || av.estudiante });
+        });
+      }
+    });
+    return out;
+  };
+
+  // ── Información administrativa (decano / director / coordinador) ──
   let adminHtml = '';
-  if (!isProf) {
-    // Courses pending evaluation
-    let scopedSecs = db.secciones || [];
-    if (filterProg) {
-      scopedSecs = scopedSecs.filter(s => {
-        const c = db.cursos.find(cc=>cc.id===s.cursoId);
-        return c?.programa === filterProg;
-      });
-    }
-    if (filterDept) {
-      const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
-      scopedSecs = scopedSecs.filter(s => {
-        const c = db.cursos.find(cc=>cc.id===s.cursoId);
-        return deptProgs.includes(c?.programa);
-      });
-    }
-    if (!isAdmin && !isDecano && !filterProg && !filterDept && e?.programas?.length) {
-      scopedSecs = scopedSecs.filter(s => {
-        const c = db.cursos.find(cc=>cc.id===s.cursoId);
-        return e.programas.includes(c?.programa);
-      });
-    }
+  if (tieneAdmin && !core) {
     const secsWithAv = new Set((db.avaluos||[]).map(a=>a.seccionId).filter(Boolean));
-    const pendSecs = scopedSecs.filter(s => !secsWithAv.has(s.id));
+    const pendSecs = (db.secciones||[]).filter(s => enProgs(s.cursoId, adminProgs) && _dashCursoEnAlcance(s.cursoId, ctx) && !secsWithAv.has(s.id));
 
-    // Students at risk in scope
-    let scopedAvaluos = avaluos;
-    if (!filterProg && !filterDept && !isAdmin && !isDecano && e?.programas?.length) {
-      scopedAvaluos = scopedAvaluos.filter(av => {
-        const c = db.cursos.find(cc=>cc.id===av.cursoId);
-        return e.programas.includes(c?.programa);
-      });
-    }
+    // Agrupar pendientes: departamento → programa
+    const deptDeProg = n => { const p = (db.programas||[]).find(x=>x.nombre===n); return (db.departamentos||[]).find(d=>d.id===p?.departamentoId)?.nombre || 'Sin departamento'; };
+    const grupos = {};
+    pendSecs.forEach(s => {
+      const ps = pDeCurso(s.cursoId).filter(p => !adminProgs || adminProgs.includes(p));
+      const prog = ps[0] || pDeCurso(s.cursoId)[0] || 'Sin programa';
+      const dep = deptDeProg(prog);
+      ((grupos[dep] ||= {})[prog] ||= []).push(s);
+    });
+    const pendHtml = pendSecs.length ? Object.keys(grupos).sort().map(dep => `
+      ${ctx.schoolWide ? `<div style="font-weight:800;font-size:0.8rem;margin:10px 0 4px;color:var(--egsp-coral)">🏛 ${dep}</div>` : ''}
+      ${Object.keys(grupos[dep]).sort().map(prog => `
+        <div style="font-weight:700;font-size:0.76rem;margin:6px 0 3px">${prog} <span style="color:var(--muted);font-weight:600">(${grupos[dep][prog].length})</span></div>
+        <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.78rem">
+          <thead><tr><th>Curso</th><th>Sección</th><th>Profesor/a</th><th>Trimestre</th></tr></thead>
+          <tbody>${grupos[dep][prog].map(s => { const c = db.cursos.find(x=>x.id===s.cursoId);
+            return `<tr><td><strong>${c?.codigo||'—'}</strong> <span style="color:var(--muted)">${c?.nombre||''}</span></td><td>${s.seccion||s.id}</td><td>${s.profesor||'—'}</td><td>${s.semestre||'—'}</td></tr>`; }).join('')}
+          </tbody></table></div>`).join('')}`).join('')
+      : '<p style="color:var(--muted);font-size:0.82rem">Todas las secciones tienen avalúo.</p>';
+
+    // Estudiantes en riesgo en el alcance filtrado
     const byEst = {};
-    scopedAvaluos.forEach(av => {
-      const id = av.estudianteId || av.estudiante;
-      if (!byEst[id]) byEst[id] = [];
-      const evs = _allEvals([av]);
-      byEst[id].push(...evs);
-    });
-    let riskCount = 0;
-    Object.values(byEst).forEach(evs => {
-      if (!evs.length) return;
-      const avg = evs.reduce((s,ev)=>s+ev.val,0) / evs.length;
-      if (avg < 1.5) riskCount++;
-    });
+    evalsDe(adminProgs).filter(ev => _dashCursoEnAlcance(ev.cursoId, ctx)).forEach(ev => { (byEst[ev.est] ||= { vals: [], progs: new Set() }).vals.push(ev.val); pDeCurso(ev.cursoId).forEach(p => byEst[ev.est].progs.add(p)); });
+    const riesgo = Object.entries(byEst).map(([id, o]) => ({ id, avg: o.vals.reduce((s,v)=>s+v,0)/o.vals.length, progs: [...o.progs].filter(p=>!adminProgs||adminProgs.includes(p)) }))
+      .filter(r => r.avg < 1.5).sort((a,b)=>a.avg-b.avg)
+      .map(r => ({ ...r, nombre: (db.estudiantes||[]).find(e=>e.numero===r.id)?.nombre || r.id }));
 
-    adminHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+    adminHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
       <div class="dash-kpi dash-kpi-clickable" onclick="_dashColToggleAdmin('pendAdmin')">
-        <div class="dash-kpi-accent" style="background:#f59e0b"></div>
-        <div class="dash-kpi-icon">📋</div>
-        <div class="dash-kpi-num">${pendSecs.length}</div>
-        <div class="dash-kpi-label">Cursos Pendientes de Evaluar</div>
-      </div>
-      <div class="dash-kpi">
-        <div class="dash-kpi-accent" style="background:${riskCount > 0 ? '#ef4444' : '#d1d5db'}"></div>
-        <div class="dash-kpi-icon">⚠️</div>
-        <div class="dash-kpi-num" style="color:${riskCount > 0 ? '#ef4444' : 'var(--muted)'}">${riskCount}</div>
-        <div class="dash-kpi-label">Estudiantes en Riesgo</div>
-      </div>
+        <div class="dash-kpi-accent" style="background:#f59e0b"></div><div class="dash-kpi-icon">📋</div>
+        <div class="dash-kpi-num">${pendSecs.length}</div><div class="dash-kpi-label">Cursos (secciones) por Evaluar</div></div>
+      <div class="dash-kpi ${riesgo.length ? 'dash-kpi-clickable' : ''}" ${riesgo.length ? `onclick="_dashColToggleAdmin('riesgoAdmin')"` : ''}>
+        <div class="dash-kpi-accent" style="background:${riesgo.length ? '#ef4444' : '#d1d5db'}"></div><div class="dash-kpi-icon">⚠️</div>
+        <div class="dash-kpi-num" style="color:${riesgo.length ? '#ef4444' : 'var(--muted)'}">${riesgo.length}</div><div class="dash-kpi-label">Estudiantes en Riesgo</div></div>
     </div>
-    <div id="dash-col-detail-pendAdmin" style="display:none">
-      <div class="dash-detail-panel">
-        <div class="detail-title">📋 Secciones Pendientes de Evaluar (${pendSecs.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
-        ${pendSecs.length ? `<div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.8rem">
-          <thead><tr><th>Curso</th><th>Sección</th><th>Profesor</th><th>Programa</th></tr></thead>
-          <tbody>${pendSecs.slice(0,50).map(s => {
-            const curso = db.cursos.find(c=>c.id===s.cursoId);
-            return `<tr>
-              <td><strong>${curso?.codigo||'—'}</strong></td>
-              <td>${s.seccion||s.id}</td>
-              <td>${s.profesor||'—'}</td>
-              <td style="font-size:0.75rem">${curso?.programa||'—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>${pendSecs.length > 50 ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:6px">Mostrando 50 de ${pendSecs.length}</div>` : ''}` : '<p style="color:var(--muted);font-size:0.82rem">Todas las secciones tienen avalúo.</p>'}
-      </div>
-    </div>`;
+    <div id="dash-col-detail-pendAdmin" style="display:none"><div class="dash-detail-panel">
+      <div class="detail-title">📋 Secciones por evaluar (${pendSecs.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>${pendHtml}</div></div>
+    <div id="dash-col-detail-riesgoAdmin" style="display:none"><div class="dash-detail-panel">
+      <div class="detail-title">⚠️ Estudiantes en riesgo (${riesgo.length}) <button class="detail-close" onclick="this.closest('.dash-detail-panel').parentElement.style.display='none'">✕</button></div>
+      <div style="overflow-x:auto"><table class="rpt-table" style="font-size:0.78rem"><thead><tr><th>Estudiante</th><th>Programa(s)</th><th>Logro prom.</th></tr></thead>
+      <tbody>${riesgo.map(r=>`<tr><td><strong>${fichaLinkEstudiante(r.id, r.nombre)}</strong></td><td style="font-size:0.72rem">${r.progs.join(', ')||'—'}</td><td style="text-align:center;font-weight:800;color:${_colorForAvg(r.avg)}">${r.avg.toFixed(2)}</td></tr>`).join('')}</tbody></table></div></div></div>`;
   }
   adminEl.innerHTML = adminHtml;
 
-  // ── Competency table + visualizations ─────────────────────────
-  // Build competency × program table
+  // ── Tabla de competencias × programa (visualización de ejecución) ──
+  const evs = evalsDe(tablaProgs);
   const compStats = {};
-  allEvals.forEach(ev => {
-    const code = ev.compId?.startsWith?.('C') ? ev.compId :
-      (db.competencias.find(cc => cc.id === ev.compId)?.codigo || ev.compId);
-    const curso = db.cursos.find(c=>c.id===ev.cursoId);
-    const prog = curso?.programa || '—';
-    if (!compStats[code]) compStats[code] = { desc: db.competencias.find(cc=>cc.codigo===code||cc.id===ev.compId)?.descripcion||'', byProg: {}, all: [] };
-    if (!compStats[code].byProg[prog]) compStats[code].byProg[prog] = [];
-    compStats[code].byProg[prog].push(ev.val);
-    compStats[code].all.push(ev.val);
+  const progsData = new Set();
+  evs.forEach(ev => {
+    const comp = db.competencias.find(cc => cc.id === ev.compId || cc.codigo === ev.compId);
+    const code = comp?.codigo || ev.compId;
+    const ps = pDeCurso(ev.cursoId).filter(p => !tablaProgs || tablaProgs.includes(p));
+    (ps.length ? ps : ['—']).forEach(p => {
+      progsData.add(p);
+      const cs = (compStats[code] ||= { desc: comp?.descripcion || '', byProg: {}, all: [] });
+      (cs.byProg[p] ||= []).push(ev.val);
+    });
+    (compStats[code] ||= { desc: comp?.descripcion || '', byProg: {}, all: [] }).all.push(ev.val);
   });
-
   const compCodes = Object.keys(compStats).sort();
-  const progsInData = [...new Set(allEvals.map(ev => {
-    const c = db.cursos.find(cc=>cc.id===ev.cursoId);
-    return c?.programa || '—';
-  }))].sort();
+  const progCols = [...progsData].sort();
+  const titulo = core ? `📊 ${core} — Nivel de ejecución por competencia` : '📋 Nivel de Ejecución por Competencia';
+  const volver = core ? `<button class="btn btn-outline btn-sm" onclick="_dashCoreCerrar()">← Volver a mi vista colectiva</button>` : '';
 
-  let tableHtml = '';
-  if (compCodes.length) {
-    tableHtml = `<div class="dash-chart-card" style="margin-bottom:18px">
-      <div class="dash-chart-header"><div class="dash-chart-title">📋 Nivel de Ejecución por Competencia</div></div>
-      <div class="dash-chart-body" style="overflow-x:auto">
-        <table style="border-collapse:collapse;font-size:0.75rem;width:100%">
-          <thead><tr style="background:var(--ink);color:var(--paper)">
-            <th style="padding:8px 12px;text-align:left;min-width:80px">Comp.</th>
-            <th style="padding:8px 12px;text-align:left;min-width:180px">Descripción</th>
-            ${progsInData.length > 1 ? progsInData.map(p=>`<th style="padding:8px 6px;text-align:center;min-width:70px;font-size:0.65rem">${p}</th>`).join('') : ''}
-            <th style="padding:8px 10px;text-align:center;min-width:60px">Promedio</th>
-          </tr></thead>
-          <tbody>${compCodes.map(code => {
-            const cs = compStats[code];
-            const globalAvg = cs.all.reduce((s,v)=>s+v,0) / cs.all.length;
-            const { bg, col } = _bgColParaAvg(globalAvg);
-            return `<tr style="border-bottom:1px solid var(--cream)">
-              <td style="padding:6px 12px;font-weight:800;color:var(--egsp-coral)">${code}</td>
-              <td style="padding:6px 12px;font-size:0.72rem;max-width:200px;color:var(--muted)">${cs.desc.substring(0,55)}${cs.desc.length>55?'…':''}</td>
-              ${progsInData.length > 1 ? progsInData.map(p => {
-                const vals = cs.byProg[p];
-                if (!vals?.length) return `<td style="text-align:center;color:#d1d5db">—</td>`;
-                const avg = vals.reduce((s,v)=>s+v,0)/vals.length;
-                const { bg:bg2, col:col2 } = _bgColParaAvg(avg);
-                return `<td style="text-align:center;padding:4px;background:${bg2}"><span style="font-weight:800;font-size:0.78rem;color:${col2}">${avg.toFixed(2)}</span></td>`;
-              }).join('') : ''}
-              <td style="text-align:center;padding:4px;background:${bg};border-left:2px solid var(--border)"><span style="font-weight:800;color:${col}">${globalAvg.toFixed(2)}</span></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
-      </div>
-    </div>`;
-  } else {
-    tableHtml = `<div class="dash-chart-card" style="margin-bottom:18px">
-      <div class="dash-chart-header"><div class="dash-chart-title">📋 Nivel de Ejecución por Competencia</div></div>
-      <div class="dash-chart-body"><div class="dash-empty"><div class="dash-empty-icon">📋</div><p>Sin datos para los filtros seleccionados</p></div></div>
-    </div>`;
-  }
-
-  // Core MPH & DrPH shortcuts (available to all professors)
-  let coreHtml = '';
-  const coreProgs = ['MPH/MPHE Core', 'DrPH Core'].filter(p => (db.cursos||[]).some(c => c.programa === p));
-  if (coreProgs.length && !filterProg) {
-    coreHtml = `<div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap">
-      ${coreProgs.map(p => `<button class="btn btn-outline btn-sm" onclick="document.getElementById('dash-col-prog').value='${p}';_dashColRefresh()">📊 Ver ${p}</button>`).join('')}
-    </div>`;
-  }
-
-  contentEl.innerHTML = tableHtml + coreHtml;
+  contentEl.innerHTML = `<div class="dash-chart-card" style="margin-bottom:18px">
+    <div class="dash-chart-header" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="dash-chart-title">${titulo}</div>${volver}</div>
+    <div class="dash-chart-body" style="overflow-x:auto">${compCodes.length ? `
+      <table style="border-collapse:collapse;font-size:0.75rem;width:100%">
+        <thead><tr style="background:var(--ink);color:var(--paper)">
+          <th style="padding:8px 12px;text-align:left;min-width:80px">Comp.</th>
+          <th style="padding:8px 12px;text-align:left;min-width:180px">Descripción</th>
+          ${progCols.length > 1 ? progCols.map(p=>`<th style="padding:8px 6px;text-align:center;min-width:70px;font-size:0.65rem">${p}</th>`).join('') : ''}
+          <th style="padding:8px 10px;text-align:center;min-width:60px">Promedio</th></tr></thead>
+        <tbody>${compCodes.map(code => { const cs = compStats[code];
+          const g = cs.all.reduce((s,v)=>s+v,0)/cs.all.length; const { bg, col } = _bgColParaAvg(g);
+          return `<tr style="border-bottom:1px solid var(--cream)">
+            <td style="padding:6px 12px;font-weight:800;color:var(--egsp-coral)">${code}</td>
+            <td style="padding:6px 12px;font-size:0.72rem;max-width:200px;color:var(--muted)">${cs.desc.substring(0,55)}${cs.desc.length>55?'…':''}</td>
+            ${progCols.length > 1 ? progCols.map(p => { const v = cs.byProg[p]; if (!v?.length) return `<td style="text-align:center;color:#d1d5db">—</td>`;
+              const a = v.reduce((s,x)=>s+x,0)/v.length; const c2 = _bgColParaAvg(a);
+              return `<td style="text-align:center;padding:4px;background:${c2.bg}"><span style="font-weight:800;font-size:0.78rem;color:${c2.col}">${a.toFixed(2)}</span></td>`; }).join('') : ''}
+            <td style="text-align:center;padding:4px;background:${bg};border-left:2px solid var(--border)"><span style="font-weight:800;color:${col}">${g.toFixed(2)}</span></td></tr>`; }).join('')}
+        </tbody></table>`
+      : `<div class="dash-empty"><div class="dash-empty-icon">📋</div><p>${tablaProgs && !tablaProgs.length ? 'No tienes un programa asignado ni cursos con secciones a tu nombre.' : 'Sin datos de avalúo para este alcance.'}</p></div>`}
+    </div></div>`;
 }
 
 function _dashColToggleAdmin(panelId) {
@@ -19730,6 +19717,8 @@ function setViewAs(role) {
     applyRoleUI();
   }
   _fichaRefrescar(); // "Ver como" aplica a la ficha abierta
+  _dashCoreSel = null;
+  renderDashboard(); // el Panel recalcula roles/alcance según el rol simulado
 }
 function getEffectiveRole() {
   return _viewAsRole || currentUser?.rol || 'viewer';
@@ -19862,14 +19851,20 @@ function enrichCurrentUserPermissions() {
 // ── Resolve effective role label for display ───────────────────────────────
 function getEffectiveRoleLabel() {
   if (!currentUser) return '';
-  if (currentUser.rol === 'admin') return 'Admin';
-  if (currentUser.rol === 'decano') return 'Decano/a';
-  const e = currentUser.efectivo;
-  if (e.isDirector)    return 'Director/a';
-  if (e.isCoordinator) return 'Coordinador/a';
-  if (e.isAdvisor)     return 'Profesor/a · Asesor/a';
-  if (currentUser.rol === 'profesor') return 'Profesor/a';
-  return currentUser.rol.charAt(0).toUpperCase() + currentUser.rol.slice(1);
+  // Roles acumulados (ej. "Decano/a · Profesor/a · Coordinador/a"); con "Ver como", solo el simulado
+  if (_viewAsRole) {
+    return { profesor:'Profesor/a', coordinator:'Coordinador/a', director:'Director/a', decano:'Decano/a', viewer:'Viewer' }[_viewAsRole] || _viewAsRole;
+  }
+  const ctx = _dashCtx();
+  const out = [];
+  if (currentUser.rol === 'admin') out.push('Admin');
+  if (ctx.isDecano) out.push('Decano/a');
+  if (ctx.isDirector) out.push('Director/a');
+  if (ctx.isCoord) out.push('Coordinador/a' + (ctx.progs.length > 1 && !ctx.isDirector ? ' (' + ctx.progs.length + ' programas)' : ''));
+  const daClases = (db.secciones || []).some(_usuarioEsProfesorDeSeccion);
+  if (daClases || !out.length) out.push('Profesor/a');
+  if ((db.asesorias || []).some(a => (a.profesorEmail || '').toLowerCase() === (currentUser.email || '').toLowerCase())) out.push('Asesor/a');
+  return out.join(' · ');
 }
 
 // ── Check if current user can see data for a given program ─────────────────
