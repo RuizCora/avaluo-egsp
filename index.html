@@ -3387,9 +3387,14 @@ function saveDB() {
       const currentJSON = JSON.stringify(db[key] ?? []);
       const lastJSON     = JSON.stringify(_lastSyncedDB[key] ?? []);
       if (currentJSON !== lastJSON) {
+        const prevSnapshot = _lastSyncedDB[key];
         _lastSyncedDB[key] = JSON.parse(currentJSON);
         window._fb.set(window._fb.ref(window._fb.database, 'db/' + key), db[key] ?? [])
-          .catch(e => console.error('Firebase saveDB error (' + key + '):', e));
+          .catch(e => {
+            console.error('Firebase saveDB error (' + key + '):', e);
+            _lastSyncedDB[key] = prevSnapshot;
+            notify('Error guardando datos (' + key + '). Se reintentará al próximo cambio.', 'error');
+          });
       }
     });
   }
@@ -3682,7 +3687,7 @@ function _populateCursoProgramaSelect() {
   // lo que ya estaba marcado antes de reconstruir las opciones.
   const prevSeleccionados = new Set([...sel.selectedOptions].map(o => o.value));
   const ordenados = [...db.programas].sort((a, b) => a.nombre.localeCompare(b.nombre));
-  sel.innerHTML = ordenados.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+  sel.innerHTML = ordenados.map(p => `<option value="${_alEscAttr(p.id)}">${_alEsc(p.nombre)}</option>`).join('');
   [...sel.options].forEach(o => { o.selected = prevSeleccionados.has(o.value); });
 }
 
@@ -3765,7 +3770,7 @@ function _populateEstudianteSecuenciaSelect() {
     if (prog?.secuencias?.[key]?.activa) opciones.push(label);
   });
   opciones.push('Plan de Estudio');
-  sel.innerHTML = opciones.map(o => `<option value="${o}">${o}</option>`).join('');
+  sel.innerHTML = opciones.map(o => `<option value="${_alEscAttr(o)}">${_alEsc(o)}</option>`).join('');
   sel.value = opciones.includes(prev) ? prev : opciones[0];
 }
 
@@ -3887,7 +3892,7 @@ function renderEstudiantesTab() {
   if (progSel) {
     const prev = progSel.value;
     const progNombres = [...new Set(visibles.map(e => db.programas.find(p => p.id === e.programaId)?.nombre).filter(Boolean))].sort();
-    progSel.innerHTML = '<option value="">Todos</option>' + progNombres.map(n => `<option value="${n}">${n}</option>`).join('');
+    progSel.innerHTML = '<option value="">Todos</option>' + progNombres.map(n => `<option value="${_alEscAttr(n)}">${_alEsc(n)}</option>`).join('');
     progSel.value = prev;
   }
   const anioSel = document.getElementById('est-filtro-anio');
@@ -4522,13 +4527,13 @@ function renderCursos() {
   if (progSel) {
     const prev = progSel.value;
     const progs = [...new Set(db.cursos.flatMap(c => _programasDeCurso(c)))].sort();
-    progSel.innerHTML = '<option value="">Todos</option>' + progs.map(p => `<option value="${p}">${p}</option>`).join('');
+    progSel.innerHTML = '<option value="">Todos</option>' + progs.map(p => `<option value="${_alEscAttr(p)}">${_alEsc(p)}</option>`).join('');
     progSel.value = prev;
   }
   if (deptSel) {
     const prev = deptSel.value;
     const depts = [...new Set(db.cursos.map(c => _deptoDeCurso(c).nombre).filter(Boolean))].sort();
-    deptSel.innerHTML = '<option value="">Todos</option>' + depts.map(d => `<option value="${d}">${d}</option>`).join('');
+    deptSel.innerHTML = '<option value="">Todos</option>' + depts.map(d => `<option value="${_alEscAttr(d)}">${_alEsc(d)}</option>`).join('');
     deptSel.value = prev;
   }
 
@@ -4583,7 +4588,7 @@ function renderCursos() {
         ? nombresProgramas.map(nombre => {
             const progCat = (db.programas || []).find(p => p.nombre === nombre);
             const badge = progBadgeMap[nombre] || 'badge-gold';
-            return progCat
+            return progCat && !_fichaVedada('programa')
               ? `<span class="badge ${badge}" style="cursor:pointer;margin:1px" title="Ver ficha del programa" onclick="abrirFicha('programa','${progCat.id}')">${nombre}</span>`
               : `<span class="badge ${badge}" style="margin:1px">${nombre}</span>`;
           }).join(' ')
@@ -4642,10 +4647,14 @@ function abrirCursosSinPrograma() {
 }
 
 function eliminarCurso(id) {
-  if (currentUser?.rol !== 'admin') { notify('Solo un administrador puede eliminar cursos', ''); return; }
-  if (!confirm('¿Eliminar este curso? También se eliminarán sus competencias y avalúos.')) return;
+  if (!authCan('cursos') || authIsReadonly('cursos')) { notify('Solo un administrador puede eliminar cursos', ''); return; }
+  if (!confirm('¿Eliminar este curso? También se eliminarán sus competencias, secciones, LAOs, rúbricas y avalúos.')) return;
+  const laoIds = (db.laos || []).filter(l => l.cursoId === id).map(l => l.id);
   db.cursos = db.cursos.filter(c => c.id !== id);
   db.competencias = db.competencias.filter(c => c.cursoId !== id);
+  db.secciones = (db.secciones || []).filter(s => s.cursoId !== id);
+  db.laos = (db.laos || []).filter(l => l.cursoId !== id);
+  db.rubricas = (db.rubricas || []).filter(r => r.cursoId !== id && !laoIds.includes(r.laoId));
   db.avaluos = db.avaluos.filter(a => a.cursoId !== id);
   saveDB(); renderCursos(); notify('Curso eliminado', '');
 }
@@ -5041,7 +5050,7 @@ function renderSesionImportPreview() {
   const { sesionInfo, cursos } = _sesionImportData;
   const infoEl = document.getElementById('sesion-semestre-info');
   if (sesionInfo) {
-    infoEl.innerHTML = ` Trimestre detectado: <strong>${sesionInfo.label}</strong> <span style="color:var(--muted)">(${sesionInfo.ayLabel})</span> — se aplicará a todas las secciones importadas.`;
+    infoEl.innerHTML = ` Trimestre detectado: <strong>${_alEsc(sesionInfo.label)}</strong> <span style="color:var(--muted)">(${_alEsc(sesionInfo.ayLabel)})</span> — se aplicará a todas las secciones importadas.`;
   } else {
     infoEl.innerHTML = ` No se pudo detectar el trimestre del nombre del archivo. Verifica que termine en un código como <code>C5Y</code> antes de la extensión.`;
   }
@@ -6651,12 +6660,18 @@ function compartirLao(id) {
 }
 
 function eliminarLao(id) {
-  if (!confirm('¿Eliminar este LAO? También se eliminará su rúbrica asociada, si tiene.')) return;
+  const avConLao = (db.avaluos || []).filter(a => a.laoId === id).length;
+  const msg = avConLao
+    ? `¿Eliminar este LAO? Se eliminará su rúbrica y se desvincularán ${avConLao} avalúo(s) asociados.`
+    : '¿Eliminar este LAO? También se eliminará su rúbrica asociada, si tiene.';
+  if (!confirm(msg)) return;
   const lao = db.laos.find(l => l.id === id);
   const cursoId = lao?.cursoId;
   const compIds = (lao?.competencias || []).map(cc => cc.competenciaId);
   db.laos = db.laos.filter(l => l.id !== id);
   db.rubricas = db.rubricas.filter(r => r.laoId !== id);
+  // Desvincular avalúos del LAO eliminado (preserva los datos, limpia la referencia)
+  (db.avaluos || []).forEach(a => { if (a.laoId === id) a.laoId = null; });
   if (cursoId) _recalcularPesosAutoParaLao(cursoId, compIds);
   saveDB(); renderLaos();
   notify('LAO eliminado', '');
@@ -6823,7 +6838,7 @@ function _modeloRubricaDocumento(rubrica, ctx) {
   const curso = (db.cursos || []).find(c => c.id === ctx.cursoId) || {};
   const niveles = [...(rubrica.niveles || [])].sort((a, b) => b.puntos - a.puntos);
   const metaId = _nivelMetaId(niveles);
-  const doms = dominiosDePrograma(curso.programa || '');
+  const doms = _programasDeCurso(curso).flatMap(p => dominiosDePrograma(p)).filter((d, i, arr) => arr.findIndex(x => x.id === d.id) === i);
   const filas = (rubrica.criterios || []).map(cr => {
     const comps = (cr.competencias || []).map(cc => db.competencias.find(c => c.id === cc.competenciaId)).filter(Boolean);
     let dominio = null;
@@ -6865,7 +6880,7 @@ function _modeloRubricaDocumento(rubrica, ctx) {
   }));
   const escala = resolverEscalaParaCurso(ctx.cursoId);
   return {
-    programa: curso.programa || '',
+    programa: _programasDeCurso(curso).join(', ') || '',
     titulo: ctx.tipo === 'directa' ? 'Rúbrica de evaluación directa del curso' : `Rúbrica del LAO: ${ctx.laoNombre || ''}`,
     curso: `${curso.codigo || ''} — ${curso.nombre || ''}`,
     nota: [
@@ -7219,7 +7234,7 @@ function _construirXlsxPlantillaRubrica(ctx) {
   });
   const info = [
     [{ v: `Plantilla de rúbrica — ${ctx.lao.nombre}`, s: 3 }],
-    [`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${ctx.curso.programa || ''}`],
+    [`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${_programasDeCurso(ctx.curso).join(', ') || ''}`],
     [`Escala de niveles: ${ctx.escala?.nombre || ''} · Competencias que mide este LAO: ${ctx.comps.map(c => c.codigo).join(', ') || '(ninguna)'}`],
     [],
     ..._INSTRUCCIONES_PLANTILLA_RUBRICA.map(t => [{ v: t, s: 2 }]),
@@ -7253,7 +7268,7 @@ function _construirDocxPlantillaRubrica(ctx) {
   const receta = `<w:p><w:r><w:rPr><w:vanish/><w:sz w:val="2"/></w:rPr><w:t xml:space="preserve">AVALUO-RECETA:${_docxEsc(JSON.stringify(ctx.receta))}</w:t></w:r></w:p>`;
   const cuerpo =
     _docxParrafos(`Plantilla de rúbrica — ${ctx.lao.nombre}`, '<w:b/><w:color w:val="1B365D"/><w:sz w:val="28"/>') +
-    _docxParrafos(`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${ctx.curso.programa || ''} · Escala: ${ctx.escala?.nombre || ''}`, '<w:sz w:val="18"/>') +
+    _docxParrafos(`Curso: ${ctx.curso.codigo || ''} — ${ctx.curso.nombre || ''} · Programa: ${_programasDeCurso(ctx.curso).join(', ') || ''} · Escala: ${ctx.escala?.nombre || ''}`, '<w:sz w:val="18"/>') +
     _docxParrafos(_INSTRUCCIONES_PLANTILLA_RUBRICA.join('\n'), '<w:i/><w:color w:val="555555"/><w:sz w:val="16"/>', '<w:spacing w:after="120"/>') +
     (ctx.comps.length ? _docxParrafos(ctx.comps.map(c => `${c.codigo}: ${c.descripcion || ''}`).join('\n'), '<w:sz w:val="16"/>', '<w:spacing w:after="160"/>') : '') +
     `<w:tbl><w:tblPr><w:tblW w:w="${ANCHO}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${bordes}</w:tblBorders></w:tblPr>${grid}${head}${body}</w:tbl>` +
@@ -9705,10 +9720,32 @@ function guardarProgramaCatalogo() {
 function eliminarPrograma(id) {
   const prog = db.programas.find(p => p.id === id);
   if (!prog) return;
-  const cursosEnUso = db.cursos.filter(c => c.programaId === id).length;
+  // Count courses with this program (primary OR secondary)
+  const cursosEnUso = db.cursos.filter(c => _programasIdsDeCurso(c).includes(id)).length;
   if (cursosEnUso > 0 && !confirm(`${cursosEnUso} curso(s) usan este programa y quedarán "sin programa asignado". ¿Continuar?`)) return;
   else if (!cursosEnUso && !confirm('¿Eliminar este programa del catálogo?')) return;
-  db.cursos.forEach(c => { if (c.programaId === id) { c.programaId = null; } });
+  // Clean program references from courses (both singular and multi-program fields)
+  db.cursos.forEach(c => {
+    if (c.programaId === id) { c.programaId = null; c.programa = ''; }
+    if (Array.isArray(c.programasIds)) {
+      c.programasIds = c.programasIds.filter(x => x !== id);
+      c.programas = (c.programas || []).filter(p => p !== prog.nombre);
+      // If only one program left, sync to singular fields
+      if (c.programasIds.length === 1 && !c.programaId) {
+        c.programaId = c.programasIds[0];
+        const pr = db.programas.find(p => p.id === c.programaId);
+        if (pr) c.programa = pr.nombre;
+      }
+    }
+  });
+  // Clean banco de competencias referencing this program
+  db.bancoCompetencias = (db.bancoCompetencias || []).filter(bc => bc.programaId !== id);
+  // Clean escalas de niveles scoped to this program
+  (db.escalasNiveles || []).forEach(e => {
+    if (e.aplicaA === 'programas' && Array.isArray(e.programaIds)) {
+      e.programaIds = e.programaIds.filter(x => x !== id);
+    }
+  });
   db.programas = db.programas.filter(p => p.id !== id);
   (db.facultad || []).forEach(f => {
     if ((f.coordinaProgramaIds || []).includes(id)) { f.coordinaProgramaIds = f.coordinaProgramaIds.filter(x => x !== id); f.coordinator = f.coordinaProgramaIds.length > 0; }
@@ -12350,7 +12387,7 @@ function renderBaseDatos() {
   const progSel = document.getElementById('filtro-bd-programa');
   if (progSel) {
     const prevProg = progSel.value;
-    const allProgs = [...new Set(db.avaluos.map(a => db.cursos.find(c=>c.id===a.cursoId)?.programa).filter(Boolean))].sort();
+    const allProgs = [...new Set(db.avaluos.flatMap(a => { const c = db.cursos.find(c=>c.id===a.cursoId); return c ? _programasDeCurso(c) : []; }))].sort();
     while (progSel.options.length > 1) progSel.remove(1);
     allProgs.forEach(p => { const o = document.createElement('option'); o.value=p; o.textContent=p; progSel.appendChild(o); });
     if (prevProg && [...progSel.options].some(o=>o.value===prevProg)) progSel.value = prevProg;
@@ -12376,7 +12413,7 @@ function renderBaseDatos() {
   let avaluos = _filterAvaluosByRole(db.avaluos).filter(a => {
     if (filtroProg) {
       const curso = db.cursos.find(c=>c.id===a.cursoId);
-      if (curso?.programa !== filtroProg) return false;
+      if (!_programasDeCurso(curso||{}).includes(filtroProg)) return false;
     }
     if (filtroAY) {
       const ay = getAcademicYear(_getSemestre(a));
@@ -12879,7 +12916,7 @@ function _progOptions(scopedAvaluos) {
   const progs = new Set();
   (scopedAvaluos||db.avaluos||[]).forEach(av => {
     const curso = db.cursos.find(c=>c.id===av.cursoId);
-    if (curso?.programa) progs.add(curso.programa);
+    if (curso) _programasDeCurso(curso).forEach(p => progs.add(p));
   });
   return [...progs].sort();
 }
@@ -13819,7 +13856,7 @@ function renderR1General() {
   const filterProg = progVal;
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r1');
-  if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
+  if (filterProg) avaluos = avaluos.filter(av=>{ const c=db.cursos.find(c=>c.id===av.cursoId); return c && _programasDeCurso(c).includes(filterProg); });
   avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); if(!t) return false;
     if(aniosSel.length && !aniosSel.includes(String(getAcademicYear(_getSemestre(av))))) return false;
@@ -13839,10 +13876,13 @@ function renderR1General() {
   const byProg = {};
   evals.forEach(ev => {
     const curso = db.cursos.find(c=>c.id===ev.cursoId);
-    const prog  = curso?.programa||'Sin Programa';
-    if (!byProg[prog]) byProg[prog] = { comps:{}, cursoMuestra: curso?.id };
-    if (!byProg[prog].comps[ev.compCode]) byProg[prog].comps[ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[]};
-    byProg[prog].comps[ev.compCode].vals.push(ev.val);
+    const progs = curso ? _programasDeCurso(curso) : ['Sin Programa'];
+    if (!progs.length) progs.push('Sin Programa');
+    progs.forEach(prog => {
+      if (!byProg[prog]) byProg[prog] = { comps:{}, cursoMuestra: curso?.id };
+      if (!byProg[prog].comps[ev.compCode]) byProg[prog].comps[ev.compCode]={code:ev.compCode,desc:ev.compDesc,vals:[]};
+      byProg[prog].comps[ev.compCode].vals.push(ev.val);
+    });
   });
 
   // Control de re-agrupar niveles ad-hoc (R1-c): solo cuando se ve UN
@@ -14981,12 +15021,14 @@ function _r3CompetenciasAgrupadas(estAvaluos) {
   const porCompetencia = {};
   estAvaluos.forEach(av => {
     const curso = db.cursos.find(c => c.id === av.cursoId);
-    const prog = curso?.programa || '';
+    const cursoProgs = curso ? _programasDeCurso(curso) : [''];
     _allEvals([av]).forEach(ev => {
-      const key = prog + '|' + ev.compCode;
-      if (!porCompetencia[key]) porCompetencia[key] = { code: ev.compCode, desc: ev.compDesc, porCurso: {} };
-      if (!porCompetencia[key].desc) porCompetencia[key].desc = ev.compDesc;
-      (porCompetencia[key].porCurso[av.cursoId] ||= []).push(ev.val);
+      cursoProgs.forEach(prog => {
+        const key = prog + '|' + ev.compCode;
+        if (!porCompetencia[key]) porCompetencia[key] = { code: ev.compCode, desc: ev.compDesc, porCurso: {} };
+        if (!porCompetencia[key].desc) porCompetencia[key].desc = ev.compDesc;
+        (porCompetencia[key].porCurso[av.cursoId] ||= []).push(ev.val);
+      });
     });
   });
   return Object.values(porCompetencia).map(c => {
@@ -15198,7 +15240,7 @@ function renderR4() {
   let avaluos = _filterAvaluosByRole(db.avaluos || [], 'r4');
   if (filterProg) avaluos = avaluos.filter(av => {
     const curso = db.cursos.find(c => c.id === av.cursoId);
-    return curso?.programa === filterProg;
+    return _programasDeCurso(curso||{}).includes(filterProg);
   });
 
   // ── Populate and apply year/cohort period multi-select ──
@@ -15845,9 +15887,12 @@ function _r4RenderV4(avaluos, filterProg) {
   const byProg = {};
   allAvaluos.forEach(av => {
     const curso = db.cursos.find(c => c.id === av.cursoId);
-    const prog = curso?.programa || 'Sin programa';
-    if (!byProg[prog]) byProg[prog] = [];
-    byProg[prog].push(av);
+    const progs = curso ? _programasDeCurso(curso) : ['Sin programa'];
+    if (!progs.length) progs.push('Sin programa');
+    progs.forEach(prog => {
+      if (!byProg[prog]) byProg[prog] = [];
+      byProg[prog].push(av);
+    });
   });
   const progs = Object.keys(byProg).sort((a, b) => a.localeCompare(b, 'es'));
 
@@ -16574,7 +16619,7 @@ function renderR5() {
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r5');
   if (filterCurso) avaluos = avaluos.filter(av=>av.cursoId===filterCurso);
-  if (filterProg)  avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
+  if (filterProg)  avaluos = avaluos.filter(av=>{ const c=db.cursos.find(c=>c.id===av.cursoId); return c && _programasDeCurso(c).includes(filterProg); });
 
   const evals = _allEvals(avaluos);
   const el = document.getElementById('r5-body');
@@ -16659,7 +16704,7 @@ function renderR6() {
   document.getElementById('rpt-export-title').textContent = `R6 · Estudiantes en Riesgo (por ${criterioLabel})`;
 
   let avaluos = _filterAvaluosByRole(db.avaluos||[], 'r6');
-  if (filterProg) avaluos = avaluos.filter(av=>db.cursos.find(c=>c.id===av.cursoId)?.programa===filterProg);
+  if (filterProg) avaluos = avaluos.filter(av=>{ const c=db.cursos.find(c=>c.id===av.cursoId); return c && _programasDeCurso(c).includes(filterProg); });
   if (filterTerm) avaluos = avaluos.filter(av=>{
     const t=parseTermString(_getSemestre(av)); return t?.term===filterTerm;
   });
@@ -17612,7 +17657,7 @@ function _dashColDeptChange() {
     const deptProgs = (db.programas||[]).filter(p=>p.departamentoId===deptId).map(p=>p.nombre);
     progs = progs.filter(p => deptProgs.includes(p));
   }
-  progSel.innerHTML = `<option value="">Todos</option>` + progs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  progSel.innerHTML = `<option value="">Todos</option>` + progs.map(p=>`<option value="${_alEscAttr(p)}">${_alEsc(p)}</option>`).join('');
   _dashColRefresh();
 }
 
@@ -17781,7 +17826,7 @@ function renderDashboard2() {
     const curProg = progSel.value;
     while(progSel.options.length > 1) progSel.remove(1);
     const filterDept = deptSel?.value || '';
-    let allProgs = [...new Set(db.cursos.map(c=>c.programa).filter(Boolean))].sort();
+    let allProgs = [...new Set(db.cursos.flatMap(c=>_programasDeCurso(c)))].sort();
     if (filterDept) {
       const deptProgNames = (db.programas||[]).filter(p=>p.departamentoId===filterDept).map(p=>p.nombre);
       allProgs = allProgs.filter(p => deptProgNames.includes(p));
@@ -17825,11 +17870,14 @@ function renderDashboard2() {
     const matrix = {};
     evals.forEach(ev => {
       const curso = db.cursos.find(c=>c.id===ev.cursoId);
-      const prog = curso?.programa || '—';
-      if (!matrix[ev.compCode]) matrix[ev.compCode] = {};
-      if (!matrix[ev.compCode][prog]) matrix[ev.compCode][prog] = { sum:0, count:0 };
-      matrix[ev.compCode][prog].sum   += ev.val;
-      matrix[ev.compCode][prog].count += 1;
+      const progs = curso ? _programasDeCurso(curso) : ['—'];
+      if (!progs.length) progs.push('—');
+      progs.forEach(prog => {
+        if (!matrix[ev.compCode]) matrix[ev.compCode] = {};
+        if (!matrix[ev.compCode][prog]) matrix[ev.compCode][prog] = { sum:0, count:0 };
+        matrix[ev.compCode][prog].sum   += ev.val;
+        matrix[ev.compCode][prog].count += 1;
+      });
     });
 
     const progsInData = progs.filter(p => compCodes.some(c => matrix[c]?.[p]));
@@ -19614,7 +19662,7 @@ function renderMatriz() {
  } catch (e) {
    console.error('renderMatriz falló:', e);
    const elErr = document.getElementById('matriz-container');
-   if (elErr) elErr.innerHTML = `<div class="empty-state"><p>Ocurrió un error mostrando la Matriz de Pareo. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${(e && e.message || e).toString().replace(/</g,'&lt;')}</code></p></div>`;
+   if (elErr) elErr.innerHTML = `<div class="empty-state"><p>Ocurrió un error mostrando la Matriz de Pareo. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${_alEsc((e && e.message || e).toString())}</code></p></div>`;
  }
 }
 
@@ -20498,7 +20546,7 @@ function renderAlineacion() {
  } catch (e) {
    console.error('renderAlineacion falló:', e);
    const elErr = document.getElementById('al-bank-content') || document.getElementById('al-matrix-content');
-   if (elErr) elErr.innerHTML = `<div class="empty-state"><p>Ocurrió un error mostrando la Alineación. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${(e && e.message || e).toString().replace(/</g,'&lt;')}</code></p></div>`;
+   if (elErr) elErr.innerHTML = `<div class="empty-state"><p>Ocurrió un error mostrando la Alineación. Revisa la consola del navegador (F12) y avísale a soporte con el mensaje: <code>${_alEsc((e && e.message || e).toString())}</code></p></div>`;
  }
 }
 
@@ -21518,7 +21566,7 @@ function renderFacultadList() {
   }
   const isAdmin = currentUser?.rol === 'admin';
   const misId = isAdmin ? (todos.find(f => (f.email||'').toLowerCase() === (currentUser.username||'').toLowerCase())?.id) : null;
-  const rolLabelMap = { decano:'Decano/a', director:'Director', coordinator:'Coordinador', profesor:'Profesor', viewer:'Visitante' };
+  const rolLabelMap = { decano:'Decano/a', director:'Director/a', coordinator:'Coordinador/a', profesor:'Profesor/a', viewer:'Visitante' };
 
   // Borrado masivo (solo administrador) — mismo patrón que Estudiantes/
   // Secciones/Avalúos: casillas por tarjeta + "Seleccionar todas" sobre la
@@ -21551,16 +21599,16 @@ function renderFacultadList() {
       <div class="fac-avatar">${initials}</div>
       <div>
         <div class="fac-name">${fichaLink('profesor', f.id, f.nombre)}</div>
-        <div class="fac-meta">${f.email||'—'} · ${f.departamento||'—'} ${f.telefono?'· '+f.telefono:''}</div>
+        <div class="fac-meta">${_alEsc(f.email||'—')} · ${_alEsc(f.departamento||'—')} ${f.telefono?'· '+_alEsc(f.telefono):''}</div>
         ${(f.rangoDocente||f.tipoNombramiento||f.jornadaTrabajo) ? `<div class="fac-meta">${[f.rangoDocente,f.tipoNombramiento,f.jornadaTrabajo].filter(Boolean).map(_alEsc).join(' · ')}</div>` : ''}
         <div class="fac-tags">
           ${inactivo ? '<span class="badge badge-gray" style="background:#e5e7eb;color:#374151"> Inactivo/a</span>' : ''}
           ${f.esAdmin ? '<span class="badge badge-red"> Administrador</span>' : ''}
           ${f.rolBase ? `<span class="badge badge-blue">${f.decanoTipo ? (DECANO_TIPOS[f.decanoTipo]||'Decano/a') : (rolLabelMap[f.rolBase]||f.rolBase)}</span>` : ''}
           ${!f.rolBase && !f.esAdmin ? '<span class="badge badge-gold">Sin acceso</span>' : ''}
-          ${(f.dirigeDepartamentoIds||[]).length ? `<span class="fac-tag fac-tag-dir" title="${_dirigeDeptosDe(f).join(', ')}"> Director/a · ${_dirigeDeptosDe(f).join(', ')}</span>` : ''}
-          ${(f.coordinaProgramaIds||[]).length || f.coordinator==='true'||f.coordinator===true ? `<span class="fac-tag fac-tag-coord" title="${_coordProgramasDe(f).join(', ')}"> Coordinador/a${_coordProgramasDe(f).length ? ' · ' + _coordProgramasDe(f).join(', ') : ''}</span>` : ''}
-          ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${p}</span>`).join('')}
+          ${(f.dirigeDepartamentoIds||[]).length ? `<span class="fac-tag fac-tag-dir" title="${_alEscAttr(_dirigeDeptosDe(f).join(', '))}"> Director/a · ${_alEsc(_dirigeDeptosDe(f).join(', '))}</span>` : ''}
+          ${(f.coordinaProgramaIds||[]).length || f.coordinator==='true'||f.coordinator===true ? `<span class="fac-tag fac-tag-coord" title="${_alEscAttr(_coordProgramasDe(f).join(', '))}"> Coordinador/a${_coordProgramasDe(f).length ? ' · ' + _alEsc(_coordProgramasDe(f).join(', ')) : ''}</span>` : ''}
+          ${progs.map(p=>`<span class="fac-tag fac-tag-prog">${_alEsc(p)}</span>`).join('')}
         </div>
       </div>
       <div style="display:flex;gap:6px">
@@ -21610,11 +21658,11 @@ function renderAsesoriasList() {
     Object.values(byProf).map(p => {
       const fac = db.facultad.find(f=>f.email?.toLowerCase()===p.email.toLowerCase());
       return `<div class="fac-card">
-        <div class="fac-avatar" style="background:var(--egsp-gray)">${(fac?.nombre||p.email).charAt(0).toUpperCase()}</div>
+        <div class="fac-avatar" style="background:var(--egsp-gray)">${_alEsc((fac?.nombre||p.email).charAt(0).toUpperCase())}</div>
         <div>
-          <div class="fac-name">${fac?.nombre||p.email}</div>
-          <div class="fac-meta">${p.email}</div>
-          <div class="fac-tags">${p.students.map(s=>`<span class="fac-tag fac-tag-prog">${s}</span>`).join('')}</div>
+          <div class="fac-name">${_alEsc(fac?.nombre||p.email)}</div>
+          <div class="fac-meta">${_alEsc(p.email)}</div>
+          <div class="fac-tags">${p.students.map(s=>`<span class="fac-tag fac-tag-prog">${_alEsc(s)}</span>`).join('')}</div>
         </div>
         <span style="font-size:0.8rem;color:var(--muted)">${p.students.length} estudiantes</span>
       </div>`;
@@ -21745,7 +21793,7 @@ function _populateFacultadDeptoProgSelects() {
 
   const dirSel = document.getElementById('fac-dirige-dept-ids');
   const prevDir = new Set([...dirSel.selectedOptions].map(o => o.value));
-  dirSel.innerHTML = [...db.departamentos].sort((a,b) => a.nombre.localeCompare(b.nombre)).map(d => `<option value="${d.id}">${d.nombre}</option>`).join('');
+  dirSel.innerHTML = [...db.departamentos].sort((a,b) => a.nombre.localeCompare(b.nombre)).map(d => `<option value="${_alEscAttr(d.id)}">${_alEsc(d.nombre)}</option>`).join('');
   [...dirSel.options].forEach(o => { o.selected = prevDir.has(o.value); });
   ['fac-programa-ids','fac-coord-prog-ids','fac-dirige-dept-ids'].forEach(id => { document.getElementById(id).onchange = _facRolHint; });
   ['fac-decano-tipo','fac-es-profesor','fac-es-visitante','fac-es-admin'].forEach(id => { document.getElementById(id).onchange = _facRolHint; });
@@ -22637,11 +22685,11 @@ async function renderSolicitudes() {
       <tr>
         <td style="font-size:0.78rem;white-space:nowrap">${new Date(s.fecha).toLocaleString('es-PR',{dateStyle:'short',timeStyle:'short'})}</td>
         <td><span class="badge badge-blue">${_solTipoLabel(s.coleccion)}</span></td>
-        <td style="font-size:0.8rem">${_fichaLinkSolicitud(s) || s.registroLabel || '<span style="color:var(--muted)">—</span>'}</td>
-        <td style="font-size:0.82rem;max-width:280px">${s.descripcion}</td>
-        ${verTodas ? `<td style="font-size:0.78rem">${s.solicitanteNombre||s.solicitante}</td>` : ''}
+        <td style="font-size:0.8rem">${_fichaLinkSolicitud(s) || _alEsc(s.registroLabel) || '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="font-size:0.82rem;max-width:280px">${_alEsc(s.descripcion)}</td>
+        ${verTodas ? `<td style="font-size:0.78rem">${_alEsc(s.solicitanteNombre||s.solicitante)}</td>` : ''}
         <td>${_solEstadoBadge(s.estado)}</td>
-        <td style="font-size:0.78rem">${s.revisadoPor ? `${s.revisadoPor}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${s.comentarioAdmin}"</span>` : ''}` : '—'}</td>
+        <td style="font-size:0.78rem">${s.revisadoPor ? `${_alEsc(s.revisadoPor)}${s.comentarioAdmin ? `<br><span style="color:var(--muted)">"${_alEsc(s.comentarioAdmin)}"</span>` : ''}` : '—'}</td>
         <td class="actions-cell">
           ${isAdmin && s.estado === 'pendiente' ? (s.coleccion === 'rubrica_lao' || (s.coleccion === 'alineamiento' && s.borradorAlineamiento) ? `
             <button class="btn btn-primary btn-sm" onclick="${s.coleccion === 'rubrica_lao' ? 'revisarSolicitudRubrica' : 'revisarSolicitudAlineamiento'}('${s.id}')">🔍 Revisar e incorporar</button>
